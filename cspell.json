@@ -1,4 +1,12 @@
 {
   "useGitignore": true,
-  "words": ["clippy", "libc"]
+  "words": [
+    "clippy",
+    "libc",
+    "TUNSETIFF",
+    "ifru",
+    "IFNAMSIZ",
+    "ifreq",
+    "IPPROTO"
+  ]
 }
