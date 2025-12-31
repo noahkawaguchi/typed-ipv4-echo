@@ -17,6 +17,31 @@ const ETHERNET_MTU: usize = 1500;
 #[allow(clippy::cast_possible_truncation)] // Because this is 0x1 | 0x1000, which fits in a short
 const IFF_TUN_IFF_NO_PI: libc::c_short = (IFF_TUN | IFF_NO_PI) as libc::c_short;
 
+/// Computes the Internet checksum (RFC 1071) for IP and ICMP headers (16-bit one's complement of
+/// the one's complement sum).
+fn calculate_checksum(data: &[u8]) -> u16 {
+    // Sum all 16-bit words (deferred carries method)
+    let mut sum = data
+        .chunks(2)
+        .map(|chunk| {
+            // Put 16-bit words into 32 bits to accumulate carries in bits 16-31 when summing.
+            // Treat an odd byte as the high byte of a 16-bit word.
+            u32::from_be_bytes([0, 0, chunk[0], if chunk.len() == 2 { chunk[1] } else { 0 }])
+        })
+        .sum::<u32>();
+
+    // Add carry bits back into sum (fold 32-bit sum to 16-bit)
+    while sum >> 16 != 0 {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+
+    // Return one's complement
+    #[allow(clippy::cast_possible_truncation)] // Just folded into 16 bits above, truncation desired
+    {
+        !sum as u16
+    }
+}
+
 /// Creates a TUN device, requesting that the name be `desired_name`. Returns the opened `File` and
 /// the actual assigned name.
 #[allow(unsafe_code)]
