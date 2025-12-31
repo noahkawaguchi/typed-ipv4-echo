@@ -11,12 +11,6 @@ const IPV4_HEADER_MIN_LEN: usize = 20;
 /// The Maximum Transmission Unit of standard Ethernet (frames up to 1500 bytes of IP packet data).
 const ETHERNET_MTU: usize = 1500;
 
-/// Flags to use when creating a TUN device.
-///   `IFF_TUN`   - TUN device (no Ethernet headers) rather than TAP
-///   `IFF_NO_PI` - Do not prepend packet metadata (get IP packet only)
-#[allow(clippy::cast_possible_truncation)] // Because this is 0x1 | 0x1000, which fits in a short
-const IFF_TUN_IFF_NO_PI: libc::c_short = (IFF_TUN | IFF_NO_PI) as libc::c_short;
-
 /// Computes the Internet checksum (RFC 1071) for IP and ICMP headers (16-bit one's complement of
 /// the one's complement sum).
 fn calculate_checksum(data: &[u8]) -> u16 {
@@ -61,7 +55,12 @@ fn create_tun(desired_name: &str) -> io::Result<(File, String)> {
     }
 
     // Set flags
-    ifr.ifr_ifru.ifru_flags = IFF_TUN_IFF_NO_PI;
+    #[allow(clippy::cast_possible_truncation)] // This is 0x1 | 0x1000, which fits in a short
+    {
+        // IFF_TUN   - TUN device (no Ethernet headers) rather than TAP
+        // IFF_NO_PI - Do not prepend packet metadata (get IP packet only)
+        ifr.ifr_ifru.ifru_flags = (IFF_TUN | IFF_NO_PI) as libc::c_short;
+    }
 
     // Create the TUN interface
     let ret = unsafe { libc::ioctl(file.as_raw_fd(), TUNSETIFF, &ifr) };
