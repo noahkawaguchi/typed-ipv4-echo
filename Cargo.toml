@@ -1,0 +1,17 @@
+[package]
+name = "tcp-ip-stack"
+version = "0.1.0"
+edition = "2024"
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+unwrap_used = "forbid"
+expect_used = "forbid"
+
+[dependencies]
+libc = "0.2.178"
