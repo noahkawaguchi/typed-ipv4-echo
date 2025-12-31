@@ -1,7 +1,7 @@
 use libc::{IFF_NO_PI, IFF_TUN, IFNAMSIZ, IPPROTO_ICMP, IPPROTO_TCP, IPPROTO_UDP, TUNSETIFF};
 use std::{
     fs::{File, OpenOptions},
-    io::{self, Read},
+    io::{self, Read, Write},
     os::unix::io::AsRawFd,
 };
 
@@ -128,11 +128,47 @@ fn main() -> io::Result<()> {
             src_ip[0], src_ip[1], src_ip[2], src_ip[3], dst_ip[0], dst_ip[1], dst_ip[2], dst_ip[3],
         );
 
-        // If it's ICMP, show type/code
-        if protocol == IPPROTO_ICMP && packet.len() > ihl + 1 {
+        // Handle ICMP echo requests (ping)
+        if protocol == IPPROTO_ICMP && packet.len() >= ihl + 8 {
             let icmp_type = packet[ihl];
             let icmp_code = packet[ihl + 1];
             println!("      ICMP type={icmp_type} code={icmp_code}");
+
+            // ICMP Echo Request: type=8, code=0
+            if icmp_type == 8 && icmp_code == 0 {
+                print!("      Building echo reply...");
+
+                // Build reply packet starting with the received packet data
+                let mut reply = [0u8; ETHERNET_MTU];
+                reply[..n].copy_from_slice(packet);
+
+                // Swap src and dst IP addresses
+                reply[12..16].copy_from_slice(dst_ip);
+                reply[16..20].copy_from_slice(src_ip);
+
+                // Clear IP header checksum field before recalculating
+                reply[10] = 0;
+                reply[11] = 0;
+
+                // Recalculate IP header checksum (covers only the IP header)
+                let ip_checksum = calculate_checksum(&reply[..ihl]);
+                reply[10..12].copy_from_slice(&ip_checksum.to_be_bytes());
+
+                // Change ICMP type to Echo Reply (type=0)
+                reply[ihl] = 0;
+
+                // Clear ICMP checksum field before recalculating
+                reply[ihl + 2] = 0;
+                reply[ihl + 3] = 0;
+
+                // Recalculate ICMP checksum (covers the entire ICMP message)
+                let icmp_checksum = calculate_checksum(&reply[ihl..n]);
+                reply[ihl + 2..ihl + 4].copy_from_slice(&icmp_checksum.to_be_bytes());
+
+                // Write reply packet to TUN device
+                tun.write_all(&reply[..n])?;
+                println!(" sent!");
+            }
         }
     }
 }
