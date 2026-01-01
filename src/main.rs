@@ -86,7 +86,8 @@ fn main() -> io::Result<()> {
     println!("\nNow run:");
     println!("  sudo ip addr add 10.0.0.1/24 dev {name}");
     println!("  sudo ip link set {name} up");
-    println!("  ping 10.0.0.2");
+    println!("  ping 10.0.0.2              # Test ICMP");
+    println!("  telnet 10.0.0.2 8080       # Test TCP handshake");
     println!("\nWaiting for packets...\n");
 
     let mut buf = [0u8; ETHERNET_MTU];
@@ -165,6 +166,123 @@ fn main() -> io::Result<()> {
 
                 // Write reply packet to TUN device
                 tun.write_all(&reply[..n])?;
+                println!(" sent!");
+            }
+        }
+
+        // Handle TCP packets (3-way handshake)
+        if protocol == IPPROTO_TCP && packet.len() >= ihl + 20 {
+            // Parse TCP header (minimum 20 bytes)
+            let tcp_start = ihl;
+            let src_port = u16::from_be_bytes([packet[tcp_start], packet[tcp_start + 1]]);
+            let dst_port = u16::from_be_bytes([packet[tcp_start + 2], packet[tcp_start + 3]]);
+            let seq_num = u32::from_be_bytes([
+                packet[tcp_start + 4],
+                packet[tcp_start + 5],
+                packet[tcp_start + 6],
+                packet[tcp_start + 7],
+            ]);
+            let ack_num = u32::from_be_bytes([
+                packet[tcp_start + 8],
+                packet[tcp_start + 9],
+                packet[tcp_start + 10],
+                packet[tcp_start + 11],
+            ]);
+            let flags = packet[tcp_start + 13];
+            let syn_flag = flags & 0x02 != 0;
+            let ack_flag = flags & 0x10 != 0;
+
+            println!(
+                "      TCP {src_port} -> {dst_port} | seq={seq_num} ack={ack_num} \
+                | SYN={syn_flag} ACK={ack_flag}"
+            );
+
+            // Handle SYN packet (connection request)
+            if syn_flag && !ack_flag {
+                print!("      Building SYN-ACK...");
+
+                // Build SYN-ACK response
+                let mut reply = [0u8; ETHERNET_MTU];
+
+                // IP header (20 bytes)
+                reply[0] = 0x45; // Version 4, IHL 5 (20 bytes)
+                reply[1] = 0x00; // DSCP/ECN
+                let total_len = 40u16; // 20 (IP) + 20 (TCP)
+                reply[2..4].copy_from_slice(&total_len.to_be_bytes());
+                reply[4..6].copy_from_slice(&[0x00, 0x00]); // Identification
+                // Flags + Fragment offset (Don't Fragment)
+                reply[6..8].copy_from_slice(&[0x40, 0x00]);
+                reply[8] = 64; // TTL
+                #[allow(clippy::cast_possible_truncation)] // Value is 6
+                {
+                    reply[9] = IPPROTO_TCP as u8; // Protocol
+                }
+
+                // Checksum at bytes 10-11 is calculated later
+
+                // Swap src and dst IPs
+                reply[12..16].copy_from_slice(dst_ip);
+                reply[16..20].copy_from_slice(src_ip);
+
+                // Calculate IP header checksum
+                reply[10] = 0;
+                reply[11] = 0;
+                let ip_checksum = calculate_checksum(&reply[..20]);
+                reply[10..12].copy_from_slice(&ip_checksum.to_be_bytes());
+
+                // TCP header (20 bytes minimum)
+                let tcp_start = 20;
+                // Swap ports
+                reply[tcp_start..tcp_start + 2].copy_from_slice(&dst_port.to_be_bytes());
+                reply[tcp_start + 2..tcp_start + 4].copy_from_slice(&src_port.to_be_bytes());
+
+                // Our sequence number (can be random, using 0 for simplicity)
+                let our_seq = 0u32;
+                reply[tcp_start + 4..tcp_start + 8].copy_from_slice(&our_seq.to_be_bytes());
+
+                // Acknowledgment number = their seq + 1
+                let our_ack = seq_num.wrapping_add(1);
+                reply[tcp_start + 8..tcp_start + 12].copy_from_slice(&our_ack.to_be_bytes());
+
+                // Data offset (5 * 4 = 20 bytes) in upper 4 bits
+                reply[tcp_start + 12] = 0x50; // 5 << 4
+
+                // Flags: SYN + ACK
+                reply[tcp_start + 13] = 0x12; // SYN (0x02) | ACK (0x10)
+
+                // Window size
+                reply[tcp_start + 14..tcp_start + 16].copy_from_slice(&8192u16.to_be_bytes());
+
+                // Checksum at bytes 16-17 (calculate with pseudo-header)
+                // Urgent pointer
+                reply[tcp_start + 18..tcp_start + 20].copy_from_slice(&[0x00, 0x00]);
+
+                // Calculate TCP checksum with pseudo-header
+                let tcp_len = 20u16;
+                let mut pseudo_header = [0u8; 12];
+                pseudo_header[0..4].copy_from_slice(&reply[12..16]); // Source IP
+                pseudo_header[4..8].copy_from_slice(&reply[16..20]); // Dest IP
+                pseudo_header[8] = 0; // Reserved
+                #[allow(clippy::cast_possible_truncation)] // Value is 6
+                {
+                    pseudo_header[9] = IPPROTO_TCP as u8; // Protocol
+                }
+                pseudo_header[10..12].copy_from_slice(&tcp_len.to_be_bytes());
+
+                // Combine pseudo-header + TCP header for checksum
+                let mut checksum_data = [0u8; 12 + 20];
+                checksum_data[0..12].copy_from_slice(&pseudo_header);
+                checksum_data[12..32].copy_from_slice(&reply[tcp_start..tcp_start + 20]);
+
+                // Zero out checksum field before calculating
+                checksum_data[12 + 16] = 0;
+                checksum_data[12 + 17] = 0;
+
+                let tcp_checksum = calculate_checksum(&checksum_data);
+                reply[tcp_start + 16..tcp_start + 18].copy_from_slice(&tcp_checksum.to_be_bytes());
+
+                // Write SYN-ACK packet to TUN device
+                tun.write_all(&reply[..40])?;
                 println!(" sent!");
             }
         }
