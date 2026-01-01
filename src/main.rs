@@ -51,7 +51,7 @@ fn create_tun(desired_name: &str) -> io::Result<(File, String)> {
 
     // Copy desired device name into ifr_name (leaving room for the null terminator)
     for (i, b) in desired_name.bytes().enumerate().take(IFNAMSIZ - 1) {
-        ifr.ifr_name[i] = libc::c_char::from(b);
+        ifr.ifr_name[i] = b;
     }
 
     // Set flags
@@ -63,20 +63,19 @@ fn create_tun(desired_name: &str) -> io::Result<(File, String)> {
     }
 
     // Create the TUN interface
-    let ret = unsafe { libc::ioctl(file.as_raw_fd(), TUNSETIFF, &ifr) };
-    if ret < 0 {
+    if unsafe { libc::ioctl(file.as_raw_fd(), TUNSETIFF, &ifr) } < 0 {
         return Err(io::Error::last_os_error());
     }
 
-    // Extract the actual device name assigned by the kernel
-    let actual_name = ifr
-        .ifr_name
-        .iter()
-        .take_while(|&&b| b != 0)
-        .map(|&b| char::from(b))
-        .collect();
-
-    Ok((file, actual_name))
+    Ok((
+        file,
+        // Extract the actual device name assigned by the kernel
+        ifr.ifr_name
+            .iter()
+            .take_while(|&&b| b != 0)
+            .map(|&b| char::from(b))
+            .collect(),
+    ))
 }
 
 fn main() -> io::Result<()> {
