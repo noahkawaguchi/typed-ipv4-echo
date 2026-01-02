@@ -11,29 +11,27 @@ const IPV4_HEADER_MIN_LEN: usize = 20;
 /// The Maximum Transmission Unit of standard Ethernet (frames up to 1500 bytes of IP packet data).
 const ETHERNET_MTU: usize = 1500;
 
+/// Adds Internet checksum carry bits back into a 16-bit sum by folding a 32-bit sum.
+#[allow(clippy::cast_possible_truncation)] // Truncation desired after folding
+const fn fold_carry_bits(sum: u32) -> u16 {
+    if sum >> 16 == 0 { sum as u16 } else { fold_carry_bits((sum & 0xFFFF) + (sum >> 16)) }
+}
+
 /// Computes the Internet checksum (RFC 1071) for IP and ICMP headers (16-bit one's complement of
 /// the one's complement sum).
 fn calculate_checksum(data: &[u8]) -> u16 {
     // Sum all 16-bit words (deferred carries method)
-    let mut sum = data
+    let sum = data
         .chunks(2)
         .map(|chunk| {
             // Put 16-bit words into 32 bits to accumulate carries in bits 16-31 when summing.
             // Treat an odd byte as the high byte of a 16-bit word.
             u32::from_be_bytes([0, 0, chunk[0], if chunk.len() == 2 { chunk[1] } else { 0 }])
         })
-        .sum::<u32>();
+        .sum();
 
-    // Add carry bits back into sum (fold 32-bit sum to 16-bit)
-    while sum >> 16 != 0 {
-        sum = (sum & 0xFFFF) + (sum >> 16);
-    }
-
-    // Return one's complement
-    #[allow(clippy::cast_possible_truncation)] // Just folded into 16 bits above, truncation desired
-    {
-        !sum as u16
-    }
+    // Fold 32 bits into 16 and return one's complement
+    !fold_carry_bits(sum)
 }
 
 /// Creates a TUN device, requesting that the name be `desired_name`. Returns the opened `File` and
