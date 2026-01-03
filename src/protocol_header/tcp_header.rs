@@ -16,6 +16,8 @@ pub(super) struct TcpHeader {
 
 impl TcpHeader {
     const TCP_HEADER_MIN_LEN: u8 = 20;
+    const PSEUDO_HEADER_LEN: usize = 12;
+    const CHECKSUM_DATA_LEN: usize = Self::PSEUDO_HEADER_LEN + Self::TCP_HEADER_MIN_LEN as usize;
 
     pub(super) fn parse(data: &[u8]) -> Result<Self, String> {
         let n = data.len();
@@ -64,13 +66,13 @@ impl ProtocolHeader for TcpHeader {
         reply[tcp_start + 8..tcp_start + 12].copy_from_slice(&our_ack.to_be_bytes());
 
         // Data offset (5 * 4 = 20 bytes) in upper 4 bits
-        reply[tcp_start + 12] = 0x50; // 5 << 4
+        reply[tcp_start + 12] = (Self::TCP_HEADER_MIN_LEN / 4) << 4;
 
         // Flags: SYN + ACK
-        reply[tcp_start + 13] = 0x12; // SYN (0x02) | ACK (0x10)
+        reply[tcp_start + 13] = 0x2 | 0x10;
 
-        // Window size
-        reply[tcp_start + 14..tcp_start + 16].copy_from_slice(&8192u16.to_be_bytes());
+        // Window size for flow control, left at max for simplicity
+        reply[tcp_start + 14..tcp_start + 16].copy_from_slice(&u16::MAX.to_be_bytes());
 
         // Checksum at bytes 16-17 calculated later with pseudo-header
 
@@ -78,22 +80,22 @@ impl ProtocolHeader for TcpHeader {
         reply[tcp_start + 18..tcp_start + 20].copy_from_slice(&[0x00, 0x00]);
 
         // Calculate TCP checksum with pseudo-header
-        let mut pseudo_header = [0u8; 12];
+        let mut pseudo_header = [0u8; Self::PSEUDO_HEADER_LEN];
         pseudo_header[0..4].copy_from_slice(&reply[12..16]); // Source IP
         pseudo_header[4..8].copy_from_slice(&reply[16..20]); // Dest IP
-        pseudo_header[8] = 0; // Reserved
+        pseudo_header[8] = 0; // Reserved padding for alignment
         pseudo_header[9] = Protocol::Tcp.as_u8();
         pseudo_header[10..12].copy_from_slice(&u16::from(Self::TCP_HEADER_MIN_LEN).to_be_bytes());
 
         // Combine pseudo-header + TCP header for checksum
-        let mut checksum_data = [0u8; 12 + 20];
-        checksum_data[0..12].copy_from_slice(&pseudo_header);
-        checksum_data[12..32]
+        let mut checksum_data = [0u8; Self::CHECKSUM_DATA_LEN];
+        checksum_data[0..Self::PSEUDO_HEADER_LEN].copy_from_slice(&pseudo_header);
+        checksum_data[Self::PSEUDO_HEADER_LEN..Self::CHECKSUM_DATA_LEN]
             .copy_from_slice(&reply[tcp_start..tcp_start + usize::from(Self::TCP_HEADER_MIN_LEN)]);
 
         // Zero out checksum field before calculating
-        checksum_data[12 + 16] = 0;
-        checksum_data[12 + 17] = 0;
+        checksum_data[Self::PSEUDO_HEADER_LEN + 16] = 0;
+        checksum_data[Self::PSEUDO_HEADER_LEN + 17] = 0;
 
         let tcp_checksum = checksum::calculate(&checksum_data);
         reply[tcp_start + 16..tcp_start + 18].copy_from_slice(&tcp_checksum.to_be_bytes());
