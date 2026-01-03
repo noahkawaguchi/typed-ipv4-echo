@@ -15,12 +15,14 @@ fn main() -> io::Result<()> {
     let (mut tun, name) = tun::create_device("tun0")?;
     println!("Created device: {name}");
 
-    println!("\nNow run:");
-    println!("  sudo ip addr add 10.0.0.1/24 dev {name}");
-    println!("  sudo ip link set {name} up");
-    println!("  ping 10.0.0.2              # Test ICMP");
-    println!("  telnet 10.0.0.2 8080       # Test TCP echo");
-    println!("  nc -u 10.0.0.2 8080        # Test UDP echo");
+    println!("Configuring device with IP 10.0.0.1/24...");
+    tun::configure_device(&name, "10.0.0.1/24")?;
+    println!("Device configured and brought up!");
+
+    println!("\nEcho server test commands:");
+    println!("  ping 10.0.0.2         # ICMP");
+    println!("  telnet 10.0.0.2 8080  # TCP");
+    println!("  nc -u 10.0.0.2 8080   # UDP");
     println!("\nWaiting for packets...\n");
 
     let mut buf = [0u8; ETHERNET_MTU];

@@ -3,6 +3,7 @@ use std::{
     fs::{File, OpenOptions},
     io,
     os::unix::io::AsRawFd,
+    process::Command,
 };
 
 /// Creates a TUN device, requesting that the name be `desired_name`. Returns the opened `File` and
@@ -45,4 +46,31 @@ pub fn create_device(desired_name: &str) -> io::Result<(File, String)> {
             .map(|&b| char::from(b))
             .collect(),
     ))
+}
+
+/// Configures a TUN device with an IP address and brings it up.
+pub fn configure_device(device_name: &str, ip_cidr: &str) -> io::Result<()> {
+    // Set IP address
+    let status = Command::new("ip")
+        .args(["addr", "add", ip_cidr, "dev", device_name])
+        .status()?;
+
+    if !status.success() {
+        return Err(io::Error::other(format!(
+            "failed to set IP address for TUN device {device_name}: {status}"
+        )));
+    }
+
+    // Bring interface up
+    let status = Command::new("ip")
+        .args(["link", "set", device_name, "up"])
+        .status()?;
+
+    if !status.success() {
+        return Err(io::Error::other(format!(
+            "failed to bring interface up for TUN device {device_name}: {status}"
+        )));
+    }
+
+    Ok(())
 }
