@@ -19,7 +19,8 @@ fn main() -> io::Result<()> {
     println!("  sudo ip addr add 10.0.0.1/24 dev {name}");
     println!("  sudo ip link set {name} up");
     println!("  ping 10.0.0.2              # Test ICMP");
-    println!("  telnet 10.0.0.2 8080       # Test TCP handshake");
+    println!("  telnet 10.0.0.2 8080       # Test TCP echo");
+    println!("  nc -u 10.0.0.2 8080        # Test UDP echo");
     println!("\nWaiting for packets...\n");
 
     let mut buf = [0u8; ETHERNET_MTU];

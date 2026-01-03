@@ -1,10 +1,13 @@
 mod icmp_echo_header;
 mod tcp_header;
+mod udp_header;
 
 use crate::{
     ETHERNET_MTU,
     protocol::Protocol,
-    protocol_header::{icmp_echo_header::IcmpEchoHeader, tcp_header::TcpHeader},
+    protocol_header::{
+        icmp_echo_header::IcmpEchoHeader, tcp_header::TcpHeader, udp_header::UdpHeader,
+    },
 };
 
 pub trait ProtocolHeader: std::fmt::Display {
@@ -22,6 +25,9 @@ pub fn parse(data: &[u8], protocol: &Protocol) -> Result<Box<dyn ProtocolHeader>
     Ok(match protocol {
         Protocol::Icmp => Box::new(IcmpEchoHeader::parse(data)?) as Box<dyn ProtocolHeader>,
         Protocol::Tcp => Box::new(TcpHeader::parse(data)?) as Box<dyn ProtocolHeader>,
-        _ => return Err(String::from("only ICMP Echo and TCP implemented so far")),
+        Protocol::Udp => Box::new(UdpHeader::parse(data)?) as Box<dyn ProtocolHeader>,
+        Protocol::Other(_) => {
+            return Err(String::from("only ICMP Echo, TCP, and UDP implemented"));
+        }
     })
 }
