@@ -11,13 +11,8 @@ use std::io::{self, Read, Write};
 const ETHERNET_MTU: usize = 1500;
 
 fn main() -> io::Result<()> {
-    println!("Creating TUN device...");
-    let (mut tun, name) = tun::create_device("tun0")?;
-    println!("Created device: {name}");
-
-    println!("Configuring device with IP 10.0.0.1/24...");
-    tun::configure_device(&name, "10.0.0.1/24")?;
-    println!("Device configured and brought up!");
+    let (mut tun, name) = tun::init("10.0.0.1/24")?;
+    println!("Created and set up TUN device {name} with IP 10.0.0.1/24");
 
     println!("\nEcho server test commands:");
     println!("  ping 10.0.0.2         # ICMP");

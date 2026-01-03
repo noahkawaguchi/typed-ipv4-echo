@@ -6,10 +6,21 @@ use std::{
     process::Command,
 };
 
-/// Creates a TUN device, requesting that the name be `desired_name`. Returns the opened `File` and
-/// the actual assigned name.
+/// The desired name to use when creating a TUN device. A different name may be assigned by the
+/// kernel.
+const DESIRED_TUN_NAME: &str = "tun0";
+
+/// Creates a TUN device and configures it with IP address `ip_cidr`, returning the opened `File`
+/// and the assigned name.
+pub fn init(ip_cidr: &str) -> io::Result<(File, String)> {
+    let (tun, name) = create_device()?;
+    configure_device(&name, ip_cidr)?;
+    Ok((tun, name))
+}
+
+/// Creates a TUN device, returning the opened `File` and the assigned name.
 #[allow(unsafe_code)]
-pub fn create_device(desired_name: &str) -> io::Result<(File, String)> {
+fn create_device() -> io::Result<(File, String)> {
     // Open the kernel's special device file for creating virtual network interfaces
     let file = OpenOptions::new()
         .read(true)
@@ -20,7 +31,7 @@ pub fn create_device(desired_name: &str) -> io::Result<(File, String)> {
     let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
 
     // Copy desired device name into ifr_name (leaving room for the null terminator)
-    for (i, b) in desired_name.bytes().enumerate().take(IFNAMSIZ - 1) {
+    for (i, b) in DESIRED_TUN_NAME.bytes().enumerate().take(IFNAMSIZ - 1) {
         ifr.ifr_name[i] = b;
     }
 
@@ -48,8 +59,8 @@ pub fn create_device(desired_name: &str) -> io::Result<(File, String)> {
     ))
 }
 
-/// Configures a TUN device with an IP address and brings it up.
-pub fn configure_device(device_name: &str, ip_cidr: &str) -> io::Result<()> {
+/// Configures a TUN device with IP address `ip_cidr` and brings it up.
+fn configure_device(device_name: &str, ip_cidr: &str) -> io::Result<()> {
     // Set IP address
     let status = Command::new("ip")
         .args(["addr", "add", ip_cidr, "dev", device_name])
@@ -57,7 +68,7 @@ pub fn configure_device(device_name: &str, ip_cidr: &str) -> io::Result<()> {
 
     if !status.success() {
         return Err(io::Error::other(format!(
-            "failed to set IP address for TUN device {device_name}: {status}"
+            "failed to set IP address for TUN device {device_name}: status {status}"
         )));
     }
 
@@ -68,7 +79,7 @@ pub fn configure_device(device_name: &str, ip_cidr: &str) -> io::Result<()> {
 
     if !status.success() {
         return Err(io::Error::other(format!(
-            "failed to bring interface up for TUN device {device_name}: {status}"
+            "failed to bring interface up for TUN device {device_name}: status {status}"
         )));
     }
 
