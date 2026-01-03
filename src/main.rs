@@ -13,12 +13,7 @@ const ETHERNET_MTU: usize = 1500;
 fn main() -> io::Result<()> {
     let (mut tun, name) = tun::init("10.0.0.1/24")?;
     println!("Created and set up TUN device {name} with IP 10.0.0.1/24");
-
-    println!("\nEcho server test commands:");
-    println!("  ping 10.0.0.2         # ICMP");
-    println!("  telnet 10.0.0.2 8080  # TCP");
-    println!("  nc -u 10.0.0.2 8080   # UDP");
-    println!("\nWaiting for packets...\n");
+    println!("Waiting for packets...\n");
 
     let mut buf = [0u8; ETHERNET_MTU];
 
