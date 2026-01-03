@@ -8,6 +8,8 @@ use crate::{
 };
 
 pub trait ProtocolHeader: std::fmt::Display {
+    /// Returns the length in bytes of the protocol-specific header. (Excludes IP header and payload
+    /// data.)
     fn len(&self) -> usize;
 
     fn write_reply_header(&self, reply: &mut [u8; ETHERNET_MTU], payload: &[u8]) -> Option<usize>;
