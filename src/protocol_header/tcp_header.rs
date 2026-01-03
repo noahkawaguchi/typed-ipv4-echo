@@ -44,12 +44,22 @@ impl ProtocolHeader for TcpHeader {
     fn len(&self) -> usize { self.offset_bytes }
 
     fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU], _payload: &[u8]) -> Option<u16> {
-        // Build SYN-ACK response
-        if !self.syn_flag || self.ack_flag {
-            return None;
-        }
+        /// Local sequence number (can be random, using 0 every time for simplicity).
+        const LOCAL_SEQ: u32 = 0;
 
-        println!("Building SYN-ACK response...");
+        match (self.syn_flag, self.ack_flag) {
+            // Build SYN-ACK response (step 2 of handshake, proceed to the logic below)
+            (true, false) => println!("Received SYN, building SYN-ACK response..."),
+
+            // Handle final ACK (step 3 of handshake)
+            // After sending SYN-ACK with seq=0, expect ACK with ack_num=1
+            (false, true) if self.ack_num == LOCAL_SEQ + 1 => {
+                println!("Received ACK, connection established!");
+                return None; // No reply needed for the ACK
+            }
+
+            _ => return None, // Not implemented yet
+        }
 
         let tcp_start = IPV4_HEADER_MIN_LEN.into();
 
@@ -57,13 +67,12 @@ impl ProtocolHeader for TcpHeader {
         reply[tcp_start..tcp_start + 2].copy_from_slice(&self.dst_port.to_be_bytes());
         reply[tcp_start + 2..tcp_start + 4].copy_from_slice(&self.src_port.to_be_bytes());
 
-        // Our sequence number (can be random, using 0 for simplicity)
-        let our_seq = 0u32;
-        reply[tcp_start + 4..tcp_start + 8].copy_from_slice(&our_seq.to_be_bytes());
+        // Sequence number
+        reply[tcp_start + 4..tcp_start + 8].copy_from_slice(&LOCAL_SEQ.to_be_bytes());
 
-        // Acknowledgment number = their seq + 1
-        let our_ack = self.seq_num.wrapping_add(1);
-        reply[tcp_start + 8..tcp_start + 12].copy_from_slice(&our_ack.to_be_bytes());
+        // Acknowledgment number = remote seq + 1
+        let local_ack = self.seq_num.wrapping_add(1);
+        reply[tcp_start + 8..tcp_start + 12].copy_from_slice(&local_ack.to_be_bytes());
 
         // Data offset (5 * 4 = 20 bytes) in upper 4 bits
         reply[tcp_start + 12] = (Self::TCP_HEADER_MIN_LEN / 4) << 4;
