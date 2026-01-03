@@ -4,8 +4,6 @@ use crate::{
 };
 use std::fmt;
 
-const TCP_HEADER_MIN_LEN: u8 = 20;
-
 pub(super) struct TcpHeader {
     src_port: u16,
     dst_port: u16,
@@ -17,10 +15,12 @@ pub(super) struct TcpHeader {
 }
 
 impl TcpHeader {
+    const TCP_HEADER_MIN_LEN: u8 = 20;
+
     pub(super) fn parse(data: &[u8]) -> Result<Self, String> {
         let n = data.len();
 
-        if n < TCP_HEADER_MIN_LEN.into() {
+        if n < Self::TCP_HEADER_MIN_LEN.into() {
             return Err(format!("Too short for TCP header ({n} bytes)"));
         }
 
@@ -51,7 +51,7 @@ impl ProtocolHeader for TcpHeader {
 
         // Total length: IPv4 header without options (20 bytes)
         //               + minimum TCP header length (20 bytes)
-        let total_len = u16::from(IPV4_HEADER_MIN_LEN) + u16::from(TCP_HEADER_MIN_LEN);
+        let total_len = u16::from(IPV4_HEADER_MIN_LEN) + u16::from(Self::TCP_HEADER_MIN_LEN);
         reply[2..4].copy_from_slice(&total_len.to_be_bytes());
 
         let tcp_start = IPV4_HEADER_MIN_LEN.into();
@@ -88,13 +88,13 @@ impl ProtocolHeader for TcpHeader {
         pseudo_header[4..8].copy_from_slice(&reply[16..20]); // Dest IP
         pseudo_header[8] = 0; // Reserved
         pseudo_header[9] = Protocol::Tcp.as_u8();
-        pseudo_header[10..12].copy_from_slice(&u16::from(TCP_HEADER_MIN_LEN).to_be_bytes());
+        pseudo_header[10..12].copy_from_slice(&u16::from(Self::TCP_HEADER_MIN_LEN).to_be_bytes());
 
         // Combine pseudo-header + TCP header for checksum
         let mut checksum_data = [0u8; 12 + 20];
         checksum_data[0..12].copy_from_slice(&pseudo_header);
         checksum_data[12..32]
-            .copy_from_slice(&reply[tcp_start..tcp_start + usize::from(TCP_HEADER_MIN_LEN)]);
+            .copy_from_slice(&reply[tcp_start..tcp_start + usize::from(Self::TCP_HEADER_MIN_LEN)]);
 
         // Zero out checksum field before calculating
         checksum_data[12 + 16] = 0;
