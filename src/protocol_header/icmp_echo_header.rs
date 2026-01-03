@@ -42,18 +42,8 @@ impl IcmpEchoHeader {
 impl ProtocolHeader for IcmpEchoHeader {
     fn len(&self) -> usize { Self::ICMP_HEADER_LEN.into() }
 
-    fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU], payload: &[u8]) -> Option<usize> {
+    fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU], payload: &[u8]) -> Option<u16> {
         println!("Building ICMP Echo Reply...");
-
-        #[allow(clippy::cast_possible_truncation)] // `u16::MAX` (65_535) > `ETHERNET_MTU` (1500)
-        let payload_len = { payload.len() as u16 };
-
-        // Total length: IPv4 header without options (20 bytes)
-        //               + fixed ICMP header length (8 bytes)
-        //               + length of echo payload
-        let total_len =
-            u16::from(IPV4_HEADER_MIN_LEN) + u16::from(Self::ICMP_HEADER_LEN) + payload_len;
-        reply[2..4].copy_from_slice(&total_len.to_be_bytes());
 
         let icmp_start = IPV4_HEADER_MIN_LEN.into();
         let payload_start = icmp_start + usize::from(Self::ICMP_HEADER_LEN);
@@ -81,7 +71,15 @@ impl ProtocolHeader for IcmpEchoHeader {
         );
         reply[icmp_start + 2..icmp_start + 4].copy_from_slice(&icmp_checksum.to_be_bytes());
 
-        Some(total_len.into())
+        // Total length: IPv4 header without options (20 bytes)
+        //               + fixed ICMP header length (8 bytes)
+        //               + length of echo payload
+        #[allow(clippy::cast_possible_truncation)] // `u16::MAX` (65_535) > `ETHERNET_MTU` (1500)
+        Some(
+            u16::from(IPV4_HEADER_MIN_LEN)
+                + u16::from(Self::ICMP_HEADER_LEN)
+                + payload.len() as u16,
+        )
     }
 }
 

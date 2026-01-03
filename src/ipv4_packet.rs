@@ -41,19 +41,21 @@ impl<'a> Ipv4Packet<'a> {
         reply[12..16].copy_from_slice(&self.ipv4_header.dst_ip.octets());
         reply[16..20].copy_from_slice(&self.ipv4_header.src_ip.octets());
 
-        // Let protocol handler fill in protocol-specific data (including total length in IP header)
-        let reply_len = self.protocol_header.write_reply(&mut reply, self.payload)?;
+        // Let protocol handler fill in protocol-specific data and calculate total length
+        let total_len = self.protocol_header.write_reply(&mut reply, self.payload)?;
+
+        // Fill in total length before calculating checksum
+        reply[2..4].copy_from_slice(&total_len.to_be_bytes());
 
         // Clear IP header checksum field before recalculating
         reply[10] = 0;
         reply[11] = 0;
 
-        // Recalculate IP header checksum (covers only the IP header, always 20 bytes for replies,
-        // includes total length set by protocol handler)
+        // Recalculate IP header checksum (covers only the IP header, always 20 bytes for replies)
         let ip_checksum = checksum::calculate(&reply[..usize::from(IPV4_HEADER_MIN_LEN)]);
         reply[10..12].copy_from_slice(&ip_checksum.to_be_bytes());
 
-        Some((reply, reply_len))
+        Some((reply, total_len.into()))
     }
 }
 

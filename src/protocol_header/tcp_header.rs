@@ -41,18 +41,13 @@ impl TcpHeader {
 impl ProtocolHeader for TcpHeader {
     fn len(&self) -> usize { self.offset_bytes }
 
-    fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU], _payload: &[u8]) -> Option<usize> {
+    fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU], _payload: &[u8]) -> Option<u16> {
         // Build SYN-ACK response
         if !self.syn_flag || self.ack_flag {
             return None;
         }
 
         println!("Building SYN-ACK response...");
-
-        // Total length: IPv4 header without options (20 bytes)
-        //               + minimum TCP header length (20 bytes)
-        let total_len = u16::from(IPV4_HEADER_MIN_LEN) + u16::from(Self::TCP_HEADER_MIN_LEN);
-        reply[2..4].copy_from_slice(&total_len.to_be_bytes());
 
         let tcp_start = IPV4_HEADER_MIN_LEN.into();
 
@@ -103,7 +98,9 @@ impl ProtocolHeader for TcpHeader {
         let tcp_checksum = checksum::calculate(&checksum_data);
         reply[tcp_start + 16..tcp_start + 18].copy_from_slice(&tcp_checksum.to_be_bytes());
 
-        Some(total_len.into())
+        // Total length: IPv4 header without options (20 bytes)
+        //               + minimum TCP header length (20 bytes)
+        Some(u16::from(IPV4_HEADER_MIN_LEN) + u16::from(Self::TCP_HEADER_MIN_LEN))
     }
 }
 
