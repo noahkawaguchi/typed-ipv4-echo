@@ -27,19 +27,19 @@ fn main() -> io::Result<()> {
     loop {
         let n = tun.read(&mut buf)?;
 
-        let packet = match Ipv4Packet::parse(&buf[..n]) {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!("{e}");
-                continue;
+        match Ipv4Packet::parse(&buf[..n]) {
+            Err(e) => eprintln!("{e}"),
+
+            Ok(packet) => {
+                println!("{packet}");
+
+                if let Some((reply, reply_len)) = packet.create_reply() {
+                    tun.write_all(&reply[..reply_len])?;
+                    println!("Reply packet sent!");
+                }
             }
-        };
-
-        println!("{packet}");
-
-        if let Some((reply, reply_len)) = packet.create_reply() {
-            tun.write_all(&reply[..reply_len])?;
-            println!("Reply packet sent!");
         }
+
+        println!();
     }
 }
