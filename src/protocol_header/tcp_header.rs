@@ -18,6 +18,9 @@ impl TcpHeader {
     const TCP_HEADER_MIN_LEN: u8 = 20;
     const PSEUDO_HEADER_LEN: usize = 12;
 
+    const SYN_FLAG: u8 = 0x02;
+    const ACK_FLAG: u8 = 0x10;
+
     pub(super) fn parse(data: &[u8]) -> Result<Self, String> {
         let n = data.len();
 
@@ -33,8 +36,8 @@ impl TcpHeader {
             seq_num: u32::from_be_bytes([data[4], data[5], data[6], data[7]]),
             ack_num: u32::from_be_bytes([data[8], data[9], data[10], data[11]]),
             offset_bytes: usize::from(data[12] >> 4) * 4, // Convert 32-bit words to bytes
-            syn_flag: flags & 0x02 != 0,
-            ack_flag: flags & 0x10 != 0,
+            syn_flag: flags & Self::SYN_FLAG != 0,
+            ack_flag: flags & Self::ACK_FLAG != 0,
         })
     }
 }
@@ -52,9 +55,10 @@ impl ProtocolHeader for TcpHeader {
                 // SYN packet (step 2 of handshake) -> send SYN-ACK, no payload echo
                 (true, false, _) => {
                     println!("Received SYN, building SYN-ACK response...");
+
                     // SYN | ACK flags, seq = LOCAL_SEQ_SYN, local ack num = remote seq num + 1
                     (
-                        0x02 | 0x10,
+                        Self::SYN_FLAG | Self::ACK_FLAG,
                         LOCAL_SEQ_SYN,
                         self.seq_num.wrapping_add(1),
                         false,
@@ -64,20 +68,18 @@ impl ProtocolHeader for TcpHeader {
                 // Data packet (ACK with payload) -> send ACK, echo payload
                 (false, true, payload_len) if payload_len > 0 => {
                     println!(
-                        "Received {payload_len} bytes of data: {}",
+                        "Received {payload_len} bytes of data: {}\nEchoing data back...",
                         str::from_utf8(payload).unwrap_or("<non-UTF-8>")
                     );
 
-                    println!("Echoing data back...");
-
-                    // `u32::MAX` (4_294_967_295) > `ETHERNET_MTU` (1500)
-                    #[allow(clippy::cast_possible_truncation)]
                     // ACK flag only
                     // Local seq num = what the client expects next (remote ack num)
                     // Local ack num = remote seq num + payload length (intentionally wrapping)
                     (
-                        0x10,
+                        Self::ACK_FLAG,
                         self.ack_num,
+                        // `u32::MAX` (4_294_967_295) > `ETHERNET_MTU` (1500)
+                        #[allow(clippy::cast_possible_truncation)]
                         self.seq_num.wrapping_add(payload_len as u32),
                         true,
                     )
@@ -90,7 +92,7 @@ impl ProtocolHeader for TcpHeader {
                     return None;
                 }
 
-                _ => return None, // Not implemented yet
+                _ => return None, // No reply implemented
             };
 
         let tcp_start = IPV4_HEADER_MIN_LEN.into();
