@@ -37,17 +37,19 @@ impl<'a> Ipv4Packet<'a> {
         reply[12..16].copy_from_slice(&self.ipv4_header.dst_ip.octets());
         reply[16..20].copy_from_slice(&self.ipv4_header.src_ip.octets());
 
+        // Let protocol handler fill in protocol-specific data (including total length in IP header)
+        let reply_len = self
+            .protocol_header
+            .write_reply_header(&mut reply, self.payload)?;
+
         // Clear IP header checksum field before recalculating
         reply[10] = 0;
         reply[11] = 0;
 
-        // Recalculate IP header checksum (covers only the IP header)
-        let ip_checksum = checksum::calculate(&reply[..self.ipv4_header.ihl_bytes]);
+        // Recalculate IP header checksum (covers only the IP header, always 20 bytes for replies,
+        // includes total length set by protocol handler)
+        let ip_checksum = checksum::calculate(&reply[..usize::from(IPV4_HEADER_MIN_LEN)]);
         reply[10..12].copy_from_slice(&ip_checksum.to_be_bytes());
-
-        let reply_len = self
-            .protocol_header
-            .write_reply_header(&mut reply, self.payload)?;
 
         Some((reply, reply_len))
     }
@@ -95,7 +97,7 @@ impl fmt::Display for Ipv4Header {
         write!(
             f,
             "IPv4 | {} bytes | {} | {} -> {}",
-            self.protocol, self.total_len, self.src_ip, self.dst_ip,
+            self.total_len, self.protocol, self.src_ip, self.dst_ip,
         )
     }
 }
