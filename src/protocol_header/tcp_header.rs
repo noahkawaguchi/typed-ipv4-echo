@@ -17,7 +17,6 @@ pub(super) struct TcpHeader {
 impl TcpHeader {
     const TCP_HEADER_MIN_LEN: u8 = 20;
     const PSEUDO_HEADER_LEN: usize = 12;
-    const CHECKSUM_DATA_LEN: usize = Self::PSEUDO_HEADER_LEN + Self::TCP_HEADER_MIN_LEN as usize;
 
     pub(super) fn parse(data: &[u8]) -> Result<Self, String> {
         let n = data.len();
@@ -44,37 +43,49 @@ impl ProtocolHeader for TcpHeader {
     fn len(&self) -> usize { self.offset_bytes }
 
     fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU], payload: &[u8]) -> Option<u16> {
-        /// Local sequence number (can be random, using 0 every time for simplicity).
-        const LOCAL_SEQ: u32 = 0;
+        /// Local sequence number for SYN-ACK (can be random, using 0 for simplicity).
+        const LOCAL_SEQ_SYN: u32 = 0;
 
-        // Determine what type of reply to send, if any, based on the packet type
-        let (reply_flags, local_ack): (u8, u32) =
+        // Determine the nature of the reply to send, if any, based on the packet type
+        let (reply_flags, local_seq, local_ack, echo_payload): (u8, u32, u32, bool) =
             match (self.syn_flag, self.ack_flag, payload.len()) {
-                // SYN packet (step 2 of handshake) -> send SYN-ACK
+                // SYN packet (step 2 of handshake) -> send SYN-ACK, no payload echo
                 (true, false, _) => {
                     println!("Received SYN, building SYN-ACK response...");
-                    // SYN | ACK flags, local ack num = remote seq num + 1 (intentionally wrapping)
-                    (0x02 | 0x10, self.seq_num.wrapping_add(1))
+                    // SYN | ACK flags, seq = LOCAL_SEQ_SYN, local ack num = remote seq num + 1
+                    (
+                        0x02 | 0x10,
+                        LOCAL_SEQ_SYN,
+                        self.seq_num.wrapping_add(1),
+                        false,
+                    )
                 }
 
-                // Data packet (ACK with payload) -> send ACK
+                // Data packet (ACK with payload) -> send ACK, echo payload
                 (false, true, payload_len) if payload_len > 0 => {
                     println!(
                         "Received {payload_len} bytes of data: {}",
                         str::from_utf8(payload).unwrap_or("<non-UTF-8>")
                     );
 
-                    println!("Sending ACK for received data...");
+                    println!("Echoing data back...");
 
                     // `u32::MAX` (4_294_967_295) > `ETHERNET_MTU` (1500)
                     #[allow(clippy::cast_possible_truncation)]
-                    // ACK flag only, local ack num = remote seq num + payload length (intentionally
-                    // wrapping)
-                    (0x10, self.seq_num.wrapping_add(payload_len as u32))
+                    // ACK flag only
+                    // Local seq num = what the client expects next (remote ack num)
+                    // Local ack num = remote seq num + payload length (intentionally wrapping)
+                    (
+                        0x10,
+                        self.ack_num,
+                        self.seq_num.wrapping_add(payload_len as u32),
+                        true,
+                    )
                 }
 
                 // Handshake ACK (step 3) -> no reply needed
-                (false, true, 0) if self.ack_num == LOCAL_SEQ + 1 => {
+                // Remote ack num should be the previous local seq num + 1
+                (false, true, 0) if self.ack_num == LOCAL_SEQ_SYN.wrapping_add(1) => {
                     println!("Received ACK, connection established!");
                     return None;
                 }
@@ -89,7 +100,7 @@ impl ProtocolHeader for TcpHeader {
         reply[tcp_start + 2..tcp_start + 4].copy_from_slice(&self.src_port.to_be_bytes());
 
         // Sequence number
-        reply[tcp_start + 4..tcp_start + 8].copy_from_slice(&LOCAL_SEQ.to_be_bytes());
+        reply[tcp_start + 4..tcp_start + 8].copy_from_slice(&local_seq.to_be_bytes());
 
         // Acknowledgment number
         reply[tcp_start + 8..tcp_start + 12].copy_from_slice(&local_ack.to_be_bytes());
@@ -108,30 +119,45 @@ impl ProtocolHeader for TcpHeader {
         // Urgent pointer
         reply[tcp_start + 18..tcp_start + 20].copy_from_slice(&[0x00, 0x00]);
 
+        // Copy payload into reply if echoing
+        let payload_len = if echo_payload {
+            let payload_start = tcp_start + usize::from(Self::TCP_HEADER_MIN_LEN);
+            reply[payload_start..payload_start + payload.len()].copy_from_slice(payload);
+            payload.len()
+        } else {
+            0
+        };
+
+        // TCP segment length (header + payload if any)
+        #[allow(clippy::cast_possible_truncation)] // `u16::MAX` (65_535) > `ETHERNET_MTU` (1500)
+        let tcp_segment_len = u16::from(Self::TCP_HEADER_MIN_LEN) + payload_len as u16;
+
         // Calculate TCP checksum with pseudo-header
         let mut pseudo_header = [0u8; Self::PSEUDO_HEADER_LEN];
         pseudo_header[0..4].copy_from_slice(&reply[12..16]); // Source IP
         pseudo_header[4..8].copy_from_slice(&reply[16..20]); // Dest IP
         pseudo_header[8] = 0; // Reserved padding for alignment
         pseudo_header[9] = Protocol::Tcp.as_u8();
-        pseudo_header[10..12].copy_from_slice(&u16::from(Self::TCP_HEADER_MIN_LEN).to_be_bytes());
+        pseudo_header[10..12].copy_from_slice(&tcp_segment_len.to_be_bytes());
 
-        // Combine pseudo-header + TCP header for checksum
-        let mut checksum_data = [0u8; Self::CHECKSUM_DATA_LEN];
+        // Build checksum data: pseudo-header + TCP header + payload if any
+        let checksum_len = Self::PSEUDO_HEADER_LEN + usize::from(tcp_segment_len);
+        let mut checksum_data = [0u8; ETHERNET_MTU + Self::PSEUDO_HEADER_LEN];
         checksum_data[0..Self::PSEUDO_HEADER_LEN].copy_from_slice(&pseudo_header);
-        checksum_data[Self::PSEUDO_HEADER_LEN..Self::CHECKSUM_DATA_LEN]
-            .copy_from_slice(&reply[tcp_start..tcp_start + usize::from(Self::TCP_HEADER_MIN_LEN)]);
+        checksum_data[Self::PSEUDO_HEADER_LEN..checksum_len]
+            .copy_from_slice(&reply[tcp_start..tcp_start + usize::from(tcp_segment_len)]);
 
         // Zero out checksum field before calculating
         checksum_data[Self::PSEUDO_HEADER_LEN + 16] = 0;
         checksum_data[Self::PSEUDO_HEADER_LEN + 17] = 0;
 
-        let tcp_checksum = checksum::calculate(&checksum_data);
+        let tcp_checksum = checksum::calculate(&checksum_data[..checksum_len]);
         reply[tcp_start + 16..tcp_start + 18].copy_from_slice(&tcp_checksum.to_be_bytes());
 
         // Total length: IPv4 header without options (20 bytes)
         //               + minimum TCP header length (20 bytes)
-        Some(u16::from(IPV4_HEADER_MIN_LEN) + u16::from(Self::TCP_HEADER_MIN_LEN))
+        //               + payload length (0+ bytes)
+        Some(u16::from(IPV4_HEADER_MIN_LEN) + tcp_segment_len)
     }
 }
 
