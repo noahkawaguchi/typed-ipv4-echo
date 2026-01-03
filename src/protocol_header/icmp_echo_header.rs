@@ -42,7 +42,7 @@ impl IcmpEchoHeader {
 impl ProtocolHeader for IcmpEchoHeader {
     fn len(&self) -> usize { Self::ICMP_HEADER_LEN.into() }
 
-    fn write_reply_header(&self, reply: &mut [u8; ETHERNET_MTU], payload: &[u8]) -> Option<usize> {
+    fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU], payload: &[u8]) -> Option<usize> {
         println!("Building ICMP Echo Reply...");
 
         #[allow(clippy::cast_possible_truncation)] // `u16::MAX` (65_535) > `ETHERNET_MTU` (1500)

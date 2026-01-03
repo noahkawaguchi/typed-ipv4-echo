@@ -41,7 +41,7 @@ impl TcpHeader {
 impl ProtocolHeader for TcpHeader {
     fn len(&self) -> usize { self.offset_bytes }
 
-    fn write_reply_header(&self, reply: &mut [u8; ETHERNET_MTU], _payload: &[u8]) -> Option<usize> {
+    fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU], _payload: &[u8]) -> Option<usize> {
         // Build SYN-ACK response
         if !self.syn_flag || self.ack_flag {
             return None;

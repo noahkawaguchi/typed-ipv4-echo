@@ -12,7 +12,7 @@ pub trait ProtocolHeader: std::fmt::Display {
     /// data.)
     fn len(&self) -> usize;
 
-    fn write_reply_header(&self, reply: &mut [u8; ETHERNET_MTU], payload: &[u8]) -> Option<usize>;
+    fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU], payload: &[u8]) -> Option<usize>;
 }
 
 pub fn parse(data: &[u8], protocol: &Protocol) -> Result<Box<dyn ProtocolHeader>, String> {
