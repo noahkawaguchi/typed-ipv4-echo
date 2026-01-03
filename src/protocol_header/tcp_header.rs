@@ -43,23 +43,44 @@ impl TcpHeader {
 impl ProtocolHeader for TcpHeader {
     fn len(&self) -> usize { self.offset_bytes }
 
-    fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU], _payload: &[u8]) -> Option<u16> {
+    fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU], payload: &[u8]) -> Option<u16> {
         /// Local sequence number (can be random, using 0 every time for simplicity).
         const LOCAL_SEQ: u32 = 0;
 
-        match (self.syn_flag, self.ack_flag) {
-            // Build SYN-ACK response (step 2 of handshake, proceed to the logic below)
-            (true, false) => println!("Received SYN, building SYN-ACK response..."),
+        // Determine what type of reply to send, if any, based on the packet type
+        let (reply_flags, local_ack): (u8, u32) =
+            match (self.syn_flag, self.ack_flag, payload.len()) {
+                // SYN packet (step 2 of handshake) -> send SYN-ACK
+                (true, false, _) => {
+                    println!("Received SYN, building SYN-ACK response...");
+                    // SYN | ACK flags, local ack num = remote seq num + 1 (intentionally wrapping)
+                    (0x02 | 0x10, self.seq_num.wrapping_add(1))
+                }
 
-            // Handle final ACK (step 3 of handshake)
-            // After sending SYN-ACK with seq=0, expect ACK with ack_num=1
-            (false, true) if self.ack_num == LOCAL_SEQ + 1 => {
-                println!("Received ACK, connection established!");
-                return None; // No reply needed for the ACK
-            }
+                // Data packet (ACK with payload) -> send ACK
+                (false, true, payload_len) if payload_len > 0 => {
+                    println!(
+                        "Received {payload_len} bytes of data: {}",
+                        str::from_utf8(payload).unwrap_or("<non-UTF-8>")
+                    );
 
-            _ => return None, // Not implemented yet
-        }
+                    println!("Sending ACK for received data...");
+
+                    // `u32::MAX` (4_294_967_295) > `ETHERNET_MTU` (1500)
+                    #[allow(clippy::cast_possible_truncation)]
+                    // ACK flag only, local ack num = remote seq num + payload length (intentionally
+                    // wrapping)
+                    (0x10, self.seq_num.wrapping_add(payload_len as u32))
+                }
+
+                // Handshake ACK (step 3) -> no reply needed
+                (false, true, 0) if self.ack_num == LOCAL_SEQ + 1 => {
+                    println!("Received ACK, connection established!");
+                    return None;
+                }
+
+                _ => return None, // Not implemented yet
+            };
 
         let tcp_start = IPV4_HEADER_MIN_LEN.into();
 
@@ -70,15 +91,14 @@ impl ProtocolHeader for TcpHeader {
         // Sequence number
         reply[tcp_start + 4..tcp_start + 8].copy_from_slice(&LOCAL_SEQ.to_be_bytes());
 
-        // Acknowledgment number = remote seq + 1
-        let local_ack = self.seq_num.wrapping_add(1);
+        // Acknowledgment number
         reply[tcp_start + 8..tcp_start + 12].copy_from_slice(&local_ack.to_be_bytes());
 
         // Data offset (5 * 4 = 20 bytes) in upper 4 bits
         reply[tcp_start + 12] = (Self::TCP_HEADER_MIN_LEN / 4) << 4;
 
-        // Flags: SYN + ACK
-        reply[tcp_start + 13] = 0x2 | 0x10;
+        // Flags (SYN | ACK for handshake, ACK for data)
+        reply[tcp_start + 13] = reply_flags;
 
         // Window size for flow control, left at max for simplicity
         reply[tcp_start + 14..tcp_start + 16].copy_from_slice(&u16::MAX.to_be_bytes());
