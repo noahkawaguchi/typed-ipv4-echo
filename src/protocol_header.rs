@@ -3,56 +3,19 @@ use std::fmt;
 
 const ICMP_HEADER_LEN: u8 = 8;
 const TCP_HEADER_MIN_LEN: u8 = 20;
-const UDP_HEADER_LEN: u8 = 8;
 
-pub enum ProtocolHeader {
-    Icmp(IcmpHeader),
-    Tcp(TcpHeader),
-    Udp,
-    Other,
+pub fn parse(data: &[u8], protocol: &Protocol) -> Result<Box<dyn ProtocolHeader>, String> {
+    Ok(match protocol {
+        Protocol::Icmp => Box::new(IcmpHeader::parse(data)?) as Box<dyn ProtocolHeader>,
+        Protocol::Tcp => Box::new(TcpHeader::parse(data)?) as Box<dyn ProtocolHeader>,
+        _ => return Err(String::from("only ICMP and TCP implemented so far")),
+    })
 }
 
-impl ProtocolHeader {
-    pub fn parse(data: &[u8], protocol: &Protocol) -> Result<Self, String> {
-        Ok(match protocol {
-            Protocol::Icmp => Self::Icmp(IcmpHeader::parse(data)?),
-            Protocol::Tcp => Self::Tcp(TcpHeader::parse(data)?),
-            Protocol::Udp => Self::Udp,
-            Protocol::Other(_) => Self::Other,
-        })
-    }
+pub trait ProtocolHeader: fmt::Display {
+    fn len(&self) -> usize;
 
-    pub fn len(&self) -> usize {
-        match self {
-            Self::Icmp(_) => ICMP_HEADER_LEN.into(),
-            Self::Tcp(tcp) => tcp.offset_bytes,
-            Self::Udp => UDP_HEADER_LEN.into(),
-            Self::Other => todo!(),
-        }
-    }
-
-    pub fn write_reply_header(
-        &self,
-        reply: &mut [u8; ETHERNET_MTU],
-        payload: &[u8],
-    ) -> Option<usize> {
-        match self {
-            Self::Icmp(icmp) => icmp.write_reply_header(reply, payload),
-            Self::Tcp(tcp) => tcp.write_reply_header(reply),
-            _ => None,
-        }
-    }
-}
-
-impl fmt::Display for ProtocolHeader {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Icmp(icmp) => write!(f, "{icmp}"),
-            Self::Tcp(tcp) => write!(f, "{tcp}"),
-            Self::Udp => write!(f, "UDP"),
-            Self::Other => write!(f, "Other"),
-        }
-    }
+    fn write_reply_header(&self, reply: &mut [u8; ETHERNET_MTU], payload: &[u8]) -> Option<usize>;
 }
 
 struct IcmpHeader {
@@ -77,6 +40,10 @@ impl IcmpHeader {
             sequence: u16::from_be_bytes([data[6], data[7]]),
         })
     }
+}
+
+impl ProtocolHeader for IcmpHeader {
+    fn len(&self) -> usize { ICMP_HEADER_LEN.into() }
 
     fn write_reply_header(&self, reply: &mut [u8; ETHERNET_MTU], payload: &[u8]) -> Option<usize> {
         // ICMP Echo Request (ping): type=8, code=0
@@ -161,8 +128,12 @@ impl TcpHeader {
             ack_flag: flags & 0x10 != 0,
         })
     }
+}
 
-    fn write_reply_header(&self, reply: &mut [u8; ETHERNET_MTU]) -> Option<usize> {
+impl ProtocolHeader for TcpHeader {
+    fn len(&self) -> usize { self.offset_bytes }
+
+    fn write_reply_header(&self, reply: &mut [u8; ETHERNET_MTU], _payload: &[u8]) -> Option<usize> {
         // Build SYN-ACK response
         if !self.syn_flag || self.ack_flag {
             return None;
