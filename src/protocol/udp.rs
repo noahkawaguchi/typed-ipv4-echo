@@ -78,7 +78,9 @@ impl ProtocolHandler for UdpHandler<'_> {
         let udp_checksum = checksum::calculate(&checksum_data[..checksum_len]);
         reply[udp_start + 6..udp_start + 8].copy_from_slice(&udp_checksum.to_be_bytes());
 
-        // Total length: IPv4 header + UDP header + payload
+        // Total length: IPv4 header without options (20 bytes)
+        //               + fixed UDP header length (8 bytes)
+        //               + length of echo payload
         Some(u16::from(IPV4_HEADER_MIN_LEN) + udp_len)
     }
 }

@@ -80,7 +80,7 @@ impl Ipv4Header {
 
         let version = data[0] >> 4;
         if version != 4 {
-            return Err(format!("Non-IPv4 packet (version {version}), skipping"));
+            return Err(format!("Non-IPv4 packet (version {version})"));
         }
 
         Ok(Self {
