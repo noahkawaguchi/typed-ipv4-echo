@@ -153,7 +153,7 @@ impl ProtocolHandler for TcpHandler<'_> {
         pseudo_header[0..4].copy_from_slice(&reply[12..16]); // Source IP
         pseudo_header[4..8].copy_from_slice(&reply[16..20]); // Dest IP
         pseudo_header[8] = 0; // Reserved padding for alignment
-        pseudo_header[9] = Protocol::Tcp.as_u8();
+        pseudo_header[9] = Protocol::Tcp.into();
         pseudo_header[10..12].copy_from_slice(&tcp_segment_len.to_be_bytes());
 
         // Build checksum data: pseudo-header + TCP header + payload if any

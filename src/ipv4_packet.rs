@@ -32,7 +32,7 @@ impl<'a> Ipv4Packet<'a> {
         reply[4..6].copy_from_slice(&[0x00, 0x00]); // Identification
         reply[6..8].copy_from_slice(&[0x40, 0x00]); // Flags + Fragment offset (Don't Fragment)
         reply[8] = 64; // TTL
-        reply[9] = self.ipv4_header.protocol.as_u8(); // Protocol
+        reply[9] = self.ipv4_header.protocol.into(); // Protocol
 
         // Swap src and dst IP addresses
         reply[12..16].copy_from_slice(&self.ipv4_header.dst_ip.octets());
@@ -86,7 +86,7 @@ impl Ipv4Header {
         Ok(Self {
             ihl_bytes: usize::from(data[0] & 0xF) * 4, // Convert 32-bit words to bytes
             total_len: u16::from_be_bytes([data[2], data[3]]),
-            protocol: Protocol::from_u8(data[9]),
+            protocol: data[9].into(),
             src_ip: Ipv4Addr::new(data[12], data[13], data[14], data[15]),
             dst_ip: Ipv4Addr::new(data[16], data[17], data[18], data[19]),
         })

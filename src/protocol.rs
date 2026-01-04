@@ -15,6 +15,7 @@ pub trait ProtocolHandler: std::fmt::Display {
     fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU]) -> Option<u16>;
 }
 
+#[derive(Clone, Copy)]
 pub enum Protocol {
     Icmp,
     Tcp,
@@ -23,7 +24,24 @@ pub enum Protocol {
 }
 
 impl Protocol {
-    pub const fn from_u8(value: u8) -> Self {
+    /// Parses `data` as the header and payload of a packet of the protocol type of `self`,
+    /// returning a `ProtocolHandler` capable of writing replies.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the packet is too short for its type or is of an unimplemented type.
+    pub fn parse_data<'a>(self, data: &'a [u8]) -> Result<Box<dyn ProtocolHandler + 'a>, String> {
+        match self {
+            Self::Icmp => Ok(Box::new(IcmpEchoHandler::parse(data)?) as Box<dyn ProtocolHandler>),
+            Self::Tcp => Ok(Box::new(TcpHandler::parse(data)?) as Box<dyn ProtocolHandler>),
+            Self::Udp => Ok(Box::new(UdpHandler::parse(data)?) as Box<dyn ProtocolHandler>),
+            Self::Other(_) => Err(String::from("only ICMP Echo, TCP, and UDP implemented")),
+        }
+    }
+}
+
+impl From<u8> for Protocol {
+    fn from(value: u8) -> Self {
         match value {
             1 => Self::Icmp,
             6 => Self::Tcp,
@@ -31,28 +49,15 @@ impl Protocol {
             other => Self::Other(other),
         }
     }
+}
 
-    pub const fn as_u8(&self) -> u8 {
-        match self {
-            Self::Icmp => 1,
-            Self::Tcp => 6,
-            Self::Udp => 17,
-            Self::Other(other) => *other,
-        }
-    }
-
-    /// Parses `data` as the header and payload of a packet of the protocol type of `self`,
-    /// returning a `ProtocolHandler` capable of writing replies.
-    ///
-    /// # Errors
-    ///
-    /// Returns `Err` if the packet is too short for its type or is of an unimplemented type.
-    pub fn parse_data<'a>(&self, data: &'a [u8]) -> Result<Box<dyn ProtocolHandler + 'a>, String> {
-        match self {
-            Self::Icmp => Ok(Box::new(IcmpEchoHandler::parse(data)?) as Box<dyn ProtocolHandler>),
-            Self::Tcp => Ok(Box::new(TcpHandler::parse(data)?) as Box<dyn ProtocolHandler>),
-            Self::Udp => Ok(Box::new(UdpHandler::parse(data)?) as Box<dyn ProtocolHandler>),
-            Self::Other(_) => Err(String::from("only ICMP Echo, TCP, and UDP implemented")),
+impl From<Protocol> for u8 {
+    fn from(value: Protocol) -> Self {
+        match value {
+            Protocol::Icmp => 1,
+            Protocol::Tcp => 6,
+            Protocol::Udp => 17,
+            Protocol::Other(other) => other,
         }
     }
 }

@@ -61,7 +61,7 @@ impl ProtocolHandler for UdpHandler<'_> {
         pseudo_header[0..4].copy_from_slice(&reply[12..16]); // Source IP
         pseudo_header[4..8].copy_from_slice(&reply[16..20]); // Dest IP
         pseudo_header[8] = 0; // Reserved padding for alignment
-        pseudo_header[9] = Protocol::Udp.as_u8();
+        pseudo_header[9] = Protocol::Udp.into();
         pseudo_header[10..12].copy_from_slice(&udp_len.to_be_bytes());
 
         // Build checksum data: pseudo-header + UDP header + payload
