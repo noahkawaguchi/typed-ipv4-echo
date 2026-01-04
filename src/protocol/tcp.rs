@@ -192,3 +192,126 @@ impl fmt::Display for TcpHandler<'_> {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn correctly_parses_valid_packet() {
+        #[rustfmt::skip]
+        let data = [
+            0x04, 0xd2,                          // Source port: 1234
+            0x00, 0x50,                          // Dest port: 80
+            0x00, 0x00, 0x00, 0x01,              // Sequence number: 1
+            0x00, 0x00, 0x00, 0x02,              // Ack number: 2
+            0x50, 0x12,                          // Data offset: 5 (20 bytes), Flags: SYN|ACK
+            0xff, 0xff,                          // Window size
+            0x00, 0x00,                          // Checksum
+            0x00, 0x00,                          // Urgent pointer
+            0x48, 0x65, 0x6c, 0x6c, 0x6f,        // Payload: "Hello"
+        ];
+
+        assert!(TcpHandler::parse(&data).is_ok_and(|handler| {
+            assert_eq!(handler.src_port, 1234);
+            assert_eq!(handler.dst_port, 80);
+            assert_eq!(handler.seq_num, 1);
+            assert_eq!(handler.ack_num, 2);
+            assert_eq!(handler.offset_bytes, 20);
+            assert!(handler.syn_flag);
+            assert!(handler.ack_flag);
+            assert_eq!(handler.payload, b"Hello");
+            true
+        }));
+    }
+
+    #[test]
+    fn parsing_fails_when_too_short() {
+        let data = [0x04, 0xd2, 0x00, 0x50]; // Only 4 bytes
+        assert!(TcpHandler::parse(&data).is_err_and(|e| e.contains("Too short")));
+    }
+
+    #[test]
+    fn extracts_syn_flag_correctly() {
+        #[rustfmt::skip]
+        let data = [
+            0x04, 0xd2,                          // Source port: 1234
+            0x00, 0x50,                          // Dest port: 80
+            0x00, 0x00, 0x00, 0x00,              // Sequence number: 0
+            0x00, 0x00, 0x00, 0x00,              // Ack number: 0
+            0x50, 0x02,                          // Data offset: 5, Flags: SYN only
+            0xff, 0xff,                          // Window size
+            0x00, 0x00,                          // Checksum
+            0x00, 0x00,                          // Urgent pointer
+        ];
+
+        assert!(TcpHandler::parse(&data).is_ok_and(|handler| {
+            assert!(handler.syn_flag);
+            assert!(!handler.ack_flag);
+            true
+        }));
+    }
+
+    #[test]
+    fn extracts_ack_flag_correctly() {
+        #[rustfmt::skip]
+        let data = [
+            0x04, 0xd2,                          // Source port: 1234
+            0x00, 0x50,                          // Dest port: 80
+            0x00, 0x00, 0x00, 0x01,              // Sequence number: 1
+            0x00, 0x00, 0x00, 0x01,              // Ack number: 1
+            0x50, 0x10,                          // Data offset: 5, Flags: ACK only
+            0xff, 0xff,                          // Window size
+            0x00, 0x00,                          // Checksum
+            0x00, 0x00,                          // Urgent pointer
+        ];
+
+        assert!(TcpHandler::parse(&data).is_ok_and(|handler| {
+            assert!(!handler.syn_flag);
+            assert!(handler.ack_flag);
+            true
+        }));
+    }
+
+    #[test]
+    fn parsing_handles_no_flags_set() {
+        #[rustfmt::skip]
+        let data = [
+            0x04, 0xd2,                          // Source port: 1234
+            0x00, 0x50,                          // Dest port: 80
+            0x00, 0x00, 0x00, 0x00,              // Sequence number: 0
+            0x00, 0x00, 0x00, 0x00,              // Ack number: 0
+            0x50, 0x00,                          // Data offset: 5, Flags: none
+            0xff, 0xff,                          // Window size
+            0x00, 0x00,                          // Checksum
+            0x00, 0x00,                          // Urgent pointer
+        ];
+
+        assert!(TcpHandler::parse(&data).is_ok_and(|handler| {
+            assert!(!handler.syn_flag);
+            assert!(!handler.ack_flag);
+            true
+        }));
+    }
+
+    #[test]
+    fn parsing_handles_large_sequence_numbers() {
+        #[rustfmt::skip]
+        let data = [
+            0x04, 0xd2,                          // Source port: 1234
+            0x00, 0x50,                          // Dest port: 80
+            0xff, 0xff, 0xff, 0xff,              // Sequence number: u32::MAX
+            0xfe, 0xdc, 0xba, 0x98,              // Ack number: 4275878552
+            0x50, 0x10,                          // Data offset: 5, Flags: ACK
+            0xff, 0xff,                          // Window size
+            0x00, 0x00,                          // Checksum
+            0x00, 0x00,                          // Urgent pointer
+        ];
+
+        assert!(TcpHandler::parse(&data).is_ok_and(|handler| {
+            assert_eq!(handler.seq_num, u32::MAX);
+            assert_eq!(handler.ack_num, 0xfedc_ba98);
+            true
+        }));
+    }
+}
