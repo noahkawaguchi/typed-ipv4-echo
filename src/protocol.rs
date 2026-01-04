@@ -8,7 +8,7 @@ use crate::{
 };
 use std::fmt;
 
-pub trait ProtocolHandler: std::fmt::Display {
+pub trait ProtocolHandler: fmt::Display {
     /// Writes the protocol-specific sections of the reply into the buffer, returning the total
     /// length of the reply packet in bytes (including the IP header and payload data), or `None` if
     /// no reply should be sent.
