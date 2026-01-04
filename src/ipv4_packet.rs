@@ -62,6 +62,7 @@ impl fmt::Display for Ipv4Packet<'_> {
     }
 }
 
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 struct Ipv4Header {
     ihl_bytes: usize,
     total_len: u16,
@@ -100,5 +101,58 @@ impl fmt::Display for Ipv4Header {
             "IPv4 | {} bytes | {} | {} -> {}",
             self.total_len, self.protocol, self.src_ip, self.dst_ip,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ipv4_header_correctly_parses_valid_packet() {
+        #[rustfmt::skip]
+        let data = [
+            0x45, 0x00, 0x00, 0x3c,  // Version 4, IHL 5, TOS 0, Total Length 60
+            0x1c, 0x46, 0x40, 0x00,  // ID, Flags, Fragment Offset
+            0x40, 0x06, 0xb1, 0xe6,  // TTL 64, Protocol 6 (TCP), Checksum
+            192, 168, 1, 100,        // Source IP: 192.168.1.100
+            172, 16, 10, 12,         // Dest IP: 172.16.10.12
+        ];
+
+        assert!(Ipv4Header::parse(&data).is_ok_and(|header| {
+            assert_eq!(
+                header,
+                Ipv4Header {
+                    ihl_bytes: 20,
+                    total_len: 60,
+                    protocol: Protocol::Tcp,
+                    src_ip: Ipv4Addr::new(192, 168, 1, 100),
+                    dst_ip: Ipv4Addr::new(172, 16, 10, 12),
+                }
+            );
+
+            true
+        }));
+    }
+
+    #[test]
+    fn ipv4_header_parsing_fails_when_too_short() {
+        let data = [0x45, 0x00, 0x00]; // Only 3 bytes
+        assert!(Ipv4Header::parse(&data).is_err_and(|e| e.contains("Too short")));
+    }
+
+    #[test]
+    fn ipv4_header_parsing_fails_when_not_ipv4() {
+        #[rustfmt::skip]
+        let data = [
+            0x60, 0x00, 0x00, 0x00,  // Version 6 (IPv6), not 4
+            0x00, 0x14, 0x06, 0x40,
+            0x20, 0x01, 0x0d, 0xb8,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x01,
+        ];
+
+        assert!(Ipv4Header::parse(&data).is_err_and(|e| e.contains("Non-IPv4")));
     }
 }
