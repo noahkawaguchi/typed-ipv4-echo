@@ -24,6 +24,10 @@ pub enum Protocol {
 }
 
 impl Protocol {
+    const PROTO_ICMP: u8 = 1;
+    const PROTO_TCP: u8 = 6;
+    const PROTO_UDP: u8 = 17;
+
     /// Parses `data` as the header and payload of a packet of the protocol type of `self`,
     /// returning a `ProtocolHandler` capable of writing replies.
     ///
@@ -43,9 +47,9 @@ impl Protocol {
 impl From<u8> for Protocol {
     fn from(value: u8) -> Self {
         match value {
-            1 => Self::Icmp,
-            6 => Self::Tcp,
-            17 => Self::Udp,
+            Self::PROTO_ICMP => Self::Icmp,
+            Self::PROTO_TCP => Self::Tcp,
+            Self::PROTO_UDP => Self::Udp,
             other => Self::Other(other),
         }
     }
@@ -54,9 +58,9 @@ impl From<u8> for Protocol {
 impl From<Protocol> for u8 {
     fn from(value: Protocol) -> Self {
         match value {
-            Protocol::Icmp => 1,
-            Protocol::Tcp => 6,
-            Protocol::Udp => 17,
+            Protocol::Icmp => Protocol::PROTO_ICMP,
+            Protocol::Tcp => Protocol::PROTO_TCP,
+            Protocol::Udp => Protocol::PROTO_UDP,
             Protocol::Other(other) => other,
         }
     }
