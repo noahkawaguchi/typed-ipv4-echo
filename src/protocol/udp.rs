@@ -1,6 +1,7 @@
 use crate::{
-    ETHERNET_MTU, checksum, ipv4_packet::IPV4_HEADER_MIN_LEN, protocol::Protocol,
-    protocol_handler::ProtocolHandler,
+    ETHERNET_MTU, checksum,
+    ipv4_packet::IPV4_HEADER_MIN_LEN,
+    protocol::{Protocol, ProtocolHandler},
 };
 use std::fmt;
 

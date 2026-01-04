@@ -1,6 +1,4 @@
-use crate::{
-    ETHERNET_MTU, checksum, ipv4_packet::IPV4_HEADER_MIN_LEN, protocol_handler::ProtocolHandler,
-};
+use crate::{ETHERNET_MTU, checksum, ipv4_packet::IPV4_HEADER_MIN_LEN, protocol::ProtocolHandler};
 use std::fmt;
 
 pub(super) struct IcmpEchoHandler<'a> {

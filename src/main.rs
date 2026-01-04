@@ -1,7 +1,6 @@
 mod checksum;
 mod ipv4_packet;
 mod protocol;
-mod protocol_handler;
 mod tun;
 
 use crate::ipv4_packet::Ipv4Packet;
