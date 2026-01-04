@@ -8,18 +8,18 @@ pub const IPV4_HEADER_MIN_LEN: u8 = 20;
 
 pub struct Ipv4Packet<'a> {
     ipv4_header: Ipv4Header,
-    protocol_header: Box<dyn ProtocolHandler + 'a>,
+    protocol_handler: Box<dyn ProtocolHandler + 'a>,
 }
 
 impl<'a> Ipv4Packet<'a> {
     pub fn parse(data: &'a [u8]) -> Result<Self, String> {
         let ipv4_header = Ipv4Header::parse(data)?;
 
-        let protocol_header = ipv4_header
+        let protocol_handler = ipv4_header
             .protocol
             .parse_data(&data[ipv4_header.ihl_bytes..])?;
 
-        Ok(Self { ipv4_header, protocol_header })
+        Ok(Self { ipv4_header, protocol_handler })
     }
 
     pub fn create_reply(&self) -> Option<([u8; ETHERNET_MTU], usize)> {
@@ -39,7 +39,7 @@ impl<'a> Ipv4Packet<'a> {
         reply[16..20].copy_from_slice(&self.ipv4_header.src_ip.octets());
 
         // Let protocol handler fill in protocol-specific data and calculate total length
-        let total_len = self.protocol_header.write_reply(&mut reply)?;
+        let total_len = self.protocol_handler.write_reply(&mut reply)?;
 
         // Fill in total length before calculating checksum
         reply[2..4].copy_from_slice(&total_len.to_be_bytes());
@@ -58,7 +58,7 @@ impl<'a> Ipv4Packet<'a> {
 
 impl fmt::Display for Ipv4Packet<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}\n{}", self.ipv4_header, self.protocol_header)
+        write!(f, "{}\n{}", self.ipv4_header, self.protocol_handler)
     }
 }
 
