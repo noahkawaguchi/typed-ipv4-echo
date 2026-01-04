@@ -90,3 +90,70 @@ impl fmt::Display for UdpHandler<'_> {
         write!(f, "UDP {} -> {}", self.src_port, self.dst_port)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn correctly_parses_valid_packet() {
+        #[rustfmt::skip]
+        let data = [
+            0x04, 0xd2,              // Source port: 1234
+            0x00, 0x35,              // Dest port: 53 (DNS)
+            0x00, 0x10,              // Length: 16 (8 byte header + 8 byte payload)
+            0x00, 0x00,              // Checksum
+            0x48, 0x65, 0x6c, 0x6c,  // Payload: "Hell"
+            0x6f, 0x21, 0x21, 0x21,  // Payload: "o!!!"
+        ];
+
+        assert!(UdpHandler::parse(&data).is_ok_and(|handler| {
+            assert_eq!(handler.src_port, 1234);
+            assert_eq!(handler.dst_port, 53);
+            assert_eq!(handler.payload, b"Hello!!!");
+            true
+        }));
+    }
+
+    #[test]
+    fn parsing_fails_when_too_short() {
+        let data = [0x04, 0xd2, 0x00]; // Only 3 bytes
+        assert!(UdpHandler::parse(&data).is_err_and(|e| e.contains("Too short")));
+    }
+
+    #[test]
+    fn parsing_handles_empty_payload() {
+        #[rustfmt::skip]
+        let data = [
+            0x1f, 0x90,              // Source port: 8080
+            0x00, 0x50,              // Dest port: 80
+            0x00, 0x08,              // Length: 8 (header only, no payload)
+            0x00, 0x00,              // Checksum
+        ];
+
+        assert!(UdpHandler::parse(&data).is_ok_and(|handler| {
+            assert_eq!(handler.src_port, 8080);
+            assert_eq!(handler.dst_port, 80);
+            assert_eq!(handler.payload.len(), 0);
+            true
+        }));
+    }
+
+    #[test]
+    fn extracts_ports_correctly() {
+        #[rustfmt::skip]
+        let data = [
+            0xff, 0xff,              // Source port: 65535 (max)
+            0x00, 0x01,              // Dest port: 1 (min non-zero)
+            0x00, 0x0c,              // Length: 12
+            0x00, 0x00,              // Checksum
+            0x74, 0x65, 0x73, 0x74,  // Payload: "test"
+        ];
+
+        assert!(UdpHandler::parse(&data).is_ok_and(|handler| {
+            assert_eq!(handler.src_port, 65535);
+            assert_eq!(handler.dst_port, 1);
+            true
+        }));
+    }
+}
