@@ -9,8 +9,7 @@ pub const IPV4_HEADER_MIN_LEN: u8 = 20;
 
 pub struct Ipv4Packet<'a> {
     ipv4_header: Ipv4Header,
-    protocol_header: Box<dyn ProtocolHeader>,
-    payload: &'a [u8],
+    protocol_header: Box<dyn ProtocolHeader + 'a>,
 }
 
 impl<'a> Ipv4Packet<'a> {
@@ -20,9 +19,7 @@ impl<'a> Ipv4Packet<'a> {
         let protocol_header =
             protocol_header::parse(&data[ipv4_header.ihl_bytes..], &ipv4_header.protocol)?;
 
-        let payload = &data[ipv4_header.ihl_bytes + protocol_header.len()..];
-
-        Ok(Self { ipv4_header, protocol_header, payload })
+        Ok(Self { ipv4_header, protocol_header })
     }
 
     pub fn create_reply(&self) -> Option<([u8; ETHERNET_MTU], usize)> {
@@ -42,7 +39,7 @@ impl<'a> Ipv4Packet<'a> {
         reply[16..20].copy_from_slice(&self.ipv4_header.src_ip.octets());
 
         // Let protocol handler fill in protocol-specific data and calculate total length
-        let total_len = self.protocol_header.write_reply(&mut reply, self.payload)?;
+        let total_len = self.protocol_header.write_reply(&mut reply)?;
 
         // Fill in total length before calculating checksum
         reply[2..4].copy_from_slice(&total_len.to_be_bytes());

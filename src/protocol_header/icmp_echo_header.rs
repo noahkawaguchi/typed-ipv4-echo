@@ -3,19 +3,20 @@ use crate::{
 };
 use std::fmt;
 
-pub(super) struct IcmpEchoHeader {
+pub(super) struct IcmpEchoHeader<'a> {
     // Type and code are constant, must be 8 and 0
     identifier: u16,
     sequence: u16,
+    payload: &'a [u8],
 }
 
-impl IcmpEchoHeader {
+impl<'a> IcmpEchoHeader<'a> {
     const ICMP_HEADER_LEN: u8 = 8;
     const ICMP_TYPE_ECHO_REQUEST: u8 = 8;
     const ICMP_TYPE_ECHO_REPLY: u8 = 0;
     const ICMP_CODE_ECHO: u8 = 0;
 
-    pub(super) fn parse(data: &[u8]) -> Result<Self, String> {
+    pub(super) fn parse(data: &'a [u8]) -> Result<Self, String> {
         let n = data.len();
 
         if n < Self::ICMP_HEADER_LEN.into() {
@@ -35,21 +36,20 @@ impl IcmpEchoHeader {
         Ok(Self {
             identifier: u16::from_be_bytes([data[4], data[5]]),
             sequence: u16::from_be_bytes([data[6], data[7]]),
+            payload: &data[Self::ICMP_HEADER_LEN.into()..],
         })
     }
 }
 
-impl ProtocolHeader for IcmpEchoHeader {
-    fn len(&self) -> usize { Self::ICMP_HEADER_LEN.into() }
-
-    fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU], payload: &[u8]) -> Option<u16> {
+impl ProtocolHeader for IcmpEchoHeader<'_> {
+    fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU]) -> Option<u16> {
         println!("Building ICMP Echo Reply...");
 
         let icmp_start = IPV4_HEADER_MIN_LEN.into();
         let payload_start = icmp_start + usize::from(Self::ICMP_HEADER_LEN);
 
         // Copy payload into reply
-        reply[payload_start..payload_start + payload.len()].copy_from_slice(payload);
+        reply[payload_start..payload_start + self.payload.len()].copy_from_slice(self.payload);
 
         // ICMP Echo Reply header
         reply[icmp_start] = Self::ICMP_TYPE_ECHO_REPLY;
@@ -67,7 +67,8 @@ impl ProtocolHeader for IcmpEchoHeader {
 
         // Calculate ICMP checksum (covers the entire ICMP message: header + payload)
         let icmp_checksum = checksum::calculate(
-            &reply[icmp_start..icmp_start + usize::from(Self::ICMP_HEADER_LEN) + payload.len()],
+            &reply
+                [icmp_start..icmp_start + usize::from(Self::ICMP_HEADER_LEN) + self.payload.len()],
         );
         reply[icmp_start + 2..icmp_start + 4].copy_from_slice(&icmp_checksum.to_be_bytes());
 
@@ -78,12 +79,12 @@ impl ProtocolHeader for IcmpEchoHeader {
         Some(
             u16::from(IPV4_HEADER_MIN_LEN)
                 + u16::from(Self::ICMP_HEADER_LEN)
-                + payload.len() as u16,
+                + self.payload.len() as u16,
         )
     }
 }
 
-impl fmt::Display for IcmpEchoHeader {
+impl fmt::Display for IcmpEchoHeader<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,

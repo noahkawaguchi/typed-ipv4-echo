@@ -4,7 +4,7 @@ use crate::{
 };
 use std::fmt;
 
-pub(super) struct TcpHeader {
+pub(super) struct TcpHeader<'a> {
     src_port: u16,
     dst_port: u16,
     seq_num: u32,
@@ -12,22 +12,24 @@ pub(super) struct TcpHeader {
     offset_bytes: usize,
     syn_flag: bool,
     ack_flag: bool,
+    payload: &'a [u8],
 }
 
-impl TcpHeader {
+impl<'a> TcpHeader<'a> {
     const TCP_HEADER_MIN_LEN: u8 = 20;
     const PSEUDO_HEADER_LEN: usize = 12;
 
     const SYN_FLAG: u8 = 0x02;
     const ACK_FLAG: u8 = 0x10;
 
-    pub(super) fn parse(data: &[u8]) -> Result<Self, String> {
+    pub(super) fn parse(data: &'a [u8]) -> Result<Self, String> {
         let n = data.len();
 
         if n < Self::TCP_HEADER_MIN_LEN.into() {
             return Err(format!("Too short for TCP header ({n} bytes)"));
         }
 
+        let offset_bytes = usize::from(data[12] >> 4) * 4; // Convert 32-bit words to bytes
         let flags = data[13];
 
         Ok(Self {
@@ -35,23 +37,22 @@ impl TcpHeader {
             dst_port: u16::from_be_bytes([data[2], data[3]]),
             seq_num: u32::from_be_bytes([data[4], data[5], data[6], data[7]]),
             ack_num: u32::from_be_bytes([data[8], data[9], data[10], data[11]]),
-            offset_bytes: usize::from(data[12] >> 4) * 4, // Convert 32-bit words to bytes
+            offset_bytes,
             syn_flag: flags & Self::SYN_FLAG != 0,
             ack_flag: flags & Self::ACK_FLAG != 0,
+            payload: &data[offset_bytes..],
         })
     }
 }
 
-impl ProtocolHeader for TcpHeader {
-    fn len(&self) -> usize { self.offset_bytes }
-
-    fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU], payload: &[u8]) -> Option<u16> {
+impl ProtocolHeader for TcpHeader<'_> {
+    fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU]) -> Option<u16> {
         /// Local sequence number for SYN-ACK (can be random, using 0 for simplicity).
         const LOCAL_SEQ_SYN: u32 = 0;
 
         // Determine the nature of the reply to send, if any, based on the packet type
         let (reply_flags, local_seq, local_ack, echo_payload): (u8, u32, u32, bool) =
-            match (self.syn_flag, self.ack_flag, payload.len()) {
+            match (self.syn_flag, self.ack_flag, self.payload.len()) {
                 // SYN packet (step 2 of handshake) -> send SYN-ACK, no payload echo
                 (true, false, _) => {
                     println!("Received SYN, building SYN-ACK response...");
@@ -69,7 +70,7 @@ impl ProtocolHeader for TcpHeader {
                 (false, true, payload_len) if payload_len > 0 => {
                     println!(
                         "Received {payload_len} bytes of data: {}\nEchoing data back...",
-                        str::from_utf8(payload).unwrap_or("<non-UTF-8>")
+                        str::from_utf8(self.payload).unwrap_or("<non-UTF-8>")
                     );
 
                     // ACK flag only
@@ -124,8 +125,8 @@ impl ProtocolHeader for TcpHeader {
         // Copy payload into reply if echoing
         let payload_len = if echo_payload {
             let payload_start = tcp_start + usize::from(Self::TCP_HEADER_MIN_LEN);
-            reply[payload_start..payload_start + payload.len()].copy_from_slice(payload);
-            payload.len()
+            reply[payload_start..payload_start + self.payload.len()].copy_from_slice(self.payload);
+            self.payload.len()
         } else {
             0
         };
@@ -163,7 +164,7 @@ impl ProtocolHeader for TcpHeader {
     }
 }
 
-impl fmt::Display for TcpHeader {
+impl fmt::Display for TcpHeader<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,

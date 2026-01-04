@@ -4,16 +4,17 @@ use crate::{
 };
 use std::fmt;
 
-pub(super) struct UdpHeader {
+pub(super) struct UdpHeader<'a> {
     src_port: u16,
     dst_port: u16,
+    payload: &'a [u8],
 }
 
-impl UdpHeader {
+impl<'a> UdpHeader<'a> {
     const UDP_HEADER_LEN: u8 = 8;
     const PSEUDO_HEADER_LEN: usize = 12;
 
-    pub(super) fn parse(data: &[u8]) -> Result<Self, String> {
+    pub(super) fn parse(data: &'a [u8]) -> Result<Self, String> {
         let n = data.len();
 
         if n < Self::UDP_HEADER_LEN.into() {
@@ -23,18 +24,17 @@ impl UdpHeader {
         Ok(Self {
             src_port: u16::from_be_bytes([data[0], data[1]]),
             dst_port: u16::from_be_bytes([data[2], data[3]]),
+            payload: &data[Self::UDP_HEADER_LEN.into()..],
         })
     }
 }
 
-impl ProtocolHeader for UdpHeader {
-    fn len(&self) -> usize { Self::UDP_HEADER_LEN.into() }
-
-    fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU], payload: &[u8]) -> Option<u16> {
+impl ProtocolHeader for UdpHeader<'_> {
+    fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU]) -> Option<u16> {
         println!(
             "Received {} bytes of data: {}\nEchoing data back...",
-            payload.len(),
-            str::from_utf8(payload).unwrap_or("<non-UTF-8>")
+            self.payload.len(),
+            str::from_utf8(self.payload).unwrap_or("<non-UTF-8>")
         );
 
         let udp_start = usize::from(IPV4_HEADER_MIN_LEN);
@@ -46,14 +46,14 @@ impl ProtocolHeader for UdpHeader {
 
         // UDP length = header (8) + payload
         #[allow(clippy::cast_possible_truncation)] // `u16::MAX` (65_535) > `ETHERNET_MTU` (1500)
-        let udp_len = u16::from(Self::UDP_HEADER_LEN) + payload.len() as u16;
+        let udp_len = u16::from(Self::UDP_HEADER_LEN) + self.payload.len() as u16;
         reply[udp_start + 4..udp_start + 6].copy_from_slice(&udp_len.to_be_bytes());
 
         // Checksum at bytes 6-7 calculated later
 
-        // Copy payload
+        // Copy payload for echo
         let payload_start = udp_start + usize::from(Self::UDP_HEADER_LEN);
-        reply[payload_start..payload_start + payload.len()].copy_from_slice(payload);
+        reply[payload_start..payload_start + self.payload.len()].copy_from_slice(self.payload);
 
         // Calculate UDP checksum with pseudo-header
         let mut pseudo_header = [0u8; Self::PSEUDO_HEADER_LEN];
@@ -82,7 +82,7 @@ impl ProtocolHeader for UdpHeader {
     }
 }
 
-impl fmt::Display for UdpHeader {
+impl fmt::Display for UdpHeader<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "UDP {} -> {}", self.src_port, self.dst_port)
     }
