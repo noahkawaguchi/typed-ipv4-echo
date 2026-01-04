@@ -1,16 +1,14 @@
-mod icmp_echo_header;
-mod tcp_header;
-mod udp_header;
+mod icmp_echo;
+mod tcp;
+mod udp;
 
 use crate::{
     ETHERNET_MTU,
     protocol::Protocol,
-    protocol_header::{
-        icmp_echo_header::IcmpEchoHeader, tcp_header::TcpHeader, udp_header::UdpHeader,
-    },
+    protocol_handler::{icmp_echo::IcmpEchoHandler, tcp::TcpHandler, udp::UdpHandler},
 };
 
-pub trait ProtocolHeader: std::fmt::Display {
+pub trait ProtocolHandler: std::fmt::Display {
     /// Writes the protocol-specific sections of the reply into the buffer, returning the total
     /// length of the reply packet in bytes (including the IP header and payload data), or `None` if
     /// no reply should be sent.
@@ -20,11 +18,11 @@ pub trait ProtocolHeader: std::fmt::Display {
 pub fn parse<'a>(
     data: &'a [u8],
     protocol: &Protocol,
-) -> Result<Box<dyn ProtocolHeader + 'a>, String> {
+) -> Result<Box<dyn ProtocolHandler + 'a>, String> {
     Ok(match protocol {
-        Protocol::Icmp => Box::new(IcmpEchoHeader::parse(data)?) as Box<dyn ProtocolHeader>,
-        Protocol::Tcp => Box::new(TcpHeader::parse(data)?) as Box<dyn ProtocolHeader>,
-        Protocol::Udp => Box::new(UdpHeader::parse(data)?) as Box<dyn ProtocolHeader>,
+        Protocol::Icmp => Box::new(IcmpEchoHandler::parse(data)?) as Box<dyn ProtocolHandler>,
+        Protocol::Tcp => Box::new(TcpHandler::parse(data)?) as Box<dyn ProtocolHandler>,
+        Protocol::Udp => Box::new(UdpHandler::parse(data)?) as Box<dyn ProtocolHandler>,
         Protocol::Other(_) => {
             return Err(String::from("only ICMP Echo, TCP, and UDP implemented"));
         }

@@ -1,10 +1,10 @@
 use crate::{
     ETHERNET_MTU, checksum, ipv4_packet::IPV4_HEADER_MIN_LEN, protocol::Protocol,
-    protocol_header::ProtocolHeader,
+    protocol_handler::ProtocolHandler,
 };
 use std::fmt;
 
-pub(super) struct TcpHeader<'a> {
+pub(super) struct TcpHandler<'a> {
     src_port: u16,
     dst_port: u16,
     seq_num: u32,
@@ -15,7 +15,7 @@ pub(super) struct TcpHeader<'a> {
     payload: &'a [u8],
 }
 
-impl<'a> TcpHeader<'a> {
+impl<'a> TcpHandler<'a> {
     const TCP_HEADER_MIN_LEN: u8 = 20;
     const PSEUDO_HEADER_LEN: usize = 12;
 
@@ -45,7 +45,7 @@ impl<'a> TcpHeader<'a> {
     }
 }
 
-impl ProtocolHeader for TcpHeader<'_> {
+impl ProtocolHandler for TcpHandler<'_> {
     fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU]) -> Option<u16> {
         /// Local sequence number for SYN-ACK (can be random, using 0 for simplicity).
         const LOCAL_SEQ_SYN: u32 = 0;
@@ -164,7 +164,7 @@ impl ProtocolHeader for TcpHeader<'_> {
     }
 }
 
-impl fmt::Display for TcpHeader<'_> {
+impl fmt::Display for TcpHandler<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,

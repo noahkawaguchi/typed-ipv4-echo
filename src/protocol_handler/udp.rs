@@ -1,16 +1,16 @@
 use crate::{
     ETHERNET_MTU, checksum, ipv4_packet::IPV4_HEADER_MIN_LEN, protocol::Protocol,
-    protocol_header::ProtocolHeader,
+    protocol_handler::ProtocolHandler,
 };
 use std::fmt;
 
-pub(super) struct UdpHeader<'a> {
+pub(super) struct UdpHandler<'a> {
     src_port: u16,
     dst_port: u16,
     payload: &'a [u8],
 }
 
-impl<'a> UdpHeader<'a> {
+impl<'a> UdpHandler<'a> {
     const UDP_HEADER_LEN: u8 = 8;
     const PSEUDO_HEADER_LEN: usize = 12;
 
@@ -29,7 +29,7 @@ impl<'a> UdpHeader<'a> {
     }
 }
 
-impl ProtocolHeader for UdpHeader<'_> {
+impl ProtocolHandler for UdpHandler<'_> {
     fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU]) -> Option<u16> {
         println!(
             "Received {} bytes of data: {}\nEchoing data back...",
@@ -82,7 +82,7 @@ impl ProtocolHeader for UdpHeader<'_> {
     }
 }
 
-impl fmt::Display for UdpHeader<'_> {
+impl fmt::Display for UdpHandler<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "UDP {} -> {}", self.src_port, self.dst_port)
     }

@@ -1,7 +1,7 @@
 use crate::{
     ETHERNET_MTU, checksum,
     protocol::Protocol,
-    protocol_header::{self, ProtocolHeader},
+    protocol_handler::{self, ProtocolHandler},
 };
 use std::{fmt, net::Ipv4Addr};
 
@@ -9,7 +9,7 @@ pub const IPV4_HEADER_MIN_LEN: u8 = 20;
 
 pub struct Ipv4Packet<'a> {
     ipv4_header: Ipv4Header,
-    protocol_header: Box<dyn ProtocolHeader + 'a>,
+    protocol_header: Box<dyn ProtocolHandler + 'a>,
 }
 
 impl<'a> Ipv4Packet<'a> {
@@ -17,7 +17,7 @@ impl<'a> Ipv4Packet<'a> {
         let ipv4_header = Ipv4Header::parse(data)?;
 
         let protocol_header =
-            protocol_header::parse(&data[ipv4_header.ihl_bytes..], &ipv4_header.protocol)?;
+            protocol_handler::parse(&data[ipv4_header.ihl_bytes..], &ipv4_header.protocol)?;
 
         Ok(Self { ipv4_header, protocol_header })
     }

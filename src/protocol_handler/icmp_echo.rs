@@ -1,16 +1,16 @@
 use crate::{
-    ETHERNET_MTU, checksum, ipv4_packet::IPV4_HEADER_MIN_LEN, protocol_header::ProtocolHeader,
+    ETHERNET_MTU, checksum, ipv4_packet::IPV4_HEADER_MIN_LEN, protocol_handler::ProtocolHandler,
 };
 use std::fmt;
 
-pub(super) struct IcmpEchoHeader<'a> {
+pub(super) struct IcmpEchoHandler<'a> {
     // Type and code are constant, must be 8 and 0
     identifier: u16,
     sequence: u16,
     payload: &'a [u8],
 }
 
-impl<'a> IcmpEchoHeader<'a> {
+impl<'a> IcmpEchoHandler<'a> {
     const ICMP_HEADER_LEN: u8 = 8;
     const ICMP_TYPE_ECHO_REQUEST: u8 = 8;
     const ICMP_TYPE_ECHO_REPLY: u8 = 0;
@@ -41,7 +41,7 @@ impl<'a> IcmpEchoHeader<'a> {
     }
 }
 
-impl ProtocolHeader for IcmpEchoHeader<'_> {
+impl ProtocolHandler for IcmpEchoHandler<'_> {
     fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU]) -> Option<u16> {
         println!("Building ICMP Echo Reply...");
 
@@ -84,7 +84,7 @@ impl ProtocolHeader for IcmpEchoHeader<'_> {
     }
 }
 
-impl fmt::Display for IcmpEchoHeader<'_> {
+impl fmt::Display for IcmpEchoHandler<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
