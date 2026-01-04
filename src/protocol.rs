@@ -41,15 +41,19 @@ impl Protocol {
         }
     }
 
+    /// Parses `data` as the header and payload of a packet of the protocol type of `self`,
+    /// returning a `ProtocolHandler` capable of writing replies.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the packet is too short for its type or is of an unimplemented type.
     pub fn parse_data<'a>(&self, data: &'a [u8]) -> Result<Box<dyn ProtocolHandler + 'a>, String> {
-        Ok(match self {
-            Self::Icmp => Box::new(IcmpEchoHandler::parse(data)?) as Box<dyn ProtocolHandler>,
-            Self::Tcp => Box::new(TcpHandler::parse(data)?) as Box<dyn ProtocolHandler>,
-            Self::Udp => Box::new(UdpHandler::parse(data)?) as Box<dyn ProtocolHandler>,
-            Self::Other(_) => {
-                return Err(String::from("only ICMP Echo, TCP, and UDP implemented"));
-            }
-        })
+        match self {
+            Self::Icmp => Ok(Box::new(IcmpEchoHandler::parse(data)?) as Box<dyn ProtocolHandler>),
+            Self::Tcp => Ok(Box::new(TcpHandler::parse(data)?) as Box<dyn ProtocolHandler>),
+            Self::Udp => Ok(Box::new(UdpHandler::parse(data)?) as Box<dyn ProtocolHandler>),
+            Self::Other(_) => Err(String::from("only ICMP Echo, TCP, and UDP implemented")),
+        }
     }
 }
 
