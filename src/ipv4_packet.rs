@@ -6,16 +6,6 @@ use std::{fmt, net::Ipv4Addr};
 
 pub const IPV4_HEADER_MIN_LEN: u8 = 20;
 
-pub trait ProtocolHandlerFactory<'a>:
-    FnOnce(Protocol, &'a [u8]) -> Result<Box<dyn ProtocolHandler + 'a>, String>
-{
-}
-
-impl<'a, T> ProtocolHandlerFactory<'a> for T where
-    T: FnOnce(Protocol, &'a [u8]) -> Result<Box<dyn ProtocolHandler + 'a>, String>
-{
-}
-
 pub struct Ipv4Packet<'a> {
     total_len: u16,
     protocol: Protocol,
@@ -25,10 +15,10 @@ pub struct Ipv4Packet<'a> {
 }
 
 impl<'a> Ipv4Packet<'a> {
-    pub fn parse(
-        data: &'a [u8],
-        protocol_handler_factory: impl ProtocolHandlerFactory<'a>,
-    ) -> Result<Self, String> {
+    pub fn parse<F>(data: &'a [u8], protocol_handler_factory: F) -> Result<Self, String>
+    where
+        F: FnOnce(Protocol, &'a [u8]) -> Result<Box<dyn ProtocolHandler + 'a>, String>,
+    {
         let n = data.len();
         if n < IPV4_HEADER_MIN_LEN.into() {
             return Err(format!("Too short for IPv4 header ({n} bytes)"));
@@ -121,7 +111,7 @@ mod tests {
     /// returns `return_val`.
     fn make_factory_returning_mock_handler_returning<'a>(
         return_val: Option<u16>,
-    ) -> impl ProtocolHandlerFactory<'a> {
+    ) -> impl Fn(Protocol, &'a [u8]) -> Result<Box<dyn ProtocolHandler + 'a>, String> {
         move |_protocol, _data| Ok(Box::new(MockProtocolHandler { return_val }))
     }
 
