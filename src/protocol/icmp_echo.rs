@@ -98,10 +98,9 @@ impl fmt::Display for IcmpEchoHandler<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::{Context, Result, anyhow};
 
     #[test]
-    fn correctly_parses_valid_request() -> Result<()> {
+    fn correctly_parses_valid_request() -> Result<(), String> {
         #[rustfmt::skip]
         let data = [
             8, 0,              // Type 8 (Echo Request), Code 0
@@ -111,7 +110,7 @@ mod tests {
             0x41, 0x42, 0x43,  // Payload: "ABC"
         ];
 
-        let handler = IcmpEchoHandler::parse(&data).map_err(|e| anyhow!(e))?;
+        let handler = IcmpEchoHandler::parse(&data)?;
 
         assert_eq!(handler.identifier, 0x1234);
         assert_eq!(handler.sequence, 0x5678);
@@ -153,7 +152,7 @@ mod tests {
     }
 
     #[test]
-    fn handles_empty_payload() -> Result<()> {
+    fn handles_empty_payload() -> Result<(), String> {
         #[rustfmt::skip]
         let data = [
             8, 0,              // Type 8 (Echo Request), Code 0
@@ -162,7 +161,7 @@ mod tests {
             0x00, 0x01,        // Sequence: 1
         ];
 
-        let handler = IcmpEchoHandler::parse(&data).map_err(|e| anyhow!(e))?;
+        let handler = IcmpEchoHandler::parse(&data)?;
 
         assert_eq!(handler.identifier, 0);
         assert_eq!(handler.sequence, 1);
@@ -172,7 +171,7 @@ mod tests {
     }
 
     #[test]
-    fn creates_valid_echo_reply() -> Result<()> {
+    fn creates_valid_echo_reply() -> Result<(), String> {
         #[rustfmt::skip]
         let request = [
             8, 0,                          // Type 8 (Echo Request), Code 0
@@ -182,7 +181,7 @@ mod tests {
             0x48, 0x65, 0x6c, 0x6c, 0x6f,  // Payload: "Hello"
         ];
 
-        let handler = IcmpEchoHandler::parse(&request).map_err(|e| anyhow!(e))?;
+        let handler = IcmpEchoHandler::parse(&request)?;
         let mut reply = [0u8; ETHERNET_MTU];
 
         // Set up IP header portion (bytes 12-19 are source and dest IPs)
@@ -191,7 +190,7 @@ mod tests {
 
         let total_len = handler
             .write_reply(&mut reply)
-            .context("failed to write reply")?;
+            .ok_or("failed to write reply")?;
 
         // Verify ICMP header at offset 20
         assert_eq!(reply[20], 0); // Type 0 (Echo Reply)

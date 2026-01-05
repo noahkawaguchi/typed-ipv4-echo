@@ -94,10 +94,9 @@ impl fmt::Display for UdpHandler<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::{Context, Result, anyhow};
 
     #[test]
-    fn correctly_parses_valid_packet() -> Result<()> {
+    fn correctly_parses_valid_packet() -> Result<(), String> {
         #[rustfmt::skip]
         let data = [
             0x04, 0xd2,              // Source port: 1234
@@ -108,7 +107,7 @@ mod tests {
             0x6f, 0x21, 0x21, 0x21,  // Payload: "o!!!"
         ];
 
-        let handler = UdpHandler::parse(&data).map_err(|e| anyhow!(e))?;
+        let handler = UdpHandler::parse(&data)?;
 
         assert_eq!(handler.src_port, 1234);
         assert_eq!(handler.dst_port, 53);
@@ -124,7 +123,7 @@ mod tests {
     }
 
     #[test]
-    fn parsing_handles_empty_payload() -> Result<()> {
+    fn parsing_handles_empty_payload() -> Result<(), String> {
         #[rustfmt::skip]
         let data = [
             0x1f, 0x90,              // Source port: 8080
@@ -133,7 +132,7 @@ mod tests {
             0x00, 0x00,              // Checksum
         ];
 
-        let handler = UdpHandler::parse(&data).map_err(|e| anyhow!(e))?;
+        let handler = UdpHandler::parse(&data)?;
 
         assert_eq!(handler.src_port, 8080);
         assert_eq!(handler.dst_port, 80);
@@ -143,7 +142,7 @@ mod tests {
     }
 
     #[test]
-    fn extracts_ports_correctly() -> Result<()> {
+    fn extracts_ports_correctly() -> Result<(), String> {
         #[rustfmt::skip]
         let data = [
             0xff, 0xff,              // Source port: 65535 (max)
@@ -153,7 +152,7 @@ mod tests {
             0x74, 0x65, 0x73, 0x74,  // Payload: "test"
         ];
 
-        let handler = UdpHandler::parse(&data).map_err(|e| anyhow!(e))?;
+        let handler = UdpHandler::parse(&data)?;
 
         assert_eq!(handler.src_port, 65535);
         assert_eq!(handler.dst_port, 1);
@@ -162,7 +161,7 @@ mod tests {
     }
 
     #[test]
-    fn creates_valid_echo_reply() -> Result<()> {
+    fn creates_valid_echo_reply() -> Result<(), String> {
         #[rustfmt::skip]
         let request = [
             0x04, 0xd2,              // Source port: 1234
@@ -172,7 +171,7 @@ mod tests {
             0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x21, 0x21, 0x21,  // Payload: "Hello!!!"
         ];
 
-        let handler = UdpHandler::parse(&request).map_err(|e| anyhow!(e))?;
+        let handler = UdpHandler::parse(&request)?;
         let mut reply = [0u8; ETHERNET_MTU];
 
         // Set up IP header portion (bytes 12-19 are source and dest IPs)
@@ -181,7 +180,7 @@ mod tests {
 
         let total_len = handler
             .write_reply(&mut reply)
-            .context("failed to write reply")?;
+            .ok_or("failed to write reply")?;
 
         // Verify UDP header at offset 20
         assert_eq!(&reply[20..22], &[0x00, 0x35]); // Source port: 53 (swapped)

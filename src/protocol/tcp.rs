@@ -196,10 +196,9 @@ impl fmt::Display for TcpHandler<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::{Context, Result, anyhow};
 
     #[test]
-    fn correctly_parses_valid_packet() -> Result<()> {
+    fn correctly_parses_valid_packet() -> Result<(), String> {
         #[rustfmt::skip]
         let data = [
             0x04, 0xd2,                          // Source port: 1234
@@ -213,7 +212,7 @@ mod tests {
             0x48, 0x65, 0x6c, 0x6c, 0x6f,        // Payload: "Hello"
         ];
 
-        let handler = TcpHandler::parse(&data).map_err(|e| anyhow!(e))?;
+        let handler = TcpHandler::parse(&data)?;
 
         assert_eq!(handler.src_port, 1234);
         assert_eq!(handler.dst_port, 80);
@@ -234,7 +233,7 @@ mod tests {
     }
 
     #[test]
-    fn extracts_syn_flag_correctly() -> Result<()> {
+    fn extracts_syn_flag_correctly() -> Result<(), String> {
         #[rustfmt::skip]
         let data = [
             0x04, 0xd2,                          // Source port: 1234
@@ -247,7 +246,7 @@ mod tests {
             0x00, 0x00,                          // Urgent pointer
         ];
 
-        let handler = TcpHandler::parse(&data).map_err(|e| anyhow!(e))?;
+        let handler = TcpHandler::parse(&data)?;
 
         assert!(handler.syn_flag);
         assert!(!handler.ack_flag);
@@ -256,7 +255,7 @@ mod tests {
     }
 
     #[test]
-    fn extracts_ack_flag_correctly() -> Result<()> {
+    fn extracts_ack_flag_correctly() -> Result<(), String> {
         #[rustfmt::skip]
         let data = [
             0x04, 0xd2,                          // Source port: 1234
@@ -269,7 +268,7 @@ mod tests {
             0x00, 0x00,                          // Urgent pointer
         ];
 
-        let handler = TcpHandler::parse(&data).map_err(|e| anyhow!(e))?;
+        let handler = TcpHandler::parse(&data)?;
 
         assert!(!handler.syn_flag);
         assert!(handler.ack_flag);
@@ -278,7 +277,7 @@ mod tests {
     }
 
     #[test]
-    fn parsing_handles_no_flags_set() -> Result<()> {
+    fn parsing_handles_no_flags_set() -> Result<(), String> {
         #[rustfmt::skip]
         let data = [
             0x04, 0xd2,                          // Source port: 1234
@@ -291,7 +290,7 @@ mod tests {
             0x00, 0x00,                          // Urgent pointer
         ];
 
-        let handler = TcpHandler::parse(&data).map_err(|e| anyhow!(e))?;
+        let handler = TcpHandler::parse(&data)?;
 
         assert!(!handler.syn_flag);
         assert!(!handler.ack_flag);
@@ -300,7 +299,7 @@ mod tests {
     }
 
     #[test]
-    fn parsing_handles_large_sequence_numbers() -> Result<()> {
+    fn parsing_handles_large_sequence_numbers() -> Result<(), String> {
         #[rustfmt::skip]
         let data = [
             0x04, 0xd2,                          // Source port: 1234
@@ -313,7 +312,7 @@ mod tests {
             0x00, 0x00,                          // Urgent pointer
         ];
 
-        let handler = TcpHandler::parse(&data).map_err(|e| anyhow!(e))?;
+        let handler = TcpHandler::parse(&data)?;
 
         assert_eq!(handler.seq_num, u32::MAX);
         assert_eq!(handler.ack_num, 0xfedc_ba98);
@@ -322,7 +321,7 @@ mod tests {
     }
 
     #[test]
-    fn reply_creates_valid_syn_ack() -> Result<()> {
+    fn reply_creates_valid_syn_ack() -> Result<(), String> {
         #[rustfmt::skip]
         let syn_packet = [
             0x04, 0xd2,                          // Source port: 1234
@@ -335,7 +334,7 @@ mod tests {
             0x00, 0x00,                          // Urgent pointer
         ];
 
-        let handler = TcpHandler::parse(&syn_packet).map_err(|e| anyhow!(e))?;
+        let handler = TcpHandler::parse(&syn_packet)?;
         let mut reply = [0u8; ETHERNET_MTU];
 
         // Set up IP header portion
@@ -344,7 +343,7 @@ mod tests {
 
         let total_len = handler
             .write_reply(&mut reply)
-            .context("failed to write reply")?;
+            .ok_or("failed to write reply")?;
 
         // Verify TCP header at offset 20
         assert_eq!(&reply[20..22], &[0x00, 0x50]); // Source port: 80 (swapped)
@@ -376,7 +375,7 @@ mod tests {
     }
 
     #[test]
-    fn reply_creates_valid_data_echo() -> Result<()> {
+    fn reply_creates_valid_data_echo() -> Result<(), String> {
         #[rustfmt::skip]
         let data_packet = [
             0x04, 0xd2,                          // Source port: 1234
@@ -390,7 +389,7 @@ mod tests {
             0x48, 0x65, 0x6c, 0x6c, 0x6f,        // Payload: "Hello"
         ];
 
-        let handler = TcpHandler::parse(&data_packet).map_err(|e| anyhow!(e))?;
+        let handler = TcpHandler::parse(&data_packet)?;
         let mut reply = [0u8; ETHERNET_MTU];
 
         reply[12..16].copy_from_slice(&[10, 0, 0, 2]);
@@ -398,7 +397,7 @@ mod tests {
 
         let total_len = handler
             .write_reply(&mut reply)
-            .context("failed to write reply")?;
+            .ok_or("failed to write reply")?;
 
         // Verify TCP header
         assert_eq!(&reply[20..22], &[0x00, 0x50]); // Source port: 80
@@ -433,7 +432,7 @@ mod tests {
     }
 
     #[test]
-    fn reply_returns_none_for_handshake_ack() -> Result<()> {
+    fn reply_returns_none_for_handshake_ack() -> Result<(), String> {
         #[rustfmt::skip]
         let ack_packet = [
             0x04, 0xd2,                          // Source port: 1234
@@ -446,7 +445,7 @@ mod tests {
             0x00, 0x00,                          // Urgent pointer
         ];
 
-        let handler = TcpHandler::parse(&ack_packet).map_err(|e| anyhow!(e))?;
+        let handler = TcpHandler::parse(&ack_packet)?;
         let mut reply = [0u8; ETHERNET_MTU];
 
         reply[12..16].copy_from_slice(&[10, 0, 0, 2]);

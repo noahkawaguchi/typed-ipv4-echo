@@ -88,7 +88,6 @@ impl fmt::Display for Ipv4Packet<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::{Context, Result, anyhow};
 
     struct MockProtocolHandler {
         return_val: Option<u16>,
@@ -117,7 +116,7 @@ mod tests {
     }
 
     #[test]
-    fn correctly_parses_valid_packet() -> Result<()> {
+    fn correctly_parses_valid_packet() -> Result<(), String> {
         #[rustfmt::skip]
         let data = [
             0x45, 0x00, 0x00, 0x3c,  // Version 4, IHL 5, TOS 0, Total Length 60
@@ -129,7 +128,7 @@ mod tests {
 
         let mock = make_factory_returning_mock_handler_returning(None);
 
-        let packet = Ipv4Packet::parse(&data, mock).map_err(|e| anyhow!(e))?;
+        let packet = Ipv4Packet::parse(&data, mock)?;
 
         assert_eq!(packet.total_len, 60);
         assert_eq!(packet.protocol, Protocol::Tcp);
@@ -164,7 +163,7 @@ mod tests {
     }
 
     #[test]
-    fn creates_valid_ipv4_header_for_reply() -> Result<()> {
+    fn creates_valid_ipv4_header_for_reply() -> Result<(), String> {
         #[rustfmt::skip]
         let request = [
             0x45, 0x00, 0x00, 0x3c,  // Version 4, IHL 5, TOS 0, Total Length 60
@@ -176,9 +175,8 @@ mod tests {
 
         // Mock handler that writes a 28-byte payload and returns total length 48 (20 + 28)
         let mock = make_factory_returning_mock_handler_returning(Some(48));
-        let packet = Ipv4Packet::parse(&request, mock).map_err(|e| anyhow!(e))?;
-
-        let (reply, total_len) = packet.create_reply().context("failed to create reply")?;
+        let packet = Ipv4Packet::parse(&request, mock)?;
+        let (reply, total_len) = packet.create_reply().ok_or("failed to create reply")?;
 
         // Verify IPv4 header fields
         assert_eq!(reply[0], 0x45); // Version 4, IHL 5
