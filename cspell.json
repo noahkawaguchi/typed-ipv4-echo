@@ -8,6 +8,10 @@
     "IFNAMSIZ",
     "ifreq",
     "IPPROTO",
-    "DSCP"
+    "DSCP",
+    "sighandler",
+    "EINTR",
+    "sigemptyset",
+    "sigaction"
   ]
 }

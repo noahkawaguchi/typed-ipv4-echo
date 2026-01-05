@@ -4,21 +4,61 @@ mod protocol;
 mod tun;
 
 use crate::ipv4_packet::Ipv4Packet;
-use std::io::{self, Read, Write};
+use std::{
+    io::{self, Read, Write},
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 /// The Maximum Transmission Unit of standard Ethernet (frames up to 1500 bytes of IP packet data).
 const ETHERNET_MTU: usize = 1500;
 
+/// Global flag for graceful shutdown.
+static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+
+/// Signal handler to atomically set the shutdown flag when called.
+extern "C" fn shutdown_signal_handler(_sig: libc::c_int) {
+    SHUTDOWN.store(true, Ordering::Relaxed);
+}
+
+/// Installs the SIGINT handler for graceful shutdown.
+#[allow(unsafe_code)]
+fn install_signal_handler() -> io::Result<()> {
+    // Use `sigaction` to ensure the `SA_RESTART` flag is not set so that blocking `read()` in the
+    // main loop will be interrupted and return `EINTR` without being automatically restarted
+
+    let mut sa: libc::sigaction = unsafe { std::mem::zeroed() }; // All flags zeroed
+    sa.sa_sigaction = shutdown_signal_handler as libc::sighandler_t;
+
+    if unsafe { libc::sigemptyset(&raw mut sa.sa_mask) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    if unsafe { libc::sigaction(libc::SIGINT, &raw const sa, std::ptr::null_mut()) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    Ok(())
+}
+
 /// Runs an echo server that uses a TUN device to read and write IPv4 packets: TCP, UDP, and ICMP.
+/// Exits gracefully upon receiving SIGINT.
 fn main() -> io::Result<()> {
+    install_signal_handler()?;
+
     let (mut tun, name) = tun::init("10.0.0.1/24")?;
     println!("Created and set up TUN device {name} with IP 10.0.0.1/24");
-    println!("Waiting for packets...\n");
+    println!("Waiting for packets... (Ctrl+C to stop)\n");
 
     let mut buf = [0u8; ETHERNET_MTU];
 
-    loop {
-        let n = tun.read(&mut buf)?;
+    while !SHUTDOWN.load(Ordering::Relaxed) {
+        let n = match tun.read(&mut buf) {
+            // If `read()` was interrupted and returned `EINTR`, immediately continue to check the
+            // shutdown flag
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+            Ok(n) => n,
+        };
 
         match Ipv4Packet::parse(&buf[..n], protocol::parse_data) {
             Err(e) => eprintln!("{e}"),
@@ -35,4 +75,7 @@ fn main() -> io::Result<()> {
 
         println!();
     }
+
+    println!("\nShutdown signal received, exiting");
+    Ok(())
 }
