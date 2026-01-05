@@ -15,3 +15,6 @@ expect_used = "forbid"
 
 [dependencies]
 libc = "0.2.178"
+
+[dev-dependencies]
+anyhow = "1.0.100"
