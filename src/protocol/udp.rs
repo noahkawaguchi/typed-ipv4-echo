@@ -94,6 +94,7 @@ impl fmt::Display for UdpHandler<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::{Context, Result, anyhow};
 
     #[test]
     fn correctly_parses_valid_packet() {
@@ -155,5 +156,57 @@ mod tests {
             assert_eq!(handler.dst_port, 1);
             true
         }));
+    }
+
+    #[test]
+    fn creates_valid_echo_reply() -> Result<()> {
+        #[rustfmt::skip]
+        let request = [
+            0x04, 0xd2,              // Source port: 1234
+            0x00, 0x35,              // Dest port: 53
+            0x00, 0x10,              // Length: 16
+            0x00, 0x00,              // Checksum
+            0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x21, 0x21, 0x21,  // Payload: "Hello!!!"
+        ];
+
+        let handler = UdpHandler::parse(&request).map_err(|e| anyhow!(e))?;
+        let mut reply = [0u8; ETHERNET_MTU];
+
+        // Set up IP header portion (bytes 12-19 are source and dest IPs)
+        reply[12..16].copy_from_slice(&[10, 0, 0, 2]); // Source: 10.0.0.2
+        reply[16..20].copy_from_slice(&[10, 0, 0, 1]); // Dest: 10.0.0.1
+
+        let total_len = handler
+            .write_reply(&mut reply)
+            .context("failed to write reply")?;
+
+        // Verify UDP header at offset 20
+        assert_eq!(&reply[20..22], &[0x00, 0x35]); // Source port: 53 (swapped)
+        assert_eq!(&reply[22..24], &[0x04, 0xd2]); // Dest port: 1234 (swapped)
+        assert_eq!(&reply[24..26], &[0x00, 0x10]); // Length: 16
+
+        // Verify payload echoed
+        assert_eq!(&reply[28..36], b"Hello!!!");
+
+        // Verify total length
+        assert_eq!(total_len, 20 + 8 + 8);
+
+        // Verify checksum is valid using pseudo-header
+        let udp_len = 16u16;
+        let mut pseudo_header = [0u8; 12];
+        pseudo_header[0..4].copy_from_slice(&reply[12..16]); // Source IP
+        pseudo_header[4..8].copy_from_slice(&reply[16..20]); // Dest IP
+        pseudo_header[8] = 0; // Reserved
+        pseudo_header[9] = Protocol::Udp.into();
+        pseudo_header[10..12].copy_from_slice(&udp_len.to_be_bytes());
+
+        let mut checksum_data = [0u8; 12 + 16];
+        checksum_data[0..12].copy_from_slice(&pseudo_header);
+        checksum_data[12..28].copy_from_slice(&reply[20..36]);
+
+        let checksum = checksum::calculate(&checksum_data);
+        assert_eq!(checksum, 0x0000);
+
+        Ok(())
     }
 }
