@@ -88,6 +88,7 @@ impl fmt::Display for Ipv4Packet<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::{Context, Result, anyhow};
 
     struct MockProtocolHandler {
         return_val: Option<u16>,
@@ -159,5 +160,45 @@ mod tests {
         let mock = make_factory_returning_mock_handler_returning(None);
 
         assert!(Ipv4Packet::parse(&data, mock).is_err_and(|e| e.contains("Non-IPv4")));
+    }
+
+    #[test]
+    fn creates_valid_ipv4_header_for_reply() -> Result<()> {
+        #[rustfmt::skip]
+        let request = [
+            0x45, 0x00, 0x00, 0x3c,  // Version 4, IHL 5, TOS 0, Total Length 60
+            0x1c, 0x46, 0x40, 0x00,  // ID, Flags, Fragment Offset
+            0x40, 0x11, 0xb1, 0xe6,  // TTL 64, Protocol 17 (UDP), Checksum
+            192, 168, 1, 100,        // Source IP: 192.168.1.100
+            172, 16, 10, 12,         // Dest IP: 172.16.10.12
+        ];
+
+        // Mock handler that writes a 28-byte payload and returns total length 48 (20 + 28)
+        let mock = make_factory_returning_mock_handler_returning(Some(48));
+        let packet = Ipv4Packet::parse(&request, mock).map_err(|e| anyhow!(e))?;
+
+        let (reply, total_len) = packet.create_reply().context("failed to create reply")?;
+
+        // Verify IPv4 header fields
+        assert_eq!(reply[0], 0x45); // Version 4, IHL 5
+        assert_eq!(reply[1], 0x00); // DSCP/ECN
+        assert_eq!(&reply[2..4], &[0x00, 0x30]); // Total length: 48
+        assert_eq!(&reply[4..6], &[0x00, 0x00]); // Identification: 0
+        assert_eq!(&reply[6..8], &[0x40, 0x00]); // Flags: Don't Fragment
+        assert_eq!(reply[8], 64); // TTL: 64
+        assert_eq!(reply[9], 0x11); // Protocol: 17 (UDP)
+
+        // Verify IPs are swapped
+        assert_eq!(&reply[12..16], &[172, 16, 10, 12]); // Source (was dest)
+        assert_eq!(&reply[16..20], &[192, 168, 1, 100]); // Dest (was source)
+
+        // Verify total length returned
+        assert_eq!(total_len, 48);
+
+        // Verify IP header checksum is valid
+        let ip_checksum = checksum::calculate(&reply[..20]);
+        assert_eq!(ip_checksum, 0x0000);
+
+        Ok(())
     }
 }
