@@ -97,7 +97,7 @@ mod tests {
     use anyhow::{Context, Result, anyhow};
 
     #[test]
-    fn correctly_parses_valid_packet() {
+    fn correctly_parses_valid_packet() -> Result<()> {
         #[rustfmt::skip]
         let data = [
             0x04, 0xd2,              // Source port: 1234
@@ -108,12 +108,13 @@ mod tests {
             0x6f, 0x21, 0x21, 0x21,  // Payload: "o!!!"
         ];
 
-        assert!(UdpHandler::parse(&data).is_ok_and(|handler| {
-            assert_eq!(handler.src_port, 1234);
-            assert_eq!(handler.dst_port, 53);
-            assert_eq!(handler.payload, b"Hello!!!");
-            true
-        }));
+        let handler = UdpHandler::parse(&data).map_err(|e| anyhow!(e))?;
+
+        assert_eq!(handler.src_port, 1234);
+        assert_eq!(handler.dst_port, 53);
+        assert_eq!(handler.payload, b"Hello!!!");
+
+        Ok(())
     }
 
     #[test]
@@ -123,7 +124,7 @@ mod tests {
     }
 
     #[test]
-    fn parsing_handles_empty_payload() {
+    fn parsing_handles_empty_payload() -> Result<()> {
         #[rustfmt::skip]
         let data = [
             0x1f, 0x90,              // Source port: 8080
@@ -132,16 +133,17 @@ mod tests {
             0x00, 0x00,              // Checksum
         ];
 
-        assert!(UdpHandler::parse(&data).is_ok_and(|handler| {
-            assert_eq!(handler.src_port, 8080);
-            assert_eq!(handler.dst_port, 80);
-            assert_eq!(handler.payload.len(), 0);
-            true
-        }));
+        let handler = UdpHandler::parse(&data).map_err(|e| anyhow!(e))?;
+
+        assert_eq!(handler.src_port, 8080);
+        assert_eq!(handler.dst_port, 80);
+        assert_eq!(handler.payload.len(), 0);
+
+        Ok(())
     }
 
     #[test]
-    fn extracts_ports_correctly() {
+    fn extracts_ports_correctly() -> Result<()> {
         #[rustfmt::skip]
         let data = [
             0xff, 0xff,              // Source port: 65535 (max)
@@ -151,11 +153,12 @@ mod tests {
             0x74, 0x65, 0x73, 0x74,  // Payload: "test"
         ];
 
-        assert!(UdpHandler::parse(&data).is_ok_and(|handler| {
-            assert_eq!(handler.src_port, 65535);
-            assert_eq!(handler.dst_port, 1);
-            true
-        }));
+        let handler = UdpHandler::parse(&data).map_err(|e| anyhow!(e))?;
+
+        assert_eq!(handler.src_port, 65535);
+        assert_eq!(handler.dst_port, 1);
+
+        Ok(())
     }
 
     #[test]

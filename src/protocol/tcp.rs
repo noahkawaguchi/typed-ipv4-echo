@@ -199,7 +199,7 @@ mod tests {
     use anyhow::{Context, Result, anyhow};
 
     #[test]
-    fn correctly_parses_valid_packet() {
+    fn correctly_parses_valid_packet() -> Result<()> {
         #[rustfmt::skip]
         let data = [
             0x04, 0xd2,                          // Source port: 1234
@@ -213,17 +213,18 @@ mod tests {
             0x48, 0x65, 0x6c, 0x6c, 0x6f,        // Payload: "Hello"
         ];
 
-        assert!(TcpHandler::parse(&data).is_ok_and(|handler| {
-            assert_eq!(handler.src_port, 1234);
-            assert_eq!(handler.dst_port, 80);
-            assert_eq!(handler.seq_num, 1);
-            assert_eq!(handler.ack_num, 2);
-            assert_eq!(handler.offset_bytes, 20);
-            assert!(handler.syn_flag);
-            assert!(handler.ack_flag);
-            assert_eq!(handler.payload, b"Hello");
-            true
-        }));
+        let handler = TcpHandler::parse(&data).map_err(|e| anyhow!(e))?;
+
+        assert_eq!(handler.src_port, 1234);
+        assert_eq!(handler.dst_port, 80);
+        assert_eq!(handler.seq_num, 1);
+        assert_eq!(handler.ack_num, 2);
+        assert_eq!(handler.offset_bytes, 20);
+        assert!(handler.syn_flag);
+        assert!(handler.ack_flag);
+        assert_eq!(handler.payload, b"Hello");
+
+        Ok(())
     }
 
     #[test]
@@ -233,7 +234,7 @@ mod tests {
     }
 
     #[test]
-    fn extracts_syn_flag_correctly() {
+    fn extracts_syn_flag_correctly() -> Result<()> {
         #[rustfmt::skip]
         let data = [
             0x04, 0xd2,                          // Source port: 1234
@@ -246,15 +247,16 @@ mod tests {
             0x00, 0x00,                          // Urgent pointer
         ];
 
-        assert!(TcpHandler::parse(&data).is_ok_and(|handler| {
-            assert!(handler.syn_flag);
-            assert!(!handler.ack_flag);
-            true
-        }));
+        let handler = TcpHandler::parse(&data).map_err(|e| anyhow!(e))?;
+
+        assert!(handler.syn_flag);
+        assert!(!handler.ack_flag);
+
+        Ok(())
     }
 
     #[test]
-    fn extracts_ack_flag_correctly() {
+    fn extracts_ack_flag_correctly() -> Result<()> {
         #[rustfmt::skip]
         let data = [
             0x04, 0xd2,                          // Source port: 1234
@@ -267,15 +269,16 @@ mod tests {
             0x00, 0x00,                          // Urgent pointer
         ];
 
-        assert!(TcpHandler::parse(&data).is_ok_and(|handler| {
-            assert!(!handler.syn_flag);
-            assert!(handler.ack_flag);
-            true
-        }));
+        let handler = TcpHandler::parse(&data).map_err(|e| anyhow!(e))?;
+
+        assert!(!handler.syn_flag);
+        assert!(handler.ack_flag);
+
+        Ok(())
     }
 
     #[test]
-    fn parsing_handles_no_flags_set() {
+    fn parsing_handles_no_flags_set() -> Result<()> {
         #[rustfmt::skip]
         let data = [
             0x04, 0xd2,                          // Source port: 1234
@@ -288,15 +291,16 @@ mod tests {
             0x00, 0x00,                          // Urgent pointer
         ];
 
-        assert!(TcpHandler::parse(&data).is_ok_and(|handler| {
-            assert!(!handler.syn_flag);
-            assert!(!handler.ack_flag);
-            true
-        }));
+        let handler = TcpHandler::parse(&data).map_err(|e| anyhow!(e))?;
+
+        assert!(!handler.syn_flag);
+        assert!(!handler.ack_flag);
+
+        Ok(())
     }
 
     #[test]
-    fn parsing_handles_large_sequence_numbers() {
+    fn parsing_handles_large_sequence_numbers() -> Result<()> {
         #[rustfmt::skip]
         let data = [
             0x04, 0xd2,                          // Source port: 1234
@@ -309,11 +313,12 @@ mod tests {
             0x00, 0x00,                          // Urgent pointer
         ];
 
-        assert!(TcpHandler::parse(&data).is_ok_and(|handler| {
-            assert_eq!(handler.seq_num, u32::MAX);
-            assert_eq!(handler.ack_num, 0xfedc_ba98);
-            true
-        }));
+        let handler = TcpHandler::parse(&data).map_err(|e| anyhow!(e))?;
+
+        assert_eq!(handler.seq_num, u32::MAX);
+        assert_eq!(handler.ack_num, 0xfedc_ba98);
+
+        Ok(())
     }
 
     #[test]

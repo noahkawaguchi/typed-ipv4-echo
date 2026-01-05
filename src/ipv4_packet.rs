@@ -117,7 +117,7 @@ mod tests {
     }
 
     #[test]
-    fn correctly_parses_valid_packet() {
+    fn correctly_parses_valid_packet() -> Result<()> {
         #[rustfmt::skip]
         let data = [
             0x45, 0x00, 0x00, 0x3c,  // Version 4, IHL 5, TOS 0, Total Length 60
@@ -129,13 +129,14 @@ mod tests {
 
         let mock = make_factory_returning_mock_handler_returning(None);
 
-        assert!(Ipv4Packet::parse(&data, mock).is_ok_and(|packet| {
-            assert_eq!(packet.total_len, 60);
-            assert_eq!(packet.protocol, Protocol::Tcp);
-            assert_eq!(packet.src_ip, Ipv4Addr::new(192, 168, 1, 100));
-            assert_eq!(packet.dst_ip, Ipv4Addr::new(172, 16, 10, 12));
-            true
-        }));
+        let packet = Ipv4Packet::parse(&data, mock).map_err(|e| anyhow!(e))?;
+
+        assert_eq!(packet.total_len, 60);
+        assert_eq!(packet.protocol, Protocol::Tcp);
+        assert_eq!(packet.src_ip, Ipv4Addr::new(192, 168, 1, 100));
+        assert_eq!(packet.dst_ip, Ipv4Addr::new(172, 16, 10, 12));
+
+        Ok(())
     }
 
     #[test]

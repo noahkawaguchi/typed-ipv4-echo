@@ -101,7 +101,7 @@ mod tests {
     use anyhow::{Context, Result, anyhow};
 
     #[test]
-    fn correctly_parses_valid_request() {
+    fn correctly_parses_valid_request() -> Result<()> {
         #[rustfmt::skip]
         let data = [
             8, 0,              // Type 8 (Echo Request), Code 0
@@ -111,12 +111,13 @@ mod tests {
             0x41, 0x42, 0x43,  // Payload: "ABC"
         ];
 
-        assert!(IcmpEchoHandler::parse(&data).is_ok_and(|handler| {
-            assert_eq!(handler.identifier, 0x1234);
-            assert_eq!(handler.sequence, 0x5678);
-            assert_eq!(handler.payload, &[0x41, 0x42, 0x43]);
-            true
-        }));
+        let handler = IcmpEchoHandler::parse(&data).map_err(|e| anyhow!(e))?;
+
+        assert_eq!(handler.identifier, 0x1234);
+        assert_eq!(handler.sequence, 0x5678);
+        assert_eq!(handler.payload, &[0x41, 0x42, 0x43]);
+
+        Ok(())
     }
 
     #[test]
@@ -152,7 +153,7 @@ mod tests {
     }
 
     #[test]
-    fn handles_empty_payload() {
+    fn handles_empty_payload() -> Result<()> {
         #[rustfmt::skip]
         let data = [
             8, 0,              // Type 8 (Echo Request), Code 0
@@ -161,12 +162,13 @@ mod tests {
             0x00, 0x01,        // Sequence: 1
         ];
 
-        assert!(IcmpEchoHandler::parse(&data).is_ok_and(|handler| {
-            assert_eq!(handler.identifier, 0);
-            assert_eq!(handler.sequence, 1);
-            assert_eq!(handler.payload.len(), 0);
-            true
-        }));
+        let handler = IcmpEchoHandler::parse(&data).map_err(|e| anyhow!(e))?;
+
+        assert_eq!(handler.identifier, 0);
+        assert_eq!(handler.sequence, 1);
+        assert_eq!(handler.payload.len(), 0);
+
+        Ok(())
     }
 
     #[test]
