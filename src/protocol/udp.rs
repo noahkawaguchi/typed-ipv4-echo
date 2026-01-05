@@ -5,6 +5,7 @@ use crate::{
 };
 use std::fmt;
 
+/// Struct for managing and replying to UDP packets. Includes the UDP header and the payload.
 pub(super) struct UdpHandler<'a> {
     src_port: u16,
     dst_port: u16,
@@ -15,6 +16,7 @@ impl<'a> UdpHandler<'a> {
     const UDP_HEADER_LEN: u8 = 8;
     const PSEUDO_HEADER_LEN: usize = 12;
 
+    /// Parses `data` as a UDP header and payload.
     pub(super) fn parse(data: &'a [u8]) -> Result<Self, String> {
         let n = data.len();
 

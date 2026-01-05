@@ -6,6 +6,8 @@ use std::{fmt, net::Ipv4Addr};
 
 pub const IPV4_HEADER_MIN_LEN: u8 = 20;
 
+/// Struct for managing a packet's IPv4 data and calling the protocol-specific handler determined at
+/// runtime.
 pub struct Ipv4Packet<'a> {
     total_len: u16,
     protocol: Protocol,
@@ -15,6 +17,8 @@ pub struct Ipv4Packet<'a> {
 }
 
 impl<'a> Ipv4Packet<'a> {
+    /// Parses packet data as as an IPv4 header and calls `protocol_handler_factory` with the parsed
+    /// protocol type.
     pub fn parse<F>(data: &'a [u8], protocol_handler_factory: F) -> Result<Self, String>
     where
         F: FnOnce(Protocol, &'a [u8]) -> Result<Box<dyn ProtocolHandler + 'a>, String>,
@@ -41,6 +45,8 @@ impl<'a> Ipv4Packet<'a> {
         })
     }
 
+    /// Creates an appropriate reply packet, returning the populated buffer and the size of the
+    /// reply in bytes, or `None` for no reply.
     pub fn create_reply(&self) -> Option<([u8; ETHERNET_MTU], usize)> {
         let mut reply = [0u8; ETHERNET_MTU];
 

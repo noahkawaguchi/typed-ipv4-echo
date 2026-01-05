@@ -5,6 +5,7 @@ use crate::{
 };
 use std::fmt;
 
+/// Struct for managing and replying to TCP packets. Includes the TCP header and the payload.
 pub(super) struct TcpHandler<'a> {
     src_port: u16,
     dst_port: u16,
@@ -32,6 +33,7 @@ impl<'a> TcpHandler<'a> {
     const SYN_FLAG: u8 = 0x02;
     const ACK_FLAG: u8 = 0x10;
 
+    /// Parses `data` as a TCP header and payload.
     pub(super) fn parse(data: &'a [u8]) -> Result<Self, String> {
         let n = data.len();
 
@@ -54,7 +56,8 @@ impl<'a> TcpHandler<'a> {
         })
     }
 
-    /// Determines the nature of the reply to send, if any, based on the received packet type.
+    /// Determines the nature of the reply to send based on the received packet type or returns
+    /// `None` for no reply.
     fn determine_reply(&self) -> Option<TcpReplyInfo> {
         /// Local sequence number for SYN-ACK (can be random, using 0 for simplicity).
         const LOCAL_SEQ_SYN: u32 = 0;

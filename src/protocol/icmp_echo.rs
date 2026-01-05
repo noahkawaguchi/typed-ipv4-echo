@@ -1,8 +1,10 @@
 use crate::{ETHERNET_MTU, checksum, ipv4_packet::IPV4_HEADER_MIN_LEN, protocol::ProtocolHandler};
 use std::fmt;
 
+/// Struct for managing ICMP Echo Request packets and creating Echo Reply packets. Includes the ICMP
+/// type-specific data and the payload.
 pub(super) struct IcmpEchoHandler<'a> {
-    // Type and code are constant, must be 8 and 0
+    // Type and code are constant, must be 8 and 0 for Echo Request
     identifier: u16,
     sequence: u16,
     payload: &'a [u8],
@@ -14,6 +16,7 @@ impl<'a> IcmpEchoHandler<'a> {
     const ICMP_TYPE_ECHO_REPLY: u8 = 0;
     const ICMP_CODE_ECHO: u8 = 0;
 
+    /// Parses `data` as an ICMP Echo Request header and payload.
     pub(super) fn parse(data: &'a [u8]) -> Result<Self, String> {
         let n = data.len();
 

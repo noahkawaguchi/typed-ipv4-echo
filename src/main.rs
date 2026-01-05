@@ -9,6 +9,7 @@ use std::io::{self, Read, Write};
 /// The Maximum Transmission Unit of standard Ethernet (frames up to 1500 bytes of IP packet data).
 const ETHERNET_MTU: usize = 1500;
 
+/// Runs an echo server that uses a TUN device to read and write IPv4 packets: TCP, UDP, and ICMP.
 fn main() -> io::Result<()> {
     let (mut tun, name) = tun::init("10.0.0.1/24")?;
     println!("Created and set up TUN device {name} with IP 10.0.0.1/24");

@@ -12,6 +12,8 @@ const PROTOCOL_ICMP: u8 = 1;
 const PROTOCOL_TCP: u8 = 6;
 const PROTOCOL_UDP: u8 = 17;
 
+/// Trait for managing the protocol-specific header, payload data, and reply logic for an IPv4
+/// packet.
 pub trait ProtocolHandler: fmt::Display {
     /// Writes the protocol-specific sections of the reply into the buffer, returning the total
     /// length of the reply packet in bytes (including the IP header and payload data), or `None` if
