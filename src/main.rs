@@ -19,7 +19,7 @@ fn main() -> io::Result<()> {
     loop {
         let n = tun.read(&mut buf)?;
 
-        match Ipv4Packet::parse(&buf[..n]) {
+        match Ipv4Packet::parse(&buf[..n], protocol::parse_data) {
             Err(e) => eprintln!("{e}"),
 
             Ok(packet) => {
