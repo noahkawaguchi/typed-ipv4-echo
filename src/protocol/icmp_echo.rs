@@ -98,6 +98,7 @@ impl fmt::Display for IcmpEchoHandler<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::{Context, Result, anyhow};
 
     #[test]
     fn correctly_parses_valid_request() {
@@ -166,5 +167,47 @@ mod tests {
             assert_eq!(handler.payload.len(), 0);
             true
         }));
+    }
+
+    #[test]
+    fn creates_valid_echo_reply() -> Result<()> {
+        #[rustfmt::skip]
+        let request = [
+            8, 0,                          // Type 8 (Echo Request), Code 0
+            0x3a, 0x4b,                    // Checksum
+            0x12, 0x34,                    // Identifier: 0x1234
+            0x56, 0x78,                    // Sequence: 0x5678
+            0x48, 0x65, 0x6c, 0x6c, 0x6f,  // Payload: "Hello"
+        ];
+
+        let handler = IcmpEchoHandler::parse(&request).map_err(|e| anyhow!(e))?;
+        let mut reply = [0u8; ETHERNET_MTU];
+
+        // Set up IP header portion (bytes 12-19 are source and dest IPs)
+        reply[12..16].copy_from_slice(&[10, 0, 0, 2]); // Source: 10.0.0.2
+        reply[16..20].copy_from_slice(&[10, 0, 0, 1]); // Dest: 10.0.0.1
+
+        let total_len = handler
+            .write_reply(&mut reply)
+            .context("failed to write reply")?;
+
+        // Verify ICMP header at offset 20
+        assert_eq!(reply[20], 0); // Type 0 (Echo Reply)
+        assert_eq!(reply[21], 0); // Code 0
+        assert_eq!(&reply[24..26], &[0x12, 0x34]); // Identifier preserved
+        assert_eq!(&reply[26..28], &[0x56, 0x78]); // Sequence preserved
+
+        // Verify payload echoed
+        assert_eq!(&reply[28..33], b"Hello");
+
+        // Verify total length
+        assert_eq!(total_len, 20 + 8 + 5);
+
+        // Verify checksum is valid (checksum of ICMP message should be 0)
+        let icmp_len = total_len - 20;
+        let checksum = checksum::calculate(&reply[20..20 + usize::from(icmp_len)]);
+        assert_eq!(checksum, 0x0000);
+
+        Ok(())
     }
 }
