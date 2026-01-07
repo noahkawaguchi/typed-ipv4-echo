@@ -45,11 +45,9 @@ impl<'a> Ipv4Packet<'a> {
         })
     }
 
-    /// Creates an appropriate reply packet, returning the populated buffer and the size of the
-    /// reply in bytes, or `None` for no reply.
-    pub fn create_reply(&self) -> Option<([u8; ETHERNET_MTU], usize)> {
-        let mut reply = [0u8; ETHERNET_MTU];
-
+    /// Writes an appropriate reply packet into the buffer, returning the size of the reply in
+    /// bytes, or `None` for no reply.
+    pub fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU]) -> Option<usize> {
         // IP header (no options, 20 bytes)
         reply[0] = 0x40 | (IPV4_HEADER_MIN_LEN / 4); // Version 4, IHL 5 (20 bytes)
         reply[1] = 0x00; // DSCP/ECN
@@ -64,7 +62,7 @@ impl<'a> Ipv4Packet<'a> {
         reply[16..20].copy_from_slice(&self.src_ip.octets());
 
         // Let protocol handler fill in protocol-specific data and calculate total length
-        let total_len = self.protocol_handler.write_reply(&mut reply)?;
+        let total_len = self.protocol_handler.write_reply(reply)?;
 
         // Fill in total length before calculating checksum
         reply[2..4].copy_from_slice(&total_len.to_be_bytes());
@@ -77,7 +75,7 @@ impl<'a> Ipv4Packet<'a> {
         let ip_checksum = checksum::calculate(&reply[..usize::from(IPV4_HEADER_MIN_LEN)]);
         reply[10..12].copy_from_slice(&ip_checksum.to_be_bytes());
 
-        Some((reply, total_len.into()))
+        Some(total_len.into())
     }
 }
 
@@ -182,7 +180,10 @@ mod tests {
         // Mock handler that writes a 28-byte payload and returns total length 48 (20 + 28)
         let mock = make_factory_returning_mock_handler_returning(Some(48));
         let packet = Ipv4Packet::parse(&request, mock)?;
-        let (reply, total_len) = packet.create_reply().ok_or("failed to create reply")?;
+        let mut reply = [0u8; ETHERNET_MTU];
+        let total_len = packet
+            .write_reply(&mut reply)
+            .ok_or("failed to create reply")?;
 
         // Verify IPv4 header fields
         assert_eq!(reply[0], 0x45); // Version 4, IHL 5

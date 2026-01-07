@@ -49,10 +49,11 @@ fn main() -> io::Result<()> {
     println!("Created and set up TUN device {name} with IP 10.0.0.1/24");
     println!("Waiting for packets... (Ctrl+C to stop)\n");
 
-    let mut buf = [0u8; ETHERNET_MTU];
+    let mut read_buf = [0u8; ETHERNET_MTU];
+    let mut write_buf = [0u8; ETHERNET_MTU];
 
     while !SHUTDOWN.load(Ordering::Relaxed) {
-        let n = match tun.read(&mut buf) {
+        let n = match tun.read(&mut read_buf) {
             // If `read()` was interrupted and returned `EINTR`, immediately continue to check the
             // shutdown flag
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
@@ -60,14 +61,14 @@ fn main() -> io::Result<()> {
             Ok(n) => n,
         };
 
-        match Ipv4Packet::parse(&buf[..n], protocol::parse_data) {
+        match Ipv4Packet::parse(&read_buf[..n], protocol::parse_data) {
             Err(e) => eprintln!("{e}"),
 
             Ok(packet) => {
                 println!("{packet}");
 
-                if let Some((reply, reply_len)) = packet.create_reply() {
-                    tun.write_all(&reply[..reply_len])?;
+                if let Some(reply_len) = packet.write_reply(&mut write_buf) {
+                    tun.write_all(&write_buf[..reply_len])?;
                     println!("Reply packet sent!");
                 }
             }
