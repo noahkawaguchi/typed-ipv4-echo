@@ -5,7 +5,7 @@
 # Build and run the server (default recipe)
 [confirm("Runs the executable with sudo. Proceed?")]
 serve: build
-    sudo ./target/debug/tcp-ip-stack
+    sudo ./target/debug/typed-ipv4-echo
 
 # Build the main server executable
 build:
