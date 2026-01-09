@@ -12,6 +12,10 @@
     "sighandler",
     "EINTR",
     "sigemptyset",
-    "sigaction"
+    "sigaction",
+    "userspace",
+    "datagrams",
+    "datagram",
+    "vtable"
   ]
 }
