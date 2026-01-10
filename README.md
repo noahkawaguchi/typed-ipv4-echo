@@ -25,6 +25,7 @@ This project demonstrates low-level networking in Rust by implementing a userspa
 - **Graceful Shutdown**: Handles SIGINT and exits cleanly
 - **Comprehensive Testing**: Includes unit tests for all packet handling logic with edge case coverage
 - **Strict Linting**: Forbids `unwrap` and `expect` completely and isolates limited use of `unsafe`
+- **Continuous Integration**: Runs tests, linting, formatting checks, and spell checks in CI and requires all to pass before merging into main
 
 ## Architecture
 

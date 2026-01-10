@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push: { branches: [main] }
+  pull_request: { branches: [main] }
+  workflow_dispatch: {}
+
+jobs:
+  format-check:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v6
+        with: { persist-credentials: false }
+      - uses: dtolnay/rust-toolchain@nightly
+        with: { components: rustfmt }
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+
+  lint:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v6
+        with: { persist-credentials: false }
+      - uses: dtolnay/rust-toolchain@1.92.0
+        with: { components: clippy }
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets
+
+  spell-check:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v6
+        with: { persist-credentials: false }
+      - uses: streetsidesoftware/cspell-action@v8
+
+  test:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v6
+        with: { persist-credentials: false }
+      - uses: dtolnay/rust-toolchain@1.92.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --all-targets
+
+  all-checks:
+    runs-on: ubuntu-24.04-arm
+    needs: [format-check, lint, spell-check, test]
+    steps:
+      - run: echo "All checks passed!"

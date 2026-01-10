@@ -16,6 +16,8 @@
     "userspace",
     "datagrams",
     "datagram",
-    "vtable"
+    "vtable",
+    "dtolnay",
+    "Swatinem"
   ]
 }
