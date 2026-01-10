@@ -4,7 +4,7 @@ use std::fmt;
 /// Struct for managing ICMP Echo Request packets and creating Echo Reply packets. Includes the ICMP
 /// type-specific data and the payload.
 pub(super) struct IcmpEchoHandler<'a> {
-    // Type and code are constant, must be 8 and 0 for Echo Request
+    // Type and code are omitted because they are constant (must be 8 and 0 for Echo Request)
     identifier: u16,
     sequence: u16,
     payload: &'a [u8],
