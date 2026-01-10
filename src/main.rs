@@ -62,7 +62,7 @@ fn main() -> io::Result<()> {
         };
 
         match Ipv4Packet::parse(&read_buf[..n], protocol::parse_data) {
-            Err(e) => eprintln!("{e}"),
+            Err(e) => eprintln!("Skipping packet: {e}"),
 
             Ok(packet) => {
                 println!("{packet}");
