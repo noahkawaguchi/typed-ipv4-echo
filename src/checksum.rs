@@ -1,5 +1,5 @@
-/// Computes the Internet checksum (RFC 1071) for IP and ICMP headers (16-bit one's complement of
-/// the one's complement sum).
+/// Computes the Internet checksum (RFC 1071) for use in headers (16-bit one's complement of the
+/// one's complement sum).
 pub fn calculate(data: &[u8]) -> u16 {
     // Sum all 16-bit words (deferred carries method)
     let sum = data
