@@ -14,4 +14,4 @@ unwrap_used = "forbid"
 expect_used = "forbid"
 
 [dependencies]
-libc = "0.2.178"
+libc = "0.2.184"
