@@ -48,7 +48,10 @@ impl ProtocolHandler for UdpHandler<'_> {
         reply[udp_start + 2..udp_start + 4].copy_from_slice(&self.src_port.to_be_bytes());
 
         // UDP length = header (8) + payload
-        #[allow(clippy::cast_possible_truncation)] // `u16::MAX` (65_535) > `ETHERNET_MTU` (1500)
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "u16::MAX (65_535) > ETHERNET_MTU (1500)"
+        )]
         let udp_len = u16::from(Self::UDP_HEADER_LEN) + self.payload.len() as u16;
         reply[udp_start + 4..udp_start + 6].copy_from_slice(&udp_len.to_be_bytes());
 

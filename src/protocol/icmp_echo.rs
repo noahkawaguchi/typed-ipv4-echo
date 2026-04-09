@@ -73,11 +73,14 @@ impl ProtocolHandler for IcmpEchoHandler<'_> {
         );
         reply[icmp_start + 2..icmp_start + 4].copy_from_slice(&icmp_checksum.to_be_bytes());
 
-        // Total length: IPv4 header without options (20 bytes)
-        //               + fixed ICMP header length (8 bytes)
-        //               + length of echo payload
-        #[allow(clippy::cast_possible_truncation)] // `u16::MAX` (65_535) > `ETHERNET_MTU` (1500)
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "u16::MAX (65_535) > ETHERNET_MTU (1500)"
+        )]
         Some(
+            // Total length: IPv4 header without options (20 bytes)
+            //               + fixed ICMP header length (8 bytes)
+            //               + length of echo payload
             u16::from(IPV4_HEADER_MIN_LEN)
                 + u16::from(Self::ICMP_HEADER_LEN)
                 + self.payload.len() as u16,

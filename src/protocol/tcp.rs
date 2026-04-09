@@ -89,8 +89,10 @@ impl<'a> TcpHandler<'a> {
                 Some(TcpReplyInfo {
                     flags: Self::ACK_FLAG,
                     seq_num: self.ack_num,
-                    // `u32::MAX` (4_294_967_295) > `ETHERNET_MTU` (1500)
-                    #[allow(clippy::cast_possible_truncation)]
+                    #[expect(
+                        clippy::cast_possible_truncation,
+                        reason = "`u32::MAX` (4_294_967_295) > `ETHERNET_MTU` (1500)"
+                    )]
                     ack_num: self.seq_num.wrapping_add(payload_len as u32),
                     echo: true,
                 })
@@ -148,7 +150,10 @@ impl ProtocolHandler for TcpHandler<'_> {
         };
 
         // TCP segment length (header + payload if any)
-        #[allow(clippy::cast_possible_truncation)] // `u16::MAX` (65_535) > `ETHERNET_MTU` (1500)
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "u16::MAX (65_535) > ETHERNET_MTU (1500)"
+        )]
         let tcp_segment_len = u16::from(Self::TCP_HEADER_MIN_LEN) + payload_len as u16;
 
         // Calculate TCP checksum with pseudo-header
