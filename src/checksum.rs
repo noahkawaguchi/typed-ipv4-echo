@@ -16,7 +16,10 @@ pub fn calculate(data: &[u8]) -> u16 {
 }
 
 /// Adds Internet checksum carry bits back into a 16-bit sum by folding a 32-bit sum.
-#[allow(clippy::cast_possible_truncation)] // Truncation desired after folding
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "Truncation desired after folding"
+)]
 const fn fold_carry_bits(sum: u32) -> u16 {
     if sum >> 16 == 0 { sum as u16 } else { fold_carry_bits((sum & 0xFFFF) + (sum >> 16)) }
 }

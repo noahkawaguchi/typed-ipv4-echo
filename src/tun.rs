@@ -22,7 +22,7 @@ pub fn init(ip_cidr: &str) -> io::Result<(File, String)> {
 }
 
 /// Creates a TUN device, returning the opened `File` and the assigned name.
-#[allow(unsafe_code)]
+#[expect(unsafe_code, reason = "libc system calls to create TUN device")]
 fn create_device() -> io::Result<(File, String)> {
     // Open the kernel's special device file for creating virtual network interfaces
     let tun_file = OpenOptions::new()
@@ -39,7 +39,10 @@ fn create_device() -> io::Result<(File, String)> {
     }
 
     // Set flags
-    #[allow(clippy::cast_possible_truncation)] // This is 0x1 | 0x1000, which fits in a short
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "0x1 | 0x1000 fits in a short"
+    )]
     {
         // IFF_TUN   - TUN device (no Ethernet headers) rather than TAP
         // IFF_NO_PI - Do not prepend packet metadata (get IP packet only)

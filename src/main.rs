@@ -21,13 +21,13 @@ extern "C" fn shutdown_signal_handler(_sig: libc::c_int) {
 }
 
 /// Installs the SIGINT handler for graceful shutdown.
-#[allow(unsafe_code)]
+#[expect(unsafe_code, reason = "libc system calls to install handler")]
 fn install_signal_handler() -> io::Result<()> {
     // Use `sigaction` to ensure the `SA_RESTART` flag is not set so that blocking `read()` in the
     // main loop will be interrupted and return `EINTR` without being automatically restarted
 
     let mut sa: libc::sigaction = unsafe { std::mem::zeroed() }; // All flags zeroed
-    sa.sa_sigaction = shutdown_signal_handler as libc::sighandler_t;
+    sa.sa_sigaction = shutdown_signal_handler as *const () as libc::sighandler_t;
 
     if unsafe { libc::sigemptyset(&raw mut sa.sa_mask) } != 0 {
         return Err(io::Error::last_os_error());
