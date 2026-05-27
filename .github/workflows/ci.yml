@@ -1,5 +1,7 @@
 name: CI
 
+permissions: { contents: read }
+
 on:
   push: { branches: [main] }
   pull_request: { branches: [main] }
@@ -57,6 +59,7 @@ jobs:
 
   all-checks:
     runs-on: ubuntu-24.04-arm
+    permissions: {}
     needs: [format-check, lint, spell-check, test]
     steps:
       - run: echo "All checks passed!"
