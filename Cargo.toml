@@ -1,19 +1,20 @@
 [package]
-name = "typed-ipv4-echo"
+name    = "typed-ipv4-echo"
 version = "0.1.0"
 edition = "2024"
 
-[lints.rust]
-unsafe_code = "deny"
-
-[lints.clippy]
-all = { level = "warn", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
-nursery = { level = "warn", priority = -1 }
-unwrap_used = "forbid"
-expect_used = "forbid"
-allow_attributes = "forbid"
-allow_attributes_without_reason = "forbid"
-
 [dependencies]
 libc = "0.2.184"
+
+[lints.clippy]
+all      = { level = "warn", priority = -1 }
+nursery  = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+
+allow_attributes                = "forbid"
+allow_attributes_without_reason = "forbid"
+expect_used                     = "forbid"
+unwrap_used                     = "forbid"
+
+[lints.rust]
+unsafe_code = "deny"
