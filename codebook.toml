@@ -1,0 +1,27 @@
+words = [
+    "DSCP",
+    "IFNAMSIZ",
+    "IHL",
+    "MTU",
+    "NUL",
+    "Swatinem",
+    "TUNSETIFF",
+    "UDP",
+    "clippy",
+    "datagrams",
+    "dtolnay",
+    "ifr",
+    "ifreq",
+    "ipv",
+    "lookups",
+    "rustfmt",
+    "sigaction",
+    "userspace",
+    "vtable",
+    "xzf",
+]
+ignore_paths = ["Cargo.lock"]
+ignore_patterns = [
+    '\b[a-fA-F0-9]{64}\b',
+    '\b0x[a-fA-F0-9]{4,8}\b',
+]
