@@ -1,0 +1,6 @@
+[format.rules]
+indent-width                    = 4
+key-value-equals-sign-alignment = true
+line-width                      = 100
+trailing-comment-alignment      = true
+trailing-comment-space-width    = 1
