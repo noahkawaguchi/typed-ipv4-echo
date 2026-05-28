@@ -31,6 +31,8 @@ fn create_device() -> io::Result<(File, String)> {
         .open(TUN_DEVICE_FILE)?;
 
     // Initialize a new interface request C struct
+    //
+    // SAFETY: All fields of `ifreq` have valid all-zero bit patterns.
     let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
 
     // Copy the desired device name into `ifr_name` (leaving room for the null terminator)
@@ -50,7 +52,11 @@ fn create_device() -> io::Result<(File, String)> {
     }
 
     // Create the TUN interface
-    if unsafe { libc::ioctl(tun_file.as_raw_fd(), TUNSETIFF, &ifr) } < 0 {
+    //
+    // SAFETY: `tun_file` stays open for the whole call, so its fd is valid. `TUNSETIFF` expects a
+    // pointer to an `ifreq`, and `&mut ifr` is a unique borrow of a valid, aligned, fully
+    // initialized `ifreq` that outlives the call.
+    if unsafe { libc::ioctl(tun_file.as_raw_fd(), TUNSETIFF, &mut ifr) } < 0 {
         return Err(io::Error::last_os_error());
     }
 

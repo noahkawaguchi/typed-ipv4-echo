@@ -26,13 +26,23 @@ fn install_signal_handler() -> io::Result<()> {
     // Use `sigaction` to ensure the `SA_RESTART` flag is not set so that blocking `read()` in the
     // main loop will be interrupted and return `EINTR` without being automatically restarted
 
-    let mut sa: libc::sigaction = unsafe { std::mem::zeroed() }; // All flags zeroed
+    // SAFETY: All fields of `sigaction` have valid all-zero bit patterns.
+    let mut sa: libc::sigaction = unsafe { std::mem::zeroed() };
+
     sa.sa_sigaction = shutdown_signal_handler as *const () as libc::sighandler_t;
 
+    // SAFETY: `&raw mut sa.sa_mask` is a valid, aligned, writable pointer to an owned `sigset_t` on
+    // the stack for `sigemptyset` to write an empty set of signals through.
     if unsafe { libc::sigemptyset(&raw mut sa.sa_mask) } != 0 {
         return Err(io::Error::last_os_error());
     }
 
+    // SAFETY:
+    // - `SIGINT` is a valid `signum`.
+    // - `&raw const sa` is a valid, aligned pointer to a fully initialized `sigaction`.
+    // - A null `oldact` is permitted.
+    // - `shutdown_signal_handler` is async-signal-safe because its body is a single relaxed store
+    //   to a lock-free `AtomicBool`.
     if unsafe { libc::sigaction(libc::SIGINT, &raw const sa, std::ptr::null_mut()) } != 0 {
         return Err(io::Error::last_os_error());
     }
