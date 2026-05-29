@@ -13,10 +13,12 @@ const ETHERNET_MTU: usize = 1500;
 /// Runs an echo server that uses a TUN device to read and write IPv4 packets: TCP, UDP, and ICMP.
 /// Exits gracefully upon receiving a shutdown signal.
 fn main() -> io::Result<()> {
+    const IP_CIDR: &str = "10.0.0.1/24";
+
     let shutdown = ShutdownSignal::install()?;
 
-    let (mut tun, name) = tun::init("10.0.0.1/24")?;
-    println!("Created and set up TUN device {name} with IP 10.0.0.1/24");
+    let (mut tun, name) = tun::init("tun0", IP_CIDR)?;
+    println!("Created and set up TUN device {name} with IP {IP_CIDR}");
     println!("Waiting for packets... (Ctrl+C to stop)\n");
 
     let mut read_buf = [0u8; ETHERNET_MTU];

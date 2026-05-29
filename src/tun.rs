@@ -6,24 +6,20 @@ use std::{
     process::Command,
 };
 
-/// The desired name to use when creating a TUN device. A different name may be assigned by the
-/// kernel.
-const DESIRED_TUN_NAME: &str = "tun0";
-
 /// The character device (clone device) used to create TUN virtual network interfaces.
 const TUN_DEVICE_FILE: &str = "/dev/net/tun";
 
-/// Creates a TUN device and configures it with IP address `ip_cidr`, returning the opened `File`
-/// and the assigned name.
-pub fn init(ip_cidr: &str) -> io::Result<(File, String)> {
-    let (tun, name) = create_device()?;
+/// Creates a TUN device and configures it with IP address `ip_cidr`. A device name different from
+/// `desired_name` may be assigned by the kernel. Returns the opened `File` and the assigned name.
+pub fn init(desired_name: &str, ip_cidr: &str) -> io::Result<(File, String)> {
+    let (tun, name) = create_device(desired_name.as_bytes())?;
     configure_device(&name, ip_cidr)?;
     Ok((tun, name))
 }
 
 /// Creates a TUN device, returning the opened `File` and the assigned name.
 #[expect(unsafe_code, reason = "libc system calls to create TUN device")]
-fn create_device() -> io::Result<(File, String)> {
+fn create_device(desired_name: &[u8]) -> io::Result<(File, String)> {
     // Open the kernel's special device file for creating virtual network interfaces
     let tun_file = OpenOptions::new()
         .read(true)
@@ -35,10 +31,19 @@ fn create_device() -> io::Result<(File, String)> {
     // SAFETY: All fields of `ifreq` have valid all-zero bit patterns.
     let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
 
-    // Copy the desired device name into `ifr_name` (leaving room for the null terminator)
-    for (i, b) in DESIRED_TUN_NAME.bytes().enumerate().take(IFNAMSIZ - 1) {
-        ifr.ifr_name[i] = libc::c_char::from(b);
-    }
+    // Copy the desired device name
+    ifr.ifr_name = std::array::from_fn(|i| {
+        if i == IFNAMSIZ - 1 {
+            // End with at least one NUL, truncating the desired name if it's too long
+            c_char_compat::NUL
+        } else {
+            // Pad with more NUL if the desired name leaves extra room
+            desired_name
+                .get(i)
+                .copied()
+                .map_or(c_char_compat::NUL, c_char_compat::from_u8)
+        }
+    });
 
     // Set flags
     #[expect(
@@ -65,7 +70,8 @@ fn create_device() -> io::Result<(File, String)> {
         // Extract the actual device name assigned by the kernel
         ifr.ifr_name
             .into_iter()
-            .take_while(|&b| b != b'\0')
+            .take_while(|&c| c != c_char_compat::NUL)
+            .map(c_char_compat::to_u8)
             .map(char::from)
             .collect(),
     ))
@@ -96,4 +102,25 @@ fn configure_device(device_name: &str, ip_cidr: &str) -> io::Result<()> {
     }
 
     Ok(())
+}
+
+/// Module for handling compatibility between C `char` (may or may not be signed depending on the
+/// platform) and Rust `u8` (always unsigned), as well as relevant lints.
+#[expect(
+    clippy::allow_attributes,
+    reason = "There's no conditional compilation for C `char` signedness"
+)]
+#[allow(
+    clippy::unnecessary_cast,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_wrap,
+    reason = "Casting is the portable solution because `libc::c_char` may be either `u8` or `i8`"
+)]
+mod c_char_compat {
+    /// The NUL character '\0' as either a `u8` or an `i8` depending on the platform.
+    pub(super) const NUL: libc::c_char = 0;
+
+    pub(super) const fn from_u8(b: u8) -> libc::c_char { b as libc::c_char }
+
+    pub(super) const fn to_u8(c: libc::c_char) -> u8 { c as u8 }
 }
