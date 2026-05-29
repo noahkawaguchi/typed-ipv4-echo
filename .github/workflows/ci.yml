@@ -58,7 +58,7 @@ jobs:
       - run: cargo test --workspace --all-targets
 
   all-checks:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-slim
     permissions: {}
     needs: [format-check, lint, spell-check, test]
     steps:
