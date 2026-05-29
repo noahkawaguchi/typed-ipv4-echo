@@ -1,3 +1,6 @@
+#[cfg(not(target_os = "linux"))]
+compile_error!("This crate only supports Linux because it directly uses Linux TUN devices");
+
 mod checksum;
 mod ipv4_packet;
 mod protocol;
