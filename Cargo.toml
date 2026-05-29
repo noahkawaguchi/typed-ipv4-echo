@@ -11,7 +11,7 @@ all      = { level = "warn", priority = -1 }
 nursery  = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 
-allow_attributes                = "forbid"
+allow_attributes                = "deny"   # Necessary for C `char` signedness portability
 allow_attributes_without_reason = "forbid"
 expect_used                     = "forbid"
 unwrap_used                     = "forbid"
