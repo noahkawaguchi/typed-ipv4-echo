@@ -28,5 +28,5 @@ words = [
 ignore_paths = ["Cargo.lock"]
 ignore_patterns = [
     '\b[a-fA-F0-9]{64}\b',
-    '\b0x[a-fA-F0-9]{4,8}\b',
+    '\b0x[a-fA-F0-9_]{4,9}\b',
 ]
