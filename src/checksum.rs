@@ -1,27 +1,45 @@
-/// Computes the Internet checksum (RFC 1071) for use in headers (16-bit one's complement of the
-/// one's complement sum).
+/// Computes the Internet checksum from data of arbitrary length (16-bit one's complement of the
+/// one's complement sum, RFC 1071).
 pub fn calculate(data: &[u8]) -> u16 {
-    // Sum all 16-bit words (deferred carries method)
-    let sum = data
-        .chunks(2)
-        .map(|chunk| {
-            // Put 16-bit words into 32 bits to accumulate carries in bits 16-31 when summing.
-            // Treat an odd byte as the high byte of a 16-bit word.
-            u32::from_be_bytes([0, 0, chunk[0], if chunk.len() == 2 { chunk[1] } else { 0 }])
-        })
-        .sum();
+    /// Folds the high half of a 32-bit accumulator back into the low half one time.
+    const fn one_carry_fold(x: u32) -> u32 { (x & 0xFFFF).wrapping_add(x >> 16) }
 
-    // Fold 32 bits into 16 and return one's complement
-    !fold_carry_bits(sum)
-}
+    let (byte_pairs, maybe_odd_byte) = data.as_chunks::<2>();
 
-/// Adds Internet checksum carry bits back into a 16-bit sum by folding a 32-bit sum.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "Truncation desired after folding"
-)]
-const fn fold_carry_bits(sum: u32) -> u16 {
-    if sum >> 16 == 0 { sum as u16 } else { fold_carry_bits((sum & 0xFFFF) + (sum >> 16)) }
+    let sum = byte_pairs.iter().fold(
+        // Treat an odd byte as the high byte of a 16-bit word
+        maybe_odd_byte
+            .first()
+            .map_or(0, |&b| u32::from_be_bytes([0, 0, b, 0])),
+        // Sum 16-bit words using a 32-bit accumulator to accumulate carries in bits 16-31
+        // (deferred carries method)
+        |sum, &[high_byte, low_byte]| {
+            /// The lowest `u32` value that would overflow if `u16::MAX` was added to it.
+            const WOULD_OVERFLOW: u32 = u32::MAX - u16::MAX as u32 + 1;
+
+            // Perform an intermediate fold if the accumulator would overflow on the next iteration.
+            //
+            // Intermediate folding will never happen for most real-world input sizes such as 1500
+            // bytes (Ethernet MTU) or 65,535 bytes (max IPv4 packet). See the test below for more
+            // information.
+            match sum.wrapping_add(u32::from_be_bytes([0, 0, high_byte, low_byte])) {
+                enough_space @ u32::MIN..WOULD_OVERFLOW => enough_space,
+                almost_full @ WOULD_OVERFLOW..=u32::MAX => one_carry_fold(almost_full),
+            }
+        },
+    );
+
+    // Fold 32 bits into 16 and return one's complement.
+    //
+    // No more than two folds are necessary because in the worst case, `u32::MAX` or 0xFFFF_FFFF,
+    // folding once results in 0x1_FFFE and folding twice results in 0xFFFF, fitting exactly into a
+    // `u16`. `u32::MAX` exactly will never occur due to the overflow check during the iteration
+    // above, but the property still holds because other `u32` values are strictly less.
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "Truncation desired after folding"
+    )]
+    !(one_carry_fold(one_carry_fold(sum)) as u16)
 }
 
 #[cfg(test)]
