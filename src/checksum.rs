@@ -163,4 +163,77 @@ mod tests {
         // Should be equal due to commutativity of addition
         assert_eq!(calculate(&data1), calculate(&data2));
     }
+
+    #[test]
+    fn accumulator_does_not_overflow_on_worst_case_large_input() {
+        /// The largest number of worst case 0xFF bytes that the deferred carries method using a
+        /// `u32` accumulator can correctly compute a checksum for before the accumulator overflows.
+        const MAX_BYTES: usize =
+            // Largest valid accumulator value before overflow
+            u32::MAX as usize
+            // Worst case 16-bit word value of all ones
+            / u16::MAX as usize
+            // Number of bytes per 16-bit word
+            * 2;
+
+        /// Internet checksum implementation that uses a 16-bit accumulator and checks for overflow
+        /// on every iteration. Correct, but does not take advantage of the deferred carries method.
+        fn always_folded_checksum(data: &[u8]) -> u16 {
+            let (byte_pairs, maybe_odd_byte) = data.as_chunks::<2>();
+
+            !byte_pairs.iter().fold(
+                maybe_odd_byte
+                    .first()
+                    .map_or(0, |&b| u16::from_be_bytes([b, 0])),
+                |sum, &byte_pair| {
+                    let (new_sum, overflowed) = sum.overflowing_add(u16::from_be_bytes(byte_pair));
+                    new_sum.wrapping_add(u16::from(overflowed))
+                },
+            )
+        }
+
+        /// Internet checksum implementation that uses a 32-bit accumulator, but does not check for
+        /// overflow. Takes advantage of the deferred carries method, but produces incorrect results
+        /// for very large input sizes.
+        fn overflowing_checksum(data: &[u8]) -> u16 {
+            let (byte_pairs, maybe_odd_byte) = data.as_chunks::<2>();
+
+            let sum = byte_pairs.iter().fold(
+                maybe_odd_byte
+                    .first()
+                    .map_or(0, |&b| u32::from_be_bytes([0, 0, b, 0])),
+                |sum, &[high_byte, low_byte]| {
+                    sum.wrapping_add(u32::from_be_bytes([0, 0, high_byte, low_byte]))
+                },
+            );
+
+            let folded = (sum & 0xFFFF).wrapping_add(sum >> 16);
+            !((folded & 0xFFFF).wrapping_add(folded >> 16) as u16)
+        }
+
+        // All implementations should be correct for input sizes up until the threshold of
+        // overflowing `u32`
+        for num_bytes in MAX_BYTES - 10..=MAX_BYTES {
+            let data = vec![0xFFu8; num_bytes];
+            let expected = if num_bytes & 1 == 1 { 0xFF } else { 0 };
+
+            assert_eq!(expected, overflowing_checksum(&data));
+            assert_eq!(expected, always_folded_checksum(&data));
+            assert_eq!(expected, calculate(&data));
+        }
+
+        // For input sizes that would cause a 32-bit accumulator to overflow, the naive
+        // implementation should silently wrap, while the production implementation should fold
+        // while accumulating and still produce correct answers
+        for num_bytes in MAX_BYTES + 1..MAX_BYTES + 10 {
+            let data = vec![0xFFu8; num_bytes];
+            let expected = if num_bytes & 1 == 1 { 0xFF } else { 0 };
+
+            // Incorrect now
+            assert_ne!(expected, overflowing_checksum(&data));
+            // Still correct
+            assert_eq!(expected, always_folded_checksum(&data));
+            assert_eq!(expected, calculate(&data));
+        }
+    }
 }
