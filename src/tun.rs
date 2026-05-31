@@ -82,3 +82,40 @@ pub fn open(device_name: &str) -> io::Result<File> {
         .then_some(tun_file)
         .ok_or_else(io::Error::last_os_error)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{assert_matches, env};
+
+    #[test]
+    fn errors_for_nonexistent_tun() {
+        assert_matches!(
+            open("abcdefghijklmnopqrstuvwxyz"),
+            Err(e) if e.kind() == io::ErrorKind::NotFound
+        );
+    }
+
+    #[test]
+    #[ignore = "requires TUN setup"]
+    fn successfully_attaches_to_existing_tun() {
+        let tun_name = env::var("TUN_DEVICE_NAME").unwrap_or_else(|_| String::from("tun0"));
+        assert_matches!(open(&tun_name), Ok(_));
+    }
+
+    #[test]
+    #[cfg_attr(
+        not(all(
+            target_os = "linux",
+            any(target_arch = "aarch64", target_arch = "x86_64")
+        )),
+        ignore = "only checking specific known architectures on Linux"
+    )]
+    fn c_char_signedness_sanity_check() {
+        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+        assert_eq!(libc::c_char::MAX, u8::MAX);
+
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        assert_eq!(libc::c_char::MAX, i8::MAX);
+    }
+}
