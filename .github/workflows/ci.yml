@@ -63,7 +63,12 @@ jobs:
         with: { persist-credentials: false }
       - uses: dtolnay/rust-toolchain@1.96.0
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace --all-targets
+
+      - name: Set up TUN device
+        run: sudo ./create-tun.sh
+
+      - name: Run tests
+        run: cargo test --workspace --all-targets -- --include-ignored
 
   all-checks:
     runs-on: ubuntu-slim
