@@ -67,27 +67,26 @@ Error messages use `String` heap allocations for readable and and safe inclusion
 
 ### Prerequisites
 
-- Linux (requires TUN device support)
-- Rust toolchain ([install here](https://rust-lang.org/tools/install/))
-- `sudo` privileges (required for creating network interfaces)
-- Optional: [just](https://github.com/casey/just) command runner
+- Linux (for its TUN device API)
+- Rust toolchain ([install here](https://rust-lang.org/tools/install))
+- `sudo` privileges (specifically CAP_NET_ADMIN for creating network interfaces)
+- Optional: [Just](https://github.com/casey/just) command runner
 
-### Building and Running the Server
+### Steps
 
-The server binary must run with `sudo` privileges to create and configure the TUN device. The command `just` will build and run the server, prompting for confirmation for `sudo`.
-
-```bash
-just
-```
-
-Or manually:
+Create a TUN device using the provided script (once per reboot):
 
 ```bash
-cargo build
-sudo ./target/debug/typed-ipv4-echo
+sudo ./create-tun.sh
 ```
 
-The server will create a TUN device at `10.0.0.1/24`, listen for and reply to packets, and log processed data until it receives SIGINT (Ctrl+C).
+Build and run the server:
+
+```bash
+cargo run
+```
+
+The server will attach to the TUN device, listen for and reply to packets, and log processed data until it receives SIGINT (Ctrl+C).
 
 ## Connecting as a Client
 
@@ -112,7 +111,8 @@ ping 10.0.0.2         # ICMP
 Run the test suite:
 
 ```bash
-cargo test
+cargo test                       # Pure unit tests with no dependencies
+cargo test -- --include-ignored  # TUN device must already exist
 ```
 
 The project includes comprehensive unit tests for:

@@ -8,7 +8,10 @@ mod shutdown_signal;
 mod tun;
 
 use crate::{ipv4_packet::Ipv4Packet, shutdown_signal::ShutdownSignal};
-use std::io::{self, Read, Write};
+use std::{
+    env,
+    io::{self, Read, Write},
+};
 
 /// The Maximum Transmission Unit of standard Ethernet (frames up to 1500 bytes of IP packet data).
 const ETHERNET_MTU: usize = 1500;
@@ -16,13 +19,11 @@ const ETHERNET_MTU: usize = 1500;
 /// Runs an echo server that uses a TUN device to read and write IPv4 packets: TCP, UDP, and ICMP.
 /// Exits gracefully upon receiving a shutdown signal.
 fn main() -> io::Result<()> {
-    const IP_CIDR: &str = "10.0.0.1/24";
-
     let shutdown = ShutdownSignal::install()?;
 
-    let (mut tun, name) = tun::init("tun0", IP_CIDR)?;
-    println!("Created and set up TUN device {name} with IP {IP_CIDR}");
-    println!("Waiting for packets... (Ctrl+C to stop)\n");
+    let tun_name = env::var("TUN_DEVICE_NAME").unwrap_or_else(|_| String::from("tun0"));
+    let mut tun = tun::open(&tun_name)?;
+    println!("Attached to TUN device {tun_name}\nWaiting for packets... (Ctrl+C to stop)\n");
 
     let mut read_buf = [0u8; ETHERNET_MTU];
     let mut write_buf = [0u8; ETHERNET_MTU];
