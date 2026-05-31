@@ -8,8 +8,9 @@ set -euo pipefail
 # After being created, the device can then be accessed by the user who ran the
 # script without needing the capabilities.
 #
-# The device persists until reboot. It can also be removed manually with
-# `sudo ip link del tun0`.
+# The device will appear in the `ip link` listing and persists until reboot. It
+# can also be removed manually with `sudo ip link del tun0` (or other custom
+# name if not the default tun0).
 #
 
 # Optional environment variable configuration
