@@ -1,5 +1,3 @@
-[English](README.md) | [日本語](README.ja.md)
-
 # typed-ipv4-echo
 
 A type-safe, userspace IPv4 echo server implementing TCP, UDP, and ICMP protocols using Linux TUN devices.
