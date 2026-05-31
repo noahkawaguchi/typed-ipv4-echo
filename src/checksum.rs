@@ -23,8 +23,8 @@ pub fn calculate(data: &[u8]) -> u16 {
             // bytes (Ethernet MTU) or 65,535 bytes (max IPv4 packet). See the test below for more
             // information.
             match sum.wrapping_add(u32::from_be_bytes([0, 0, high_byte, low_byte])) {
-                enough_space @ u32::MIN..WOULD_OVERFLOW => enough_space,
-                almost_full @ WOULD_OVERFLOW..=u32::MAX => one_carry_fold(almost_full),
+                enough_space @ ..WOULD_OVERFLOW => enough_space,
+                almost_full @ WOULD_OVERFLOW.. => one_carry_fold(almost_full),
             }
         },
     );

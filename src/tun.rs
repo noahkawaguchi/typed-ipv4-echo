@@ -57,8 +57,8 @@ pub fn open(device_name: &str) -> io::Result<File> {
         .ifr_name
         .iter_mut()
         .zip(device_name.bytes().map(|b| b as libc::c_char))
-        // Leave space for the trailing NUL byte (redundant with the existence check above since
-        // the name must be valid for the device to exist)
+        // Leave space for the trailing NUL byte (redundant with the existence check above since the
+        // name must be valid for the device to exist)
         .take(IFNAMSIZ - 1)
     {
         *c = b;
