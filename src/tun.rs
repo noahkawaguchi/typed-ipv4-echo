@@ -3,42 +3,55 @@ use std::{
     fs::{File, OpenOptions},
     io,
     os::unix::io::AsRawFd,
-    process::Command,
+    path::Path,
 };
 
-/// The character device (clone device) used to create TUN virtual network interfaces.
+/// The character device (clone device) that serves as the entrypoint for TUN virtual network
+/// interfaces.
 const TUN_DEVICE_FILE: &str = "/dev/net/tun";
 
-/// Creates a TUN device and configures it with IP address `ip_cidr`. A device name different from
-/// `desired_name` may be assigned by the kernel. Returns the opened `File` and the assigned name.
-pub fn init(desired_name: &str, ip_cidr: &str) -> io::Result<(File, String)> {
-    let (tun, name) = create_device(desired_name.as_bytes())?;
-    configure_device(&name, ip_cidr)?;
-    Ok((tun, name))
-}
+/// The pseudo-filesystem directory containing symlinks to networking devices, including TUN
+/// interfaces.
+const SYSFS_NET_DEVICES: &str = "/sys/class/net";
 
-/// Creates a TUN device, returning the opened `File` and the assigned name.
-#[expect(unsafe_code, reason = "libc system calls to create TUN device")]
-fn create_device(desired_name: &[u8]) -> io::Result<(File, String)> {
-    // Open the kernel's special device file for creating virtual network interfaces
-    let tun_file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(TUN_DEVICE_FILE)?;
+/// Attaches to the TUN device with name `device_name` as an opened `File`.
+#[expect(unsafe_code, reason = "libc FFI to manage TUN device")]
+pub fn open(device_name: &str) -> io::Result<File> {
+    let device_name_bytes = device_name.as_bytes();
 
-    // Initialize a new interface request C struct
+    // There must be at least one byte of space after the name for the trailing NUL
+    if device_name_bytes.len() >= IFNAMSIZ {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "TUN device name too long",
+        ));
+    }
+
+    // The interface must already exist, otherwise the `ioctl` call will try to create it and fail
+    // with permission denied
+    if !Path::new(SYSFS_NET_DEVICES)
+        .join(device_name)
+        .try_exists()?
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("TUN device {device_name} does not exist"),
+        ));
+    }
+
+    // Initialize a new interface request C struct.
     //
     // SAFETY: All fields of `ifreq` have valid all-zero bit patterns.
     let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
 
-    // Copy the desired device name
+    // Copy the device name
     ifr.ifr_name = std::array::from_fn(|i| {
         if i == IFNAMSIZ - 1 {
-            // End with at least one NUL, truncating the desired name if it's too long
+            // End with at least one NUL
             c_char_compat::NUL
         } else {
-            // Pad with more NUL if the desired name leaves extra room
-            desired_name
+            // Pad with more NUL if the name leaves extra room
+            device_name_bytes
                 .get(i)
                 .copied()
                 .map_or(c_char_compat::NUL, c_char_compat::from_u8)
@@ -56,7 +69,13 @@ fn create_device(desired_name: &[u8]) -> io::Result<(File, String)> {
         ifr.ifr_ifru.ifru_flags = (IFF_TUN | IFF_NO_PI) as libc::c_short;
     }
 
-    // Create the TUN interface
+    // Open the kernel's TUN/TAP device file
+    let tun_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(TUN_DEVICE_FILE)?;
+
+    // Bind the `tun_file` fd to the named interface.
     //
     // SAFETY: `tun_file` stays open for the whole call, so its fd is valid. `TUNSETIFF` expects a
     // pointer to an `ifreq`, and `&mut ifr` is a unique borrow of a valid, aligned, fully
@@ -65,43 +84,7 @@ fn create_device(desired_name: &[u8]) -> io::Result<(File, String)> {
         return Err(io::Error::last_os_error());
     }
 
-    Ok((
-        tun_file,
-        // Extract the actual device name assigned by the kernel
-        ifr.ifr_name
-            .into_iter()
-            .take_while(|&c| c != c_char_compat::NUL)
-            .map(c_char_compat::to_u8)
-            .map(char::from)
-            .collect(),
-    ))
-}
-
-/// Configures a TUN device with IP address `ip_cidr` and brings it up.
-fn configure_device(device_name: &str, ip_cidr: &str) -> io::Result<()> {
-    // Set IP address
-    let addr_status = Command::new("ip")
-        .args(["addr", "add", ip_cidr, "dev", device_name])
-        .status()?;
-
-    if !addr_status.success() {
-        return Err(io::Error::other(format!(
-            "Failed to set IP address for TUN device {device_name}: status {addr_status}"
-        )));
-    }
-
-    // Bring interface up
-    let link_status = Command::new("ip")
-        .args(["link", "set", device_name, "up"])
-        .status()?;
-
-    if !link_status.success() {
-        return Err(io::Error::other(format!(
-            "Failed to bring interface up for TUN device {device_name}: status {link_status}"
-        )));
-    }
-
-    Ok(())
+    Ok(tun_file)
 }
 
 /// Module for handling compatibility between C `char` (may or may not be signed depending on the
@@ -121,6 +104,4 @@ mod c_char_compat {
     pub(super) const NUL: libc::c_char = 0;
 
     pub(super) const fn from_u8(b: u8) -> libc::c_char { b as libc::c_char }
-
-    pub(super) const fn to_u8(c: libc::c_char) -> u8 { c as u8 }
 }
