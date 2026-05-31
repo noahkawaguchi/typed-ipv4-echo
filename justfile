@@ -1,18 +1,5 @@
 ####################################################################################################
-# Server recipes
-####################################################################################################
-
-# Build and run the server (default recipe)
-[confirm("Runs the executable with sudo. Proceed?")]
-serve: build
-    sudo ./target/debug/typed-ipv4-echo
-
-# Build the main server executable
-build:
-    cargo build
-
-####################################################################################################
-# Client recipes
+# Connecting as a client
 ####################################################################################################
 
 addr := "10.0.0.2"
