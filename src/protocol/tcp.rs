@@ -1,9 +1,12 @@
 use crate::{
     ETHERNET_MTU, checksum,
-    ipv4_packet::IPV4_HEADER_MIN_LEN,
+    ipv4_packet::{IPV4_HDR_MIN_LEN_U8, IPV4_HDR_MIN_LEN_USIZE},
     protocol::{Protocol, ProtocolHandler},
+    try_ops::{TryAdd, TryGet, TryGetMut},
 };
 use std::fmt;
+
+const TCP_HEADER_MIN_LEN: u8 = 20;
 
 /// Struct for managing and replying to TCP packets. Includes the TCP header and the payload.
 pub(super) struct TcpHandler<'a> {
@@ -27,32 +30,38 @@ struct TcpReplyInfo {
 }
 
 impl<'a> TcpHandler<'a> {
-    const TCP_HEADER_MIN_LEN: u8 = 20;
     const PSEUDO_HEADER_LEN: usize = 12;
-
     const SYN_FLAG: u8 = 0x02;
     const ACK_FLAG: u8 = 0x10;
 
     /// Parses `data` as a TCP header and payload.
     pub(super) fn parse(data: &'a [u8]) -> Result<Self, String> {
-        let n = data.len();
+        let Some(tcp_header) = data.first_chunk::<{ TCP_HEADER_MIN_LEN as usize }>() else {
+            return Err(format!("Too short for TCP header ({} bytes)", data.len()));
+        };
 
-        if n < Self::TCP_HEADER_MIN_LEN.into() {
-            return Err(format!("Too short for TCP header ({n} bytes)"));
-        }
-
-        let offset_bytes = usize::from(data[12] >> 4) * 4; // Convert 32-bit words to bytes
-        let flags = data[13];
+        let offset_bytes = usize::from(tcp_header[12] >> 4) * 4; // Convert 32-bit words to bytes
+        let flags = tcp_header[13];
 
         Ok(Self {
-            src_port: u16::from_be_bytes([data[0], data[1]]),
-            dst_port: u16::from_be_bytes([data[2], data[3]]),
-            seq_num: u32::from_be_bytes([data[4], data[5], data[6], data[7]]),
-            ack_num: u32::from_be_bytes([data[8], data[9], data[10], data[11]]),
+            src_port: u16::from_be_bytes([tcp_header[0], tcp_header[1]]),
+            dst_port: u16::from_be_bytes([tcp_header[2], tcp_header[3]]),
+            seq_num: u32::from_be_bytes([
+                tcp_header[4],
+                tcp_header[5],
+                tcp_header[6],
+                tcp_header[7],
+            ]),
+            ack_num: u32::from_be_bytes([
+                tcp_header[8],
+                tcp_header[9],
+                tcp_header[10],
+                tcp_header[11],
+            ]),
             offset_bytes,
             syn_flag: flags & Self::SYN_FLAG != 0,
             ack_flag: flags & Self::ACK_FLAG != 0,
-            payload: &data[offset_bytes..],
+            payload: data.get(offset_bytes..).ok_or("No data after TCP header")?,
         })
     }
 
@@ -111,39 +120,43 @@ impl<'a> TcpHandler<'a> {
 }
 
 impl ProtocolHandler for TcpHandler<'_> {
-    fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU]) -> Option<u16> {
-        let reply_info = self.determine_reply()?;
+    fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU]) -> Result<Option<u16>, String> {
+        const TCP_START: usize = IPV4_HDR_MIN_LEN_USIZE;
 
-        let tcp_start = IPV4_HEADER_MIN_LEN.into();
+        let Some(reply_info) = self.determine_reply() else { return Ok(None) };
 
         // Swap ports
-        reply[tcp_start..tcp_start + 2].copy_from_slice(&self.dst_port.to_be_bytes());
-        reply[tcp_start + 2..tcp_start + 4].copy_from_slice(&self.src_port.to_be_bytes());
+        reply[TCP_START..TCP_START + 2].copy_from_slice(&self.dst_port.to_be_bytes());
+        reply[TCP_START + 2..TCP_START + 4].copy_from_slice(&self.src_port.to_be_bytes());
 
         // Sequence number
-        reply[tcp_start + 4..tcp_start + 8].copy_from_slice(&reply_info.seq_num.to_be_bytes());
+        reply[TCP_START + 4..TCP_START + 8].copy_from_slice(&reply_info.seq_num.to_be_bytes());
 
         // Acknowledgment number
-        reply[tcp_start + 8..tcp_start + 12].copy_from_slice(&reply_info.ack_num.to_be_bytes());
+        reply[TCP_START + 8..TCP_START + 12].copy_from_slice(&reply_info.ack_num.to_be_bytes());
 
         // Data offset (5 * 4 = 20 bytes) in upper 4 bits
-        reply[tcp_start + 12] = (Self::TCP_HEADER_MIN_LEN / 4) << 4;
+        reply[TCP_START + 12] = (TCP_HEADER_MIN_LEN / 4) << 4;
 
         // Flags (SYN | ACK for handshake, ACK for data)
-        reply[tcp_start + 13] = reply_info.flags;
+        reply[TCP_START + 13] = reply_info.flags;
 
         // Window size for flow control, left at max for simplicity
-        reply[tcp_start + 14..tcp_start + 16].copy_from_slice(&u16::MAX.to_be_bytes());
+        reply[TCP_START + 14..TCP_START + 16].copy_from_slice(&u16::MAX.to_be_bytes());
 
         // Checksum at bytes 16-17 calculated later with pseudo-header
 
         // Urgent pointer
-        reply[tcp_start + 18..tcp_start + 20].copy_from_slice(&[0x00, 0x00]);
+        reply[TCP_START + 18..TCP_START + 20].copy_from_slice(&[0x00, 0x00]);
 
         // Copy payload into reply if echoing
         let payload_len = if reply_info.echo {
-            let payload_start = tcp_start + usize::from(Self::TCP_HEADER_MIN_LEN);
-            reply[payload_start..payload_start + self.payload.len()].copy_from_slice(self.payload);
+            const PAYLOAD_START: usize = TCP_START + TCP_HEADER_MIN_LEN as usize;
+
+            reply
+                .try_get_mut(PAYLOAD_START..PAYLOAD_START.try_add(self.payload.len())?)?
+                .copy_from_slice(self.payload);
+
             self.payload.len()
         } else {
             0
@@ -154,7 +167,7 @@ impl ProtocolHandler for TcpHandler<'_> {
             clippy::cast_possible_truncation,
             reason = "u16::MAX (65_535) > ETHERNET_MTU (1500)"
         )]
-        let tcp_segment_len = u16::from(Self::TCP_HEADER_MIN_LEN) + payload_len as u16;
+        let tcp_segment_len = u16::from(TCP_HEADER_MIN_LEN).try_add(payload_len as u16)?;
 
         // Calculate TCP checksum with pseudo-header
         let mut pseudo_header = [0u8; Self::PSEUDO_HEADER_LEN];
@@ -168,20 +181,23 @@ impl ProtocolHandler for TcpHandler<'_> {
         let checksum_len = Self::PSEUDO_HEADER_LEN + usize::from(tcp_segment_len);
         let mut checksum_data = [0u8; ETHERNET_MTU + Self::PSEUDO_HEADER_LEN];
         checksum_data[0..Self::PSEUDO_HEADER_LEN].copy_from_slice(&pseudo_header);
-        checksum_data[Self::PSEUDO_HEADER_LEN..checksum_len]
-            .copy_from_slice(&reply[tcp_start..tcp_start + usize::from(tcp_segment_len)]);
+        checksum_data
+            .try_get_mut(Self::PSEUDO_HEADER_LEN..checksum_len)?
+            .copy_from_slice(reply.try_get(TCP_START..TCP_START + usize::from(tcp_segment_len))?);
 
         // Zero out checksum field before calculating
         checksum_data[Self::PSEUDO_HEADER_LEN + 16] = 0;
         checksum_data[Self::PSEUDO_HEADER_LEN + 17] = 0;
 
-        let tcp_checksum = checksum::calculate(&checksum_data[..checksum_len]);
-        reply[tcp_start + 16..tcp_start + 18].copy_from_slice(&tcp_checksum.to_be_bytes());
+        let tcp_checksum = checksum::calculate(checksum_data.try_get(..checksum_len)?);
+        reply[TCP_START + 16..TCP_START + 18].copy_from_slice(&tcp_checksum.to_be_bytes());
 
         // Total length: IPv4 header without options (20 bytes)
         //               + minimum TCP header length (20 bytes)
         //               + payload length (0+ bytes)
-        Some(u16::from(IPV4_HEADER_MIN_LEN) + tcp_segment_len)
+        Ok(Some(
+            u16::from(IPV4_HDR_MIN_LEN_U8).try_add(tcp_segment_len)?,
+        ))
     }
 }
 
@@ -350,7 +366,7 @@ mod tests {
         reply[16..20].copy_from_slice(&[10, 0, 0, 1]); // Dest: 10.0.0.1
 
         let total_len = handler
-            .write_reply(&mut reply)
+            .write_reply(&mut reply)?
             .ok_or("failed to write reply")?;
 
         // Verify TCP header at offset 20
@@ -404,7 +420,7 @@ mod tests {
         reply[16..20].copy_from_slice(&[10, 0, 0, 1]);
 
         let total_len = handler
-            .write_reply(&mut reply)
+            .write_reply(&mut reply)?
             .ok_or("failed to write reply")?;
 
         // Verify TCP header
@@ -460,7 +476,7 @@ mod tests {
         reply[16..20].copy_from_slice(&[10, 0, 0, 1]);
 
         // Handshake ACK should not generate a reply
-        assert!(handler.write_reply(&mut reply).is_none());
+        assert!(handler.write_reply(&mut reply)?.is_none());
 
         Ok(())
     }

@@ -4,7 +4,11 @@ use crate::{
 };
 use std::{fmt, net::Ipv4Addr};
 
-pub const IPV4_HEADER_MIN_LEN: u8 = 20;
+/// The minimum number of bytes for an IPv4 header (no options) as a `u8`.
+pub const IPV4_HDR_MIN_LEN_U8: u8 = 20;
+
+/// The minimum number of bytes for an IPv4 header (no options) as a `usize`.
+pub const IPV4_HDR_MIN_LEN_USIZE: usize = IPV4_HDR_MIN_LEN_U8 as usize;
 
 /// Struct for managing a packet's IPv4 data and calling the protocol-specific handler determined at
 /// runtime.
@@ -23,33 +27,35 @@ impl<'a> Ipv4Packet<'a> {
     where
         F: FnOnce(Protocol, &'a [u8]) -> Result<Box<dyn ProtocolHandler + 'a>, String>,
     {
-        let n = data.len();
-        if n < IPV4_HEADER_MIN_LEN.into() {
-            return Err(format!("Too short for IPv4 header ({n} bytes)"));
-        }
+        let Some(ip_header) = data.first_chunk::<IPV4_HDR_MIN_LEN_USIZE>() else {
+            return Err(format!("Too short for IPv4 header ({} bytes)", data.len()));
+        };
 
-        let version = data[0] >> 4;
+        let version = ip_header[0] >> 4;
         if version != 4 {
             return Err(format!("Non-IPv4 packet (version {version})"));
         }
 
-        let ihl_bytes = usize::from(data[0] & 0xF) * 4; // Convert 32-bit words to bytes
-        let protocol = Protocol::from(data[9]);
+        let ihl_bytes = usize::from(ip_header[0] & 0xF) * 4; // Convert 32-bit words to bytes
+        let protocol = Protocol::from(ip_header[9]);
 
         Ok(Self {
-            total_len: u16::from_be_bytes([data[2], data[3]]),
+            total_len: u16::from_be_bytes([ip_header[2], ip_header[3]]),
             protocol,
-            src_ip: Ipv4Addr::new(data[12], data[13], data[14], data[15]),
-            dst_ip: Ipv4Addr::new(data[16], data[17], data[18], data[19]),
-            protocol_handler: protocol_handler_factory(protocol, &data[ihl_bytes..])?,
+            src_ip: Ipv4Addr::new(ip_header[12], ip_header[13], ip_header[14], ip_header[15]),
+            dst_ip: Ipv4Addr::new(ip_header[16], ip_header[17], ip_header[18], ip_header[19]),
+            protocol_handler: protocol_handler_factory(
+                protocol,
+                data.get(ihl_bytes..).ok_or("No data after IPv4 header")?,
+            )?,
         })
     }
 
     /// Writes an appropriate reply packet into the buffer, returning the size of the reply in
     /// bytes, or `None` for no reply.
-    pub fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU]) -> Option<usize> {
+    pub fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU]) -> Result<Option<usize>, String> {
         // IP header (no options, 20 bytes)
-        reply[0] = 0x40 | (IPV4_HEADER_MIN_LEN / 4); // Version 4, IHL 5 (20 bytes)
+        reply[0] = 0x40 | (IPV4_HDR_MIN_LEN_U8 / 4); // Version 4, IHL 5 (20 bytes)
         reply[1] = 0x00; // DSCP/ECN
         // Total length at [2..4] set later depending on protocol
         reply[4..6].copy_from_slice(&[0x00, 0x00]); // Identification
@@ -62,7 +68,7 @@ impl<'a> Ipv4Packet<'a> {
         reply[16..20].copy_from_slice(&self.src_ip.octets());
 
         // Let protocol handler fill in protocol-specific data and calculate total length
-        let total_len = self.protocol_handler.write_reply(reply)?;
+        let Some(total_len) = self.protocol_handler.write_reply(reply)? else { return Ok(None) };
 
         // Fill in total length before calculating checksum
         reply[2..4].copy_from_slice(&total_len.to_be_bytes());
@@ -72,10 +78,10 @@ impl<'a> Ipv4Packet<'a> {
         reply[11] = 0;
 
         // Recalculate IP header checksum (covers only the IP header, always 20 bytes for replies)
-        let ip_checksum = checksum::calculate(&reply[..usize::from(IPV4_HEADER_MIN_LEN)]);
+        let ip_checksum = checksum::calculate(&reply[..IPV4_HDR_MIN_LEN_USIZE]);
         reply[10..12].copy_from_slice(&ip_checksum.to_be_bytes());
 
-        Some(total_len.into())
+        Ok(Some(total_len.into()))
     }
 }
 
@@ -98,7 +104,9 @@ mod tests {
     }
 
     impl ProtocolHandler for MockProtocolHandler {
-        fn write_reply(&self, _reply: &mut [u8; ETHERNET_MTU]) -> Option<u16> { self.return_val }
+        fn write_reply(&self, _reply: &mut [u8; ETHERNET_MTU]) -> Result<Option<u16>, String> {
+            Ok(self.return_val)
+        }
     }
 
     impl fmt::Display for MockProtocolHandler {
@@ -182,7 +190,7 @@ mod tests {
         let packet = Ipv4Packet::parse(&request, mock)?;
         let mut reply = [0u8; ETHERNET_MTU];
         let total_len = packet
-            .write_reply(&mut reply)
+            .write_reply(&mut reply)?
             .ok_or("failed to create reply")?;
 
         // Verify IPv4 header fields

@@ -16,9 +16,9 @@ const PROTOCOL_UDP: u8 = 17;
 /// packet.
 pub trait ProtocolHandler: fmt::Display {
     /// Writes the protocol-specific sections of the reply into the buffer, returning the total
-    /// length of the reply packet in bytes (including the IP header and payload data), or `None` if
-    /// no reply should be sent.
-    fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU]) -> Option<u16>;
+    /// length of the reply packet in bytes (including the IP header and payload data), or
+    /// `Ok(None)` if no reply should be sent.
+    fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU]) -> Result<Option<u16>, String>;
 }
 
 /// Parses `data` as the header and payload of a packet of protocol type `protocol`, returning a

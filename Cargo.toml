@@ -7,14 +7,47 @@ edition = "2024"
 libc = "0.2.184"
 
 [lints.clippy]
-all      = { level = "warn", priority = -1 }
+# All lint groups except restriction and cargo
 nursery  = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 
+# Explicit panics
+expect_used   = "forbid"
+panic         = "forbid"
+todo          = "forbid"
+unimplemented = "forbid"
+unreachable   = "forbid"
+unwrap_used   = "forbid"
+
+# Implicit panics (and wrapping)
+arithmetic_side_effects = "forbid"
+indexing_slicing        = "forbid"
+string_slice            = "forbid"
+
+# Ignoring `#[must_use]`
+let_underscore_must_use = "forbid"
+unused_result_ok        = "forbid"
+
+# Unsafe discipline (only relevant when `unsafe_code` is not set to "forbid")
+multiple_unsafe_ops_per_block = "forbid"
+undocumented_unsafe_blocks    = "forbid"
+
+# Lint suppression
 allow_attributes                = "deny"   # Necessary for C `char` signedness portability
 allow_attributes_without_reason = "forbid"
-expect_used                     = "forbid"
-unwrap_used                     = "forbid"
+
+# Binding shadowing
+shadow_reuse     = "forbid"
+shadow_same      = "forbid"
+shadow_unrelated = "forbid"
+
+# Redundant constructs
+redundant_test_prefix    = "deny"
+unnecessary_self_imports = "warn"
 
 [lints.rust]
 unsafe_code = "deny"
+
+closure_returning_async_block = "warn"
+redundant_imports             = "warn"
+unused_qualifications         = "warn"

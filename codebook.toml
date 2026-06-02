@@ -21,6 +21,7 @@ words = [
     "signedness",
     "signum",
     "sigset",
+    "subslice",
     "userspace",
     "vtable",
     "xzf",
