@@ -5,6 +5,7 @@ mod checksum;
 mod ipv4_packet;
 mod protocol;
 mod shutdown_signal;
+mod try_ops;
 mod tun;
 
 use crate::{ipv4_packet::Ipv4Packet, shutdown_signal::ShutdownSignal};
