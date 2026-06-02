@@ -8,9 +8,10 @@ mod shutdown_signal;
 mod try_ops;
 mod tun;
 
-use crate::{ipv4_packet::Ipv4Packet, shutdown_signal::ShutdownSignal};
+use crate::{ipv4_packet::Ipv4Packet, shutdown_signal::ShutdownSignal, try_ops::TryGet};
 use std::{
     env,
+    error::Error,
     io::{self, Read, Write},
 };
 
@@ -19,7 +20,7 @@ const ETHERNET_MTU: usize = 1500;
 
 /// Runs an echo server that uses a TUN device to read and write IPv4 packets: TCP, UDP, and ICMP.
 /// Exits gracefully upon receiving a shutdown signal.
-fn main() -> io::Result<()> {
+fn main() -> Result<(), Box<dyn Error>> {
     let shutdown = ShutdownSignal::install()?;
 
     let tun_name = env::var("TUN_DEVICE_NAME").unwrap_or_else(|_| String::from("tun0"));
@@ -34,19 +35,25 @@ fn main() -> io::Result<()> {
             // If `read()` was interrupted and returned `EINTR`, immediately continue to check the
             // shutdown flag
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-            Err(e) => return Err(e),
+            Err(e) => return Err(e.into()),
             Ok(n) => n,
         };
 
-        match Ipv4Packet::parse(&read_buf[..n], protocol::parse_data) {
+        match Ipv4Packet::parse(read_buf.try_get(..n)?, protocol::parse_data) {
             Err(e) => eprintln!("Skipping packet: {e}"),
 
             Ok(packet) => {
                 println!("{packet}");
 
-                if let Some(reply_len) = packet.write_reply(&mut write_buf) {
-                    tun.write_all(&write_buf[..reply_len])?;
-                    println!("Reply packet sent!");
+                match packet.write_reply(&mut write_buf) {
+                    Ok(Some(reply_len)) => {
+                        tun.write_all(write_buf.try_get(..reply_len)?)?;
+                        println!("Reply packet sent!");
+                    }
+
+                    Ok(None) => {}
+
+                    Err(e) => eprintln!("Error writing reply: {e}"),
                 }
             }
         }

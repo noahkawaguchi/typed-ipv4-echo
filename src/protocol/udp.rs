@@ -1,9 +1,12 @@
 use crate::{
     ETHERNET_MTU, checksum,
-    ipv4_packet::IPV4_HEADER_MIN_LEN,
+    ipv4_packet::{IPV4_HDR_MIN_LEN_U8, IPV4_HDR_MIN_LEN_USIZE},
     protocol::{Protocol, ProtocolHandler},
+    try_ops::{TryAdd, TryGet, TryGetMut},
 };
 use std::fmt;
+
+const UDP_HEADER_LEN: u8 = 8;
 
 /// Struct for managing and replying to UDP packets. Includes the UDP header and the payload.
 pub(super) struct UdpHandler<'a> {
@@ -13,53 +16,58 @@ pub(super) struct UdpHandler<'a> {
 }
 
 impl<'a> UdpHandler<'a> {
-    const UDP_HEADER_LEN: u8 = 8;
     const PSEUDO_HEADER_LEN: usize = 12;
 
     /// Parses `data` as a UDP header and payload.
     pub(super) fn parse(data: &'a [u8]) -> Result<Self, String> {
-        let n = data.len();
-
-        if n < Self::UDP_HEADER_LEN.into() {
-            return Err(format!("Too short for UDP header ({n} bytes)"));
-        }
+        let Some(udp_header) = data.first_chunk::<{ UDP_HEADER_LEN as usize }>() else {
+            return Err(format!("Too short for UDP header ({} bytes)", data.len()));
+        };
 
         Ok(Self {
-            src_port: u16::from_be_bytes([data[0], data[1]]),
-            dst_port: u16::from_be_bytes([data[2], data[3]]),
-            payload: &data[Self::UDP_HEADER_LEN.into()..],
+            src_port: u16::from_be_bytes([udp_header[0], udp_header[1]]),
+            dst_port: u16::from_be_bytes([udp_header[2], udp_header[3]]),
+            payload: data
+                .get(UDP_HEADER_LEN.into()..)
+                .ok_or("No data after UDP header")?,
         })
     }
 }
 
 impl ProtocolHandler for UdpHandler<'_> {
-    fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU]) -> Option<u16> {
+    fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU]) -> Result<Option<u16>, String> {
+        const UDP_START: usize = IPV4_HDR_MIN_LEN_USIZE;
+
         println!(
             "Received {} bytes of data: {}\nEchoing data back...",
             self.payload.len(),
             str::from_utf8(self.payload).unwrap_or("<non-UTF-8>")
         );
 
-        let udp_start = usize::from(IPV4_HEADER_MIN_LEN);
-
         // UDP header
         // Swap src and dst ports
-        reply[udp_start..udp_start + 2].copy_from_slice(&self.dst_port.to_be_bytes());
-        reply[udp_start + 2..udp_start + 4].copy_from_slice(&self.src_port.to_be_bytes());
+        reply[UDP_START..UDP_START + 2].copy_from_slice(&self.dst_port.to_be_bytes());
+        reply[UDP_START + 2..UDP_START + 4].copy_from_slice(&self.src_port.to_be_bytes());
 
         // UDP length = header (8) + payload
         #[expect(
             clippy::cast_possible_truncation,
             reason = "u16::MAX (65_535) > ETHERNET_MTU (1500)"
         )]
-        let udp_len = u16::from(Self::UDP_HEADER_LEN) + self.payload.len() as u16;
-        reply[udp_start + 4..udp_start + 6].copy_from_slice(&udp_len.to_be_bytes());
+        let udp_len = u16::from(UDP_HEADER_LEN).try_add(self.payload.len() as u16)?;
+        reply[UDP_START + 4..UDP_START + 6].copy_from_slice(&udp_len.to_be_bytes());
 
         // Checksum at bytes 6-7 calculated later
 
         // Copy payload for echo
-        let payload_start = udp_start + usize::from(Self::UDP_HEADER_LEN);
-        reply[payload_start..payload_start + self.payload.len()].copy_from_slice(self.payload);
+        #[expect(
+            clippy::items_after_statements,
+            reason = "Constant only used right here"
+        )]
+        const PAYLOAD_START: usize = UDP_START + UDP_HEADER_LEN as usize;
+        reply
+            .try_get_mut(PAYLOAD_START..PAYLOAD_START.try_add(self.payload.len())?)?
+            .copy_from_slice(self.payload);
 
         // Calculate UDP checksum with pseudo-header
         let mut pseudo_header = [0u8; Self::PSEUDO_HEADER_LEN];
@@ -73,20 +81,21 @@ impl ProtocolHandler for UdpHandler<'_> {
         let checksum_len = Self::PSEUDO_HEADER_LEN + usize::from(udp_len);
         let mut checksum_data = [0u8; ETHERNET_MTU + Self::PSEUDO_HEADER_LEN];
         checksum_data[0..Self::PSEUDO_HEADER_LEN].copy_from_slice(&pseudo_header);
-        checksum_data[Self::PSEUDO_HEADER_LEN..checksum_len]
-            .copy_from_slice(&reply[udp_start..udp_start + usize::from(udp_len)]);
+        checksum_data
+            .try_get_mut(Self::PSEUDO_HEADER_LEN..checksum_len)?
+            .copy_from_slice(reply.try_get(UDP_START..UDP_START.try_add(usize::from(udp_len))?)?);
 
         // Zero out checksum field before calculating
         checksum_data[Self::PSEUDO_HEADER_LEN + 6] = 0;
         checksum_data[Self::PSEUDO_HEADER_LEN + 7] = 0;
 
-        let udp_checksum = checksum::calculate(&checksum_data[..checksum_len]);
-        reply[udp_start + 6..udp_start + 8].copy_from_slice(&udp_checksum.to_be_bytes());
+        let udp_checksum = checksum::calculate(checksum_data.try_get(..checksum_len)?);
+        reply[UDP_START + 6..UDP_START + 8].copy_from_slice(&udp_checksum.to_be_bytes());
 
         // Total length: IPv4 header without options (20 bytes)
         //               + fixed UDP header length (8 bytes)
         //               + length of echo payload
-        Some(u16::from(IPV4_HEADER_MIN_LEN) + udp_len)
+        Ok(Some(u16::from(IPV4_HDR_MIN_LEN_U8).try_add(udp_len)?))
     }
 }
 
@@ -184,7 +193,7 @@ mod tests {
         reply[16..20].copy_from_slice(&[10, 0, 0, 1]); // Dest: 10.0.0.1
 
         let total_len = handler
-            .write_reply(&mut reply)
+            .write_reply(&mut reply)?
             .ok_or("failed to write reply")?;
 
         // Verify UDP header at offset 20
