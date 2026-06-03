@@ -1,7 +1,7 @@
 use crate::{
     ETHERNET_MTU, checksum,
     ipv4_packet::{IPV4_HDR_MIN_LEN_U8, IPV4_HDR_MIN_LEN_USIZE},
-    protocol::{Protocol, ProtocolHandler},
+    protocol::Protocol,
     try_ops::{TryAdd, TryGet, TryGetMut},
 };
 use std::fmt;
@@ -9,7 +9,7 @@ use std::fmt;
 const UDP_HEADER_LEN: u8 = 8;
 
 /// Struct for managing and replying to UDP packets. Includes the UDP header and the payload.
-pub(super) struct UdpHandler<'a> {
+pub struct UdpHandler<'a> {
     src_port: u16,
     dst_port: u16,
     payload: &'a [u8],
@@ -19,7 +19,7 @@ impl<'a> UdpHandler<'a> {
     const PSEUDO_HEADER_LEN: usize = 12;
 
     /// Parses `data` as a UDP header and payload.
-    pub(super) fn parse(data: &'a [u8]) -> Result<Self, String> {
+    pub fn parse(data: &'a [u8]) -> Result<Self, String> {
         let Some(udp_header) = data.first_chunk::<{ UDP_HEADER_LEN as usize }>() else {
             return Err(format!("Too short for UDP header ({} bytes)", data.len()));
         };
@@ -32,10 +32,8 @@ impl<'a> UdpHandler<'a> {
                 .ok_or("No data after UDP header")?,
         })
     }
-}
 
-impl ProtocolHandler for UdpHandler<'_> {
-    fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU]) -> Result<Option<u16>, String> {
+    pub fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU]) -> Result<Option<u16>, String> {
         const UDP_START: usize = IPV4_HDR_MIN_LEN_USIZE;
 
         println!(

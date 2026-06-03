@@ -1,7 +1,4 @@
-use crate::{
-    ETHERNET_MTU, checksum,
-    protocol::{Protocol, ProtocolHandler},
-};
+use crate::{ETHERNET_MTU, checksum, protocol::Protocol};
 use std::{fmt, net::Ipv4Addr};
 
 /// The minimum number of bytes for an IPv4 header (no options) as a `u8`.
@@ -10,23 +7,18 @@ pub const IPV4_HDR_MIN_LEN_U8: u8 = 20;
 /// The minimum number of bytes for an IPv4 header (no options) as a `usize`.
 pub const IPV4_HDR_MIN_LEN_USIZE: usize = IPV4_HDR_MIN_LEN_U8 as usize;
 
-/// Struct for managing a packet's IPv4 data and calling the protocol-specific handler determined at
-/// runtime.
+/// Parsed IPv4 header fields and the payload slice that follows the header.
 pub struct Ipv4Packet<'a> {
     total_len: u16,
-    protocol: Protocol,
+    pub protocol: Protocol,
     src_ip: Ipv4Addr,
     dst_ip: Ipv4Addr,
-    protocol_handler: Box<dyn ProtocolHandler + 'a>,
+    pub payload: &'a [u8],
 }
 
 impl<'a> Ipv4Packet<'a> {
-    /// Parses packet data as as an IPv4 header and calls `protocol_handler_factory` with the parsed
-    /// protocol type.
-    pub fn parse<F>(data: &'a [u8], protocol_handler_factory: F) -> Result<Self, String>
-    where
-        F: FnOnce(Protocol, &'a [u8]) -> Result<Box<dyn ProtocolHandler + 'a>, String>,
-    {
+    /// Parses `data` as an IPv4 header, returning the header fields and a slice of the payload.
+    pub fn parse(data: &'a [u8]) -> Result<Self, String> {
         let Some(ip_header) = data.first_chunk::<IPV4_HDR_MIN_LEN_USIZE>() else {
             return Err(format!("Too short for IPv4 header ({} bytes)", data.len()));
         };
@@ -37,27 +29,23 @@ impl<'a> Ipv4Packet<'a> {
         }
 
         let ihl_bytes = usize::from(ip_header[0] & 0xF) * 4; // Convert 32-bit words to bytes
-        let protocol = Protocol::from(ip_header[9]);
 
         Ok(Self {
             total_len: u16::from_be_bytes([ip_header[2], ip_header[3]]),
-            protocol,
+            protocol: Protocol::from(ip_header[9]),
             src_ip: Ipv4Addr::new(ip_header[12], ip_header[13], ip_header[14], ip_header[15]),
             dst_ip: Ipv4Addr::new(ip_header[16], ip_header[17], ip_header[18], ip_header[19]),
-            protocol_handler: protocol_handler_factory(
-                protocol,
-                data.get(ihl_bytes..).ok_or("No data after IPv4 header")?,
-            )?,
+            payload: data.get(ihl_bytes..).ok_or("No data after IPv4 header")?,
         })
     }
 
-    /// Writes an appropriate reply packet into the buffer, returning the size of the reply in
-    /// bytes, or `None` for no reply.
-    pub fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU]) -> Result<Option<usize>, String> {
+    /// Writes the IPv4 reply header into `reply` using `total_len` as the packet length.
+    /// Source and destination addresses are swapped from the original packet.
+    pub fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU], total_len: u16) {
         // IP header (no options, 20 bytes)
         reply[0] = 0x40 | (IPV4_HDR_MIN_LEN_U8 / 4); // Version 4, IHL 5 (20 bytes)
         reply[1] = 0x00; // DSCP/ECN
-        // Total length at [2..4] set later depending on protocol
+        reply[2..4].copy_from_slice(&total_len.to_be_bytes());
         reply[4..6].copy_from_slice(&[0x00, 0x00]); // Identification
         reply[6..8].copy_from_slice(&[0x40, 0x00]); // Flags + Fragment offset (Don't Fragment)
         reply[8] = 64; // TTL
@@ -67,12 +55,6 @@ impl<'a> Ipv4Packet<'a> {
         reply[12..16].copy_from_slice(&self.dst_ip.octets());
         reply[16..20].copy_from_slice(&self.src_ip.octets());
 
-        // Let protocol handler fill in protocol-specific data and calculate total length
-        let Some(total_len) = self.protocol_handler.write_reply(reply)? else { return Ok(None) };
-
-        // Fill in total length before calculating checksum
-        reply[2..4].copy_from_slice(&total_len.to_be_bytes());
-
         // Clear IP header checksum field before recalculating
         reply[10] = 0;
         reply[11] = 0;
@@ -80,8 +62,6 @@ impl<'a> Ipv4Packet<'a> {
         // Recalculate IP header checksum (covers only the IP header, always 20 bytes for replies)
         let ip_checksum = checksum::calculate(&reply[..IPV4_HDR_MIN_LEN_USIZE]);
         reply[10..12].copy_from_slice(&ip_checksum.to_be_bytes());
-
-        Ok(Some(total_len.into()))
     }
 }
 
@@ -89,8 +69,8 @@ impl fmt::Display for Ipv4Packet<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "IPv4 | {} bytes | {} | {} -> {}\n{}",
-            self.total_len, self.protocol, self.src_ip, self.dst_ip, self.protocol_handler,
+            "IPv4 | {} bytes | {} | {} -> {}",
+            self.total_len, self.protocol, self.src_ip, self.dst_ip,
         )
     }
 }
@@ -98,34 +78,6 @@ impl fmt::Display for Ipv4Packet<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    struct MockProtocolHandler {
-        return_val: Option<u16>,
-    }
-
-    impl ProtocolHandler for MockProtocolHandler {
-        fn write_reply(&self, _reply: &mut [u8; ETHERNET_MTU]) -> Result<Option<u16>, String> {
-            Ok(self.return_val)
-        }
-    }
-
-    impl fmt::Display for MockProtocolHandler {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(
-                f,
-                "mock protocol handler with return value {:#?}",
-                self.return_val
-            )
-        }
-    }
-
-    /// Creates a factory function that returns a `ProtocolHandler` whose `write_reply` method
-    /// returns `return_val`.
-    fn make_factory_returning_mock_handler_returning<'a>(
-        return_val: Option<u16>,
-    ) -> impl Fn(Protocol, &'a [u8]) -> Result<Box<dyn ProtocolHandler + 'a>, String> {
-        move |_protocol, _data| Ok(Box::new(MockProtocolHandler { return_val }))
-    }
 
     #[test]
     fn correctly_parses_valid_packet() -> Result<(), String> {
@@ -138,9 +90,7 @@ mod tests {
             172, 16, 10, 12,         // Dest IP: 172.16.10.12
         ];
 
-        let mock = make_factory_returning_mock_handler_returning(None);
-
-        let packet = Ipv4Packet::parse(&data, mock)?;
+        let packet = Ipv4Packet::parse(&data)?;
 
         assert_eq!(packet.total_len, 60);
         assert_eq!(packet.protocol, Protocol::Tcp);
@@ -153,8 +103,7 @@ mod tests {
     #[test]
     fn parsing_fails_if_too_short() {
         let data = [0x45, 0x00, 0x00]; // Only 3 bytes
-        let mock = make_factory_returning_mock_handler_returning(None);
-        assert!(Ipv4Packet::parse(&data, mock).is_err_and(|e| e.contains("Too short")));
+        assert!(Ipv4Packet::parse(&data).is_err_and(|e| e.contains("Too short")));
     }
 
     #[test]
@@ -169,9 +118,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x01,
         ];
 
-        let mock = make_factory_returning_mock_handler_returning(None);
-
-        assert!(Ipv4Packet::parse(&data, mock).is_err_and(|e| e.contains("Non-IPv4")));
+        assert!(Ipv4Packet::parse(&data).is_err_and(|e| e.contains("Non-IPv4")));
     }
 
     #[test]
@@ -185,13 +132,9 @@ mod tests {
             172, 16, 10, 12,         // Dest IP: 172.16.10.12
         ];
 
-        // Mock handler that writes a 28-byte payload and returns total length 48 (20 + 28)
-        let mock = make_factory_returning_mock_handler_returning(Some(48));
-        let packet = Ipv4Packet::parse(&request, mock)?;
+        let packet = Ipv4Packet::parse(&request)?;
         let mut reply = [0u8; ETHERNET_MTU];
-        let total_len = packet
-            .write_reply(&mut reply)?
-            .ok_or("failed to create reply")?;
+        packet.write_reply(&mut reply, 48);
 
         // Verify IPv4 header fields
         assert_eq!(reply[0], 0x45); // Version 4, IHL 5
@@ -205,9 +148,6 @@ mod tests {
         // Verify IPs are swapped
         assert_eq!(&reply[12..16], &[172, 16, 10, 12]); // Source (was dest)
         assert_eq!(&reply[16..20], &[192, 168, 1, 100]); // Dest (was source)
-
-        // Verify total length returned
-        assert_eq!(total_len, 48);
 
         // Verify IP header checksum is valid
         let ip_checksum = checksum::calculate(&reply[..20]);

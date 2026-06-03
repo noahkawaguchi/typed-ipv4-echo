@@ -27,7 +27,7 @@ This project demonstrates low-level networking in Rust by implementing a userspa
 
 ## Architecture
 
-The server's design uses a `ProtocolHandler` trait (interface) to separate protocol-agnostic IPv4 handling from protocol-specific logic. At the same time, the design prioritizes controlled use of the heap only when it truly improves clarity and maintainability.
+The server separates protocol-agnostic IPv4 handling from protocol-specific ICMP/TCP/UDP logic using a `ProtocolHandler` enum with variants for each supported protocol.
 
 ```
 ┌────────────────────────────────────┐
@@ -43,8 +43,8 @@ The server's design uses a `ProtocolHandler` trait (interface) to separate proto
                  │
                  ▼
 ┌───────────────────────────────────┐
-      ProtocolHandler trait
-   (runtime polymorphism via Box)
+       ProtocolHandler enum
+         (static dispatch)
 └────┬───────────┬───────────┬──────┘
      │           │           │
      ▼           ▼           ▼
@@ -54,14 +54,12 @@ The server's design uses a `ProtocolHandler` trait (interface) to separate proto
 └─────────┘ └─────────┘ └─────────┘
 ```
 
-Each concrete protocol handler implements the `ProtocolHandler` trait and performs the following:
+Each variant wraps a concrete protocol handler responsible for:
 
 - Parsing the protocol-specific header and payload from raw bytes
 - Writing an appropriate reply packet
 
-At the cost of vtable lookups and one `Box` (heap-allocated smart pointer without reference counting) per pair of packets, this design enables straightforward testing via dependency injection and maintains a clear separation of concerns between IPv4 and TCP/UDP/ICMP.
-
-Error messages use `String` heap allocations for readable and and safe inclusion of runtime data, but all of the core packet data is managed in two fixed-size arrays on the stack.
+The design also prioritizes controlled use of the heap only when it truly improves clarity and maintainability. Error messages use `String` heap allocations for readable and safe inclusion of runtime data, but all of the core packet data is managed in two fixed-size arrays on the stack.
 
 ## Running the Server
 

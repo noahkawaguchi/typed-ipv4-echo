@@ -1,7 +1,6 @@
 use crate::{
     ETHERNET_MTU, checksum,
     ipv4_packet::{IPV4_HDR_MIN_LEN_U8, IPV4_HDR_MIN_LEN_USIZE},
-    protocol::ProtocolHandler,
     try_ops::{TryAdd, TryGet, TryGetMut},
 };
 use std::fmt;
@@ -10,7 +9,7 @@ const ICMP_HEADER_LEN: u8 = 8;
 
 /// Struct for managing ICMP Echo Request packets and creating Echo Reply packets. Includes the ICMP
 /// type-specific data and the payload.
-pub(super) struct IcmpEchoHandler<'a> {
+pub struct IcmpEchoHandler<'a> {
     // Type and code are omitted because they are constant (must be 8 and 0 for Echo Request)
     identifier: u16,
     sequence: u16,
@@ -23,7 +22,7 @@ impl<'a> IcmpEchoHandler<'a> {
     const ICMP_CODE_ECHO: u8 = 0;
 
     /// Parses `data` as an ICMP Echo Request header and payload.
-    pub(super) fn parse(data: &'a [u8]) -> Result<Self, String> {
+    pub fn parse(data: &'a [u8]) -> Result<Self, String> {
         let Some(icmp_header) = data.first_chunk::<{ ICMP_HEADER_LEN as usize }>() else {
             return Err(format!("Too short for ICMP header ({} bytes)", data.len()));
         };
@@ -46,10 +45,8 @@ impl<'a> IcmpEchoHandler<'a> {
                 .ok_or("No data after ICMP header")?,
         })
     }
-}
 
-impl ProtocolHandler for IcmpEchoHandler<'_> {
-    fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU]) -> Result<Option<u16>, String> {
+    pub fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU]) -> Result<Option<u16>, String> {
         const ICMP_START: usize = IPV4_HDR_MIN_LEN_USIZE;
         const PAYLOAD_START: usize = ICMP_START + ICMP_HEADER_LEN as usize;
 

@@ -8,7 +8,10 @@ mod shutdown_signal;
 mod try_ops;
 mod tun;
 
-use crate::{ipv4_packet::Ipv4Packet, shutdown_signal::ShutdownSignal, try_ops::TryGet};
+use crate::{
+    ipv4_packet::Ipv4Packet, protocol::ProtocolHandler, shutdown_signal::ShutdownSignal,
+    try_ops::TryGet,
+};
 use std::{
     env,
     error::Error,
@@ -39,21 +42,30 @@ fn main() -> Result<(), Box<dyn Error>> {
             Ok(n) => n,
         };
 
-        match Ipv4Packet::parse(read_buf.try_get(..n)?, protocol::parse_data) {
+        match Ipv4Packet::parse(read_buf.try_get(..n)?) {
             Err(e) => eprintln!("Skipping packet: {e}"),
 
             Ok(packet) => {
                 println!("{packet}");
 
-                match packet.write_reply(&mut write_buf) {
-                    Ok(Some(reply_len)) => {
-                        tun.write_all(write_buf.try_get(..reply_len)?)?;
-                        println!("Reply packet sent!");
+                match ProtocolHandler::parse(packet.payload, packet.protocol) {
+                    Err(e) => eprintln!("Skipping packet: {e}"),
+
+                    Ok(handler) => {
+                        println!("{handler}");
+
+                        match handler.write_reply(&mut write_buf) {
+                            Err(e) => eprintln!("Error writing reply: {e}"),
+
+                            Ok(None) => {}
+
+                            Ok(Some(total_len)) => {
+                                packet.write_reply(&mut write_buf, total_len);
+                                tun.write_all(write_buf.try_get(..usize::from(total_len))?)?;
+                                println!("Reply packet sent!");
+                            }
+                        }
                     }
-
-                    Ok(None) => {}
-
-                    Err(e) => eprintln!("Error writing reply: {e}"),
                 }
             }
         }
