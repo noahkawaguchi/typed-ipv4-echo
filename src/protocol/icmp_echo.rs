@@ -1,11 +1,10 @@
 use crate::{
-    ETHERNET_MTU, checksum,
-    ipv4_packet::{IPV4_HDR_MIN_LEN_U8, IPV4_HDR_MIN_LEN_USIZE},
+    checksum,
     try_ops::{TryAdd, TryGet, TryGetMut},
 };
 use std::fmt;
 
-const ICMP_HEADER_LEN: u8 = 8;
+const ICMP_HEADER_LEN: u16 = 8;
 
 /// Struct for managing ICMP Echo Request packets and creating Echo Reply packets. Includes the ICMP
 /// type-specific data and the payload.
@@ -46,47 +45,49 @@ impl<'a> IcmpEchoHandler<'a> {
         })
     }
 
-    pub fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU]) -> Result<Option<u16>, String> {
-        const ICMP_START: usize = IPV4_HDR_MIN_LEN_USIZE;
-        const PAYLOAD_START: usize = ICMP_START + ICMP_HEADER_LEN as usize;
-
+    pub fn write_reply(&self, reply: &mut [u8]) -> Result<Option<u16>, String> {
         println!("Building ICMP Echo Reply...");
 
         // Copy payload into reply
         reply
-            .try_get_mut(PAYLOAD_START..PAYLOAD_START.try_add(self.payload.len())?)?
+            .try_get_mut(
+                usize::from(ICMP_HEADER_LEN)
+                    ..usize::from(ICMP_HEADER_LEN).try_add(self.payload.len())?,
+            )?
             .copy_from_slice(self.payload);
 
         // ICMP Echo Reply header
-        reply[ICMP_START] = Self::ICMP_TYPE_ECHO_REPLY;
-        reply[ICMP_START + 1] = Self::ICMP_CODE_ECHO;
+        *reply.try_get_mut(0)? = Self::ICMP_TYPE_ECHO_REPLY;
+        *reply.try_get_mut(1)? = Self::ICMP_CODE_ECHO;
 
         // Checksum at bytes 2-3 calculated later
 
         // Identifier and sequence for echo request/reply
-        reply[ICMP_START + 4..ICMP_START + 6].copy_from_slice(&self.identifier.to_be_bytes());
-        reply[ICMP_START + 6..ICMP_START + 8].copy_from_slice(&self.sequence.to_be_bytes());
+        reply
+            .try_get_mut(4..6)?
+            .copy_from_slice(&self.identifier.to_be_bytes());
+        reply
+            .try_get_mut(6..8)?
+            .copy_from_slice(&self.sequence.to_be_bytes());
 
         // Clear ICMP checksum field before recalculating
-        reply[ICMP_START + 2] = 0;
-        reply[ICMP_START + 3] = 0;
+        *reply.try_get_mut(2)? = 0;
+        *reply.try_get_mut(3)? = 0;
 
-        // Calculate ICMP checksum (covers the entire ICMP message: header + payload)
-        let icmp_checksum = checksum::calculate(reply.try_get(
-            ICMP_START..(ICMP_START + usize::from(ICMP_HEADER_LEN)).try_add(self.payload.len())?,
-        )?);
-        reply[ICMP_START + 2..ICMP_START + 4].copy_from_slice(&icmp_checksum.to_be_bytes());
-
+        // ICMP length: fixed ICMP header length (8 bytes) + length of echo payload
         #[expect(
             clippy::cast_possible_truncation,
             reason = "u16::MAX (65_535) > ETHERNET_MTU (1500)"
         )]
-        Ok(Some(
-            // Total length: IPv4 header without options (20 bytes)
-            //               + fixed ICMP header length (8 bytes)
-            //               + length of echo payload
-            u16::from(IPV4_HDR_MIN_LEN_U8 + ICMP_HEADER_LEN).try_add(self.payload.len() as u16)?,
-        ))
+        let icmp_len = ICMP_HEADER_LEN.try_add(self.payload.len() as u16)?;
+
+        // Calculate ICMP checksum (covers the entire ICMP message: header + payload)
+        let icmp_checksum = checksum::calculate(reply.try_get(..usize::from(icmp_len))?);
+        reply
+            .try_get_mut(2..4)?
+            .copy_from_slice(&icmp_checksum.to_be_bytes());
+
+        Ok(Some(icmp_len))
     }
 }
 
@@ -106,6 +107,7 @@ impl fmt::Display for IcmpEchoHandler<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ETHERNET_MTU;
 
     #[test]
     fn correctly_parses_valid_request() -> Result<(), String> {
@@ -196,8 +198,8 @@ mod tests {
         reply[12..16].copy_from_slice(&[10, 0, 0, 2]); // Source: 10.0.0.2
         reply[16..20].copy_from_slice(&[10, 0, 0, 1]); // Dest: 10.0.0.1
 
-        let total_len = handler
-            .write_reply(&mut reply)?
+        let icmp_len = handler
+            .write_reply(&mut reply[20..])?
             .ok_or("failed to write reply")?;
 
         // Verify ICMP header at offset 20
@@ -209,11 +211,10 @@ mod tests {
         // Verify payload echoed
         assert_eq!(&reply[28..33], b"Hello");
 
-        // Verify total length
-        assert_eq!(total_len, 20 + 8 + 5);
+        // Verify ICMP length
+        assert_eq!(icmp_len, 8 + 5);
 
         // Verify checksum is valid (checksum of ICMP message should be 0)
-        let icmp_len = total_len - 20;
         let checksum = checksum::calculate(reply.try_get(20..20 + usize::from(icmp_len))?);
         assert_eq!(checksum, 0x0000);
 

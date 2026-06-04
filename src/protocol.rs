@@ -2,11 +2,8 @@ mod icmp_echo;
 mod tcp;
 mod udp;
 
-use crate::{
-    ETHERNET_MTU,
-    protocol::{icmp_echo::IcmpEchoHandler, tcp::TcpHandler, udp::UdpHandler},
-};
-use std::fmt;
+use crate::protocol::{icmp_echo::IcmpEchoHandler, tcp::TcpHandler, udp::UdpHandler};
+use std::{fmt, net::Ipv4Addr};
 
 const PROTOCOL_ICMP: u8 = 1;
 const PROTOCOL_TCP: u8 = 6;
@@ -36,14 +33,19 @@ impl<'a> ProtocolHandler<'a> {
         }
     }
 
-    /// Writes the protocol-specific sections of the reply into the buffer, returning the total
-    /// length of the reply packet in bytes (including the IP header and payload data), or
+    /// Writes the protocol-specific sections starting from the beginning of `reply`, returning the
+    /// length of the protocol-specific header and payload in bytes (excluding the IP header), or
     /// `Ok(None)` if no reply should be sent.
-    pub fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU]) -> Result<Option<u16>, String> {
+    pub fn write_reply(
+        &self,
+        reply: &mut [u8],
+        src_ip: Ipv4Addr,
+        dst_ip: Ipv4Addr,
+    ) -> Result<Option<u16>, String> {
         match self {
             Self::Icmp(handler) => handler.write_reply(reply),
-            Self::Tcp(handler) => handler.write_reply(reply),
-            Self::Udp(handler) => handler.write_reply(reply),
+            Self::Tcp(handler) => handler.write_reply(reply, src_ip, dst_ip),
+            Self::Udp(handler) => handler.write_reply(reply, src_ip, dst_ip),
         }
     }
 }
