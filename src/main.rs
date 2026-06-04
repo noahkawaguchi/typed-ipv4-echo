@@ -61,8 +61,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                             ipv4_header.dst_ip,
                             ipv4_header.src_ip,
                         )? {
-                            let total_len = ipv4_header.write_reply(&mut write_buf, proto_len)?;
-                            tun.write_all(write_buf.try_get(..total_len)?)?;
+                            let reply_ipv4_header = ipv4_header.create_reply(proto_len)?;
+                            println!("{reply_ipv4_header}");
+
+                            reply_ipv4_header.write_into(&mut write_buf);
+                            tun.write_all(
+                                write_buf.try_get(..reply_ipv4_header.total_len.into())?,
+                            )?;
+
                             println!("Reply packet sent!");
                         }
                     }
