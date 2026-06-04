@@ -54,22 +54,31 @@ fn main() -> Result<(), Box<dyn Error>> {
                     Ok(handler) => {
                         println!("{handler}");
 
-                        if let Some(proto_len) = handler.write_reply(
-                            &mut write_buf[Ipv4Header::REPLY_HEADER_LEN..],
-                            // Swap the source and destination IP addresses from the received
-                            // packet for the reply packet
-                            ipv4_header.dst_ip,
-                            ipv4_header.src_ip,
-                        )? {
-                            let reply_ipv4_header = ipv4_header.create_reply(proto_len)?;
-                            println!("{reply_ipv4_header}");
+                        match handler.create_reply() {
+                            None => println!("No reply required"),
 
-                            reply_ipv4_header.write_into(&mut write_buf);
-                            tun.write_all(
-                                write_buf.try_get(..reply_ipv4_header.total_len.into())?,
-                            )?;
+                            Some(reply_handler) => {
+                                // Write the protocol-specific portion of the reply packet first to
+                                // have the total length for the IPv4 header
+                                let proto_len = reply_handler.write_into(
+                                    &mut write_buf[Ipv4Header::REPLY_HEADER_LEN..],
+                                    // Swap the source and destination IP addresses from the
+                                    // received packet for the reply packet
+                                    ipv4_header.dst_ip,
+                                    ipv4_header.src_ip,
+                                )?;
 
-                            println!("Reply packet sent!");
+                                let reply_ipv4_header = ipv4_header.create_reply(proto_len)?;
+                                reply_ipv4_header.write_into(&mut write_buf);
+
+                                tun.write_all(
+                                    write_buf.try_get(..reply_ipv4_header.total_len.into())?,
+                                )?;
+
+                                println!("{reply_ipv4_header}");
+                                println!("{reply_handler}");
+                                println!("Reply packet sent!");
+                            }
                         }
                     }
                 }
