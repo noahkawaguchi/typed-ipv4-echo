@@ -54,7 +54,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                     Ok(handler) => {
                         println!("{handler}");
 
-                        if let Some(proto_len) = handler.write_reply(&mut write_buf)? {
+                        if let Some(proto_len) = handler.write_reply(
+                            &mut write_buf[Ipv4Packet::REPLY_HEADER_LEN..],
+                            // Swap the source and destination IP addresses from the received
+                            // packet for the reply packet
+                            packet.dst_ip,
+                            packet.src_ip,
+                        )? {
                             let total_len = packet.write_reply(&mut write_buf, proto_len)?;
                             tun.write_all(write_buf.try_get(..total_len)?)?;
                             println!("Reply packet sent!");

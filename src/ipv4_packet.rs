@@ -2,21 +2,24 @@ use crate::{ETHERNET_MTU, checksum, protocol::Protocol, try_ops::TryAdd};
 use std::{fmt, net::Ipv4Addr};
 
 /// The minimum number of bytes for an IPv4 header (no options) as a `u8`.
-pub const IPV4_HDR_MIN_LEN_U8: u8 = 20;
+const IPV4_HDR_MIN_LEN_U8: u8 = 20;
 
 /// The minimum number of bytes for an IPv4 header (no options) as a `usize`.
-pub const IPV4_HDR_MIN_LEN_USIZE: usize = IPV4_HDR_MIN_LEN_U8 as usize;
+const IPV4_HDR_MIN_LEN_USIZE: usize = IPV4_HDR_MIN_LEN_U8 as usize;
 
 /// Parsed IPv4 header fields and the payload slice that follows the header.
 pub struct Ipv4Packet<'a> {
     total_len: u16,
     pub protocol: Protocol,
-    src_ip: Ipv4Addr,
-    dst_ip: Ipv4Addr,
+    pub src_ip: Ipv4Addr,
+    pub dst_ip: Ipv4Addr,
     pub payload: &'a [u8],
 }
 
 impl<'a> Ipv4Packet<'a> {
+    /// The length in bytes of an IPv4 header for a reply packet (no options).
+    pub const REPLY_HEADER_LEN: usize = IPV4_HDR_MIN_LEN_USIZE;
+
     /// Parses `data` as an IPv4 header, returning the header fields and a slice of the payload.
     pub fn parse(data: &'a [u8]) -> Result<Self, String> {
         let Some(ip_header) = data.first_chunk::<IPV4_HDR_MIN_LEN_USIZE>() else {

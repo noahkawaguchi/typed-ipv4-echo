@@ -1,10 +1,9 @@
 use crate::{
     ETHERNET_MTU, checksum,
-    ipv4_packet::IPV4_HDR_MIN_LEN_USIZE,
     protocol::Protocol,
     try_ops::{TryAdd, TryGet, TryGetMut},
 };
-use std::fmt;
+use std::{fmt, net::Ipv4Addr};
 
 const TCP_HEADER_MIN_LEN: u8 = 20;
 
@@ -65,41 +64,55 @@ impl<'a> TcpHandler<'a> {
         })
     }
 
-    pub fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU]) -> Result<Option<u16>, String> {
-        const TCP_START: usize = IPV4_HDR_MIN_LEN_USIZE;
-
+    pub fn write_reply(
+        &self,
+        reply: &mut [u8],
+        src_ip: Ipv4Addr,
+        dst_ip: Ipv4Addr,
+    ) -> Result<Option<u16>, String> {
         let Some(reply_info) = self.determine_reply() else { return Ok(None) };
 
         // Swap ports
-        reply[TCP_START..TCP_START + 2].copy_from_slice(&self.dst_port.to_be_bytes());
-        reply[TCP_START + 2..TCP_START + 4].copy_from_slice(&self.src_port.to_be_bytes());
+        reply
+            .try_get_mut(..2)?
+            .copy_from_slice(&self.dst_port.to_be_bytes());
+        reply
+            .try_get_mut(2..4)?
+            .copy_from_slice(&self.src_port.to_be_bytes());
 
         // Sequence number
-        reply[TCP_START + 4..TCP_START + 8].copy_from_slice(&reply_info.seq_num.to_be_bytes());
+        reply
+            .try_get_mut(4..8)?
+            .copy_from_slice(&reply_info.seq_num.to_be_bytes());
 
         // Acknowledgment number
-        reply[TCP_START + 8..TCP_START + 12].copy_from_slice(&reply_info.ack_num.to_be_bytes());
+        reply
+            .try_get_mut(8..12)?
+            .copy_from_slice(&reply_info.ack_num.to_be_bytes());
 
         // Data offset (5 * 4 = 20 bytes) in upper 4 bits
-        reply[TCP_START + 12] = (TCP_HEADER_MIN_LEN / 4) << 4;
+        *reply.try_get_mut(12)? = (TCP_HEADER_MIN_LEN / 4) << 4;
 
         // Flags (SYN | ACK for handshake, ACK for data)
-        reply[TCP_START + 13] = reply_info.flags;
+        *reply.try_get_mut(13)? = reply_info.flags;
 
         // Window size for flow control, left at max for simplicity
-        reply[TCP_START + 14..TCP_START + 16].copy_from_slice(&u16::MAX.to_be_bytes());
+        reply
+            .try_get_mut(14..16)?
+            .copy_from_slice(&u16::MAX.to_be_bytes());
 
         // Checksum at bytes 16-17 calculated later with pseudo-header
 
         // Urgent pointer
-        reply[TCP_START + 18..TCP_START + 20].copy_from_slice(&[0x00, 0x00]);
+        reply.try_get_mut(18..20)?.copy_from_slice(&[0x00, 0x00]);
 
         // Copy payload into reply if echoing
         let payload_len = if reply_info.echo {
-            const PAYLOAD_START: usize = TCP_START + TCP_HEADER_MIN_LEN as usize;
-
             reply
-                .try_get_mut(PAYLOAD_START..PAYLOAD_START.try_add(self.payload.len())?)?
+                .try_get_mut(
+                    usize::from(TCP_HEADER_MIN_LEN)
+                        ..usize::from(TCP_HEADER_MIN_LEN).try_add(self.payload.len())?,
+                )?
                 .copy_from_slice(self.payload);
 
             self.payload.len()
@@ -107,7 +120,7 @@ impl<'a> TcpHandler<'a> {
             0
         };
 
-        // TCP segment length (header + payload if any)
+        // TCP segment length: minimum TCP header length (20 bytes) + payload length (0+ bytes)
         #[expect(
             clippy::cast_possible_truncation,
             reason = "u16::MAX (65_535) > ETHERNET_MTU (1500)"
@@ -116,8 +129,8 @@ impl<'a> TcpHandler<'a> {
 
         // Calculate TCP checksum with pseudo-header
         let mut pseudo_header = [0u8; Self::PSEUDO_HEADER_LEN];
-        pseudo_header[0..4].copy_from_slice(&reply[12..16]); // Source IP
-        pseudo_header[4..8].copy_from_slice(&reply[16..20]); // Dest IP
+        pseudo_header[0..4].copy_from_slice(&src_ip.octets()); // Source IP
+        pseudo_header[4..8].copy_from_slice(&dst_ip.octets()); // Dest IP
         pseudo_header[8] = 0; // Reserved padding for alignment
         pseudo_header[9] = Protocol::Tcp.into();
         pseudo_header[10..12].copy_from_slice(&tcp_segment_len.to_be_bytes());
@@ -125,19 +138,20 @@ impl<'a> TcpHandler<'a> {
         // Build checksum data: pseudo-header + TCP header + payload if any
         let checksum_len = Self::PSEUDO_HEADER_LEN + usize::from(tcp_segment_len);
         let mut checksum_data = [0u8; ETHERNET_MTU + Self::PSEUDO_HEADER_LEN];
-        checksum_data[0..Self::PSEUDO_HEADER_LEN].copy_from_slice(&pseudo_header);
+        checksum_data[..Self::PSEUDO_HEADER_LEN].copy_from_slice(&pseudo_header);
         checksum_data
             .try_get_mut(Self::PSEUDO_HEADER_LEN..checksum_len)?
-            .copy_from_slice(reply.try_get(TCP_START..TCP_START + usize::from(tcp_segment_len))?);
+            .copy_from_slice(reply.try_get(..usize::from(tcp_segment_len))?);
 
         // Zero out checksum field before calculating
         checksum_data[Self::PSEUDO_HEADER_LEN + 16] = 0;
         checksum_data[Self::PSEUDO_HEADER_LEN + 17] = 0;
 
         let tcp_checksum = checksum::calculate(checksum_data.try_get(..checksum_len)?);
-        reply[TCP_START + 16..TCP_START + 18].copy_from_slice(&tcp_checksum.to_be_bytes());
+        reply
+            .try_get_mut(16..18)?
+            .copy_from_slice(&tcp_checksum.to_be_bytes());
 
-        // TCP length: minimum TCP header length (20 bytes) + payload length (0+ bytes)
         Ok(Some(tcp_segment_len))
     }
 
@@ -355,12 +369,12 @@ mod tests {
         let handler = TcpHandler::parse(&syn_packet)?;
         let mut reply = [0u8; ETHERNET_MTU];
 
-        // Set up IP header portion
-        reply[12..16].copy_from_slice(&[10, 0, 0, 2]); // Source: 10.0.0.2
-        reply[16..20].copy_from_slice(&[10, 0, 0, 1]); // Dest: 10.0.0.1
+        // Set up addresses from IP header
+        let src_ip = Ipv4Addr::new(10, 0, 0, 2); // Source: 10.0.0.2
+        let dst_ip = Ipv4Addr::new(10, 0, 0, 1); // Dest: 10.0.0.1
 
         let tcp_len = handler
-            .write_reply(&mut reply)?
+            .write_reply(&mut reply[20..], src_ip, dst_ip)?
             .ok_or("failed to write reply")?;
 
         // Verify TCP header at offset 20
@@ -375,8 +389,8 @@ mod tests {
 
         // Verify checksum is valid using pseudo-header
         let mut pseudo_header = [0u8; 12];
-        pseudo_header[0..4].copy_from_slice(&reply[12..16]);
-        pseudo_header[4..8].copy_from_slice(&reply[16..20]);
+        pseudo_header[0..4].copy_from_slice(&src_ip.octets());
+        pseudo_header[4..8].copy_from_slice(&dst_ip.octets());
         pseudo_header[8] = 0;
         pseudo_header[9] = Protocol::Tcp.into();
         pseudo_header[10..12].copy_from_slice(&tcp_len.to_be_bytes());
@@ -409,11 +423,12 @@ mod tests {
         let handler = TcpHandler::parse(&data_packet)?;
         let mut reply = [0u8; ETHERNET_MTU];
 
-        reply[12..16].copy_from_slice(&[10, 0, 0, 2]);
-        reply[16..20].copy_from_slice(&[10, 0, 0, 1]);
+        // Set up addresses from IP header
+        let src_ip = Ipv4Addr::new(10, 0, 0, 2); // Source: 10.0.0.2
+        let dst_ip = Ipv4Addr::new(10, 0, 0, 1); // Dest: 10.0.0.1
 
         let tcp_len = handler
-            .write_reply(&mut reply)?
+            .write_reply(&mut reply[20..], src_ip, dst_ip)?
             .ok_or("failed to write reply")?;
 
         // Verify TCP header
@@ -431,8 +446,8 @@ mod tests {
 
         // Verify checksum
         let mut pseudo_header = [0u8; 12];
-        pseudo_header[0..4].copy_from_slice(&reply[12..16]);
-        pseudo_header[4..8].copy_from_slice(&reply[16..20]);
+        pseudo_header[0..4].copy_from_slice(&src_ip.octets());
+        pseudo_header[4..8].copy_from_slice(&dst_ip.octets());
         pseudo_header[8] = 0;
         pseudo_header[9] = Protocol::Tcp.into();
         pseudo_header[10..12].copy_from_slice(&tcp_len.to_be_bytes());
@@ -464,11 +479,16 @@ mod tests {
         let handler = TcpHandler::parse(&ack_packet)?;
         let mut reply = [0u8; ETHERNET_MTU];
 
-        reply[12..16].copy_from_slice(&[10, 0, 0, 2]);
-        reply[16..20].copy_from_slice(&[10, 0, 0, 1]);
+        // Set up addresses from IP header
+        let src_ip = Ipv4Addr::new(10, 0, 0, 2); // Source: 10.0.0.2
+        let dst_ip = Ipv4Addr::new(10, 0, 0, 1); // Dest: 10.0.0.1
 
         // Handshake ACK should not generate a reply
-        assert!(handler.write_reply(&mut reply)?.is_none());
+        assert!(
+            handler
+                .write_reply(&mut reply[20..], src_ip, dst_ip)?
+                .is_none()
+        );
 
         Ok(())
     }
