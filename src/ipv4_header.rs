@@ -8,14 +8,14 @@ const IPV4_HDR_MIN_LEN_U8: u8 = 20;
 const IPV4_HDR_MIN_LEN_USIZE: usize = IPV4_HDR_MIN_LEN_U8 as usize;
 
 /// Struct for managing IPv4 packet header fields and replies.
-pub struct Ipv4Packet {
+pub struct Ipv4Header {
     total_len: u16,
     pub protocol: Protocol,
     pub src_ip: Ipv4Addr,
     pub dst_ip: Ipv4Addr,
 }
 
-impl Ipv4Packet {
+impl Ipv4Header {
     /// The length in bytes of an IPv4 header for a reply packet (no options).
     pub const REPLY_HEADER_LEN: usize = IPV4_HDR_MIN_LEN_USIZE;
 
@@ -79,7 +79,7 @@ impl Ipv4Packet {
     }
 }
 
-impl fmt::Display for Ipv4Packet {
+impl fmt::Display for Ipv4Header {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -104,12 +104,12 @@ mod tests {
             172, 16, 10, 12,         // Dest IP: 172.16.10.12
         ];
 
-        let (packet, payload) = Ipv4Packet::parse(&data)?;
+        let (header, payload) = Ipv4Header::parse(&data)?;
 
-        assert_eq!(packet.total_len, 60);
-        assert_eq!(packet.protocol, Protocol::Tcp);
-        assert_eq!(packet.src_ip, Ipv4Addr::new(192, 168, 1, 100));
-        assert_eq!(packet.dst_ip, Ipv4Addr::new(172, 16, 10, 12));
+        assert_eq!(header.total_len, 60);
+        assert_eq!(header.protocol, Protocol::Tcp);
+        assert_eq!(header.src_ip, Ipv4Addr::new(192, 168, 1, 100));
+        assert_eq!(header.dst_ip, Ipv4Addr::new(172, 16, 10, 12));
         assert_eq!(payload, &data[20..]);
 
         Ok(())
@@ -118,7 +118,7 @@ mod tests {
     #[test]
     fn parsing_fails_if_too_short() {
         let data = [0x45, 0x00, 0x00]; // Only 3 bytes
-        assert!(Ipv4Packet::parse(&data).is_err_and(|e| e.contains("Too short")));
+        assert!(Ipv4Header::parse(&data).is_err_and(|e| e.contains("Too short")));
     }
 
     #[test]
@@ -133,7 +133,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x01,
         ];
 
-        assert!(Ipv4Packet::parse(&data).is_err_and(|e| e.contains("Non-IPv4")));
+        assert!(Ipv4Header::parse(&data).is_err_and(|e| e.contains("Non-IPv4")));
     }
 
     #[test]
@@ -147,10 +147,10 @@ mod tests {
             172, 16, 10, 12,         // Dest IP: 172.16.10.12
         ];
 
-        let (packet, _) = Ipv4Packet::parse(&request)?;
+        let (header, _) = Ipv4Header::parse(&request)?;
         let mut reply = [0u8; ETHERNET_MTU];
         let proto_len = 48 - 20; // Total length - IPv4 reply header length
-        let total_len = packet.write_reply(&mut reply, proto_len)?;
+        let total_len = header.write_reply(&mut reply, proto_len)?;
         assert_eq!(total_len, 48);
 
         // Verify IPv4 header fields

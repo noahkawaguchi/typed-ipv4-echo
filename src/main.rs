@@ -2,14 +2,14 @@
 compile_error!("This crate only supports Linux because it directly uses Linux TUN devices");
 
 mod checksum;
-mod ipv4_packet;
+mod ipv4_header;
 mod protocol;
 mod shutdown_signal;
 mod try_ops;
 mod tun;
 
 use crate::{
-    ipv4_packet::Ipv4Packet, protocol::ProtocolHandler, shutdown_signal::ShutdownSignal,
+    ipv4_header::Ipv4Header, protocol::ProtocolHandler, shutdown_signal::ShutdownSignal,
     try_ops::TryGet,
 };
 use std::{
@@ -42,26 +42,26 @@ fn main() -> Result<(), Box<dyn Error>> {
             Ok(n) => n,
         };
 
-        match Ipv4Packet::parse(read_buf.try_get(..n)?) {
+        match Ipv4Header::parse(read_buf.try_get(..n)?) {
             Err(e) => eprintln!("Skipping packet: {e}"),
 
-            Ok((packet, ipv4_payload)) => {
-                println!("{packet}");
+            Ok((ipv4_header, ipv4_payload)) => {
+                println!("{ipv4_header}");
 
-                match ProtocolHandler::parse(ipv4_payload, packet.protocol) {
+                match ProtocolHandler::parse(ipv4_payload, ipv4_header.protocol) {
                     Err(e) => eprintln!("Skipping packet: {e}"),
 
                     Ok(handler) => {
                         println!("{handler}");
 
                         if let Some(proto_len) = handler.write_reply(
-                            &mut write_buf[Ipv4Packet::REPLY_HEADER_LEN..],
+                            &mut write_buf[Ipv4Header::REPLY_HEADER_LEN..],
                             // Swap the source and destination IP addresses from the received
                             // packet for the reply packet
-                            packet.dst_ip,
-                            packet.src_ip,
+                            ipv4_header.dst_ip,
+                            ipv4_header.src_ip,
                         )? {
-                            let total_len = packet.write_reply(&mut write_buf, proto_len)?;
+                            let total_len = ipv4_header.write_reply(&mut write_buf, proto_len)?;
                             tun.write_all(write_buf.try_get(..total_len)?)?;
                             println!("Reply packet sent!");
                         }
