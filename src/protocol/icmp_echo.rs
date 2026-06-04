@@ -7,9 +7,10 @@ use std::fmt;
 const ICMP_HEADER_LEN: u16 = 8;
 
 /// Struct for managing ICMP Echo Request packets and creating Echo Reply packets. Includes the ICMP
-/// type-specific data and the payload.
+/// header and the payload.
 pub struct IcmpEchoHandler<'a> {
-    // Type and code are omitted because they are constant (must be 8 and 0 for Echo Request)
+    icmp_type: u8,
+    // The code field is omitted because it is constant 0 for Echo Request/Reply
     identifier: u16,
     sequence: u16,
     payload: &'a [u8],
@@ -37,6 +38,7 @@ impl<'a> IcmpEchoHandler<'a> {
         }
 
         Ok(Self {
+            icmp_type,
             identifier: u16::from_be_bytes([icmp_header[4], icmp_header[5]]),
             sequence: u16::from_be_bytes([icmp_header[6], icmp_header[7]]),
             payload: data
@@ -95,9 +97,14 @@ impl fmt::Display for IcmpEchoHandler<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "ICMP type={} code={} (Echo Request) | identifier={} sequence={}",
-            Self::ICMP_TYPE_ECHO_REQUEST,
+            "ICMP type={} code={} ({}) | identifier={} sequence={}",
+            self.icmp_type,
             Self::ICMP_CODE_ECHO,
+            match self.icmp_type {
+                Self::ICMP_TYPE_ECHO_REQUEST => "Echo Request",
+                Self::ICMP_TYPE_ECHO_REPLY => "Echo Reply",
+                _ => "unknown type",
+            },
             self.identifier,
             self.sequence,
         )
