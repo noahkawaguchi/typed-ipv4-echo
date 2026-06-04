@@ -21,9 +21,10 @@ pub struct TcpHandler<'a> {
 
 /// Struct for managing the TCP reply data that varies depending on the received packet.
 struct TcpReplyInfo {
-    flags: u8,
     seq_num: u32,
     ack_num: u32,
+    syn_flag: bool,
+    ack_flag: bool,
     /// Whether to echo the payload.
     echo: bool,
 }
@@ -94,7 +95,8 @@ impl<'a> TcpHandler<'a> {
         *reply.try_get_mut(12)? = (TCP_HEADER_MIN_LEN / 4) << 4;
 
         // Flags (SYN | ACK for handshake, ACK for data)
-        *reply.try_get_mut(13)? = reply_info.flags;
+        *reply.try_get_mut(13)? = if reply_info.syn_flag { Self::SYN_FLAG } else { 0 }
+            | if reply_info.ack_flag { Self::ACK_FLAG } else { 0 };
 
         // Window size for flow control, left at max for simplicity
         reply
@@ -168,7 +170,8 @@ impl<'a> TcpHandler<'a> {
 
                 // SYN | ACK flags, seq = LOCAL_SEQ_SYN, local ack num = remote seq num + 1
                 Some(TcpReplyInfo {
-                    flags: Self::SYN_FLAG | Self::ACK_FLAG,
+                    syn_flag: true,
+                    ack_flag: true,
                     seq_num: LOCAL_SEQ_SYN,
                     ack_num: self.seq_num.wrapping_add(1),
                     echo: false,
@@ -186,7 +189,8 @@ impl<'a> TcpHandler<'a> {
                 // Local seq num = what the client expects next (remote ack num)
                 // Local ack num = remote seq num + payload length (intentionally wrapping)
                 Some(TcpReplyInfo {
-                    flags: Self::ACK_FLAG,
+                    syn_flag: false,
+                    ack_flag: true,
                     seq_num: self.ack_num,
                     #[expect(
                         clippy::cast_possible_truncation,
