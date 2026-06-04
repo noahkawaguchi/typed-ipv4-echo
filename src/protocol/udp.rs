@@ -1,6 +1,6 @@
 use crate::{
     ETHERNET_MTU, checksum,
-    ipv4_packet::{IPV4_HDR_MIN_LEN_U8, IPV4_HDR_MIN_LEN_USIZE},
+    ipv4_packet::IPV4_HDR_MIN_LEN_USIZE,
     protocol::Protocol,
     try_ops::{TryAdd, TryGet, TryGetMut},
 };
@@ -90,10 +90,8 @@ impl<'a> UdpHandler<'a> {
         let udp_checksum = checksum::calculate(checksum_data.try_get(..checksum_len)?);
         reply[UDP_START + 6..UDP_START + 8].copy_from_slice(&udp_checksum.to_be_bytes());
 
-        // Total length: IPv4 header without options (20 bytes)
-        //               + fixed UDP header length (8 bytes)
-        //               + length of echo payload
-        Ok(Some(u16::from(IPV4_HDR_MIN_LEN_U8).try_add(udp_len)?))
+        // UDP length: fixed UDP header length (8 bytes) + length of echo payload
+        Ok(Some(udp_len))
     }
 }
 
@@ -190,7 +188,7 @@ mod tests {
         reply[12..16].copy_from_slice(&[10, 0, 0, 2]); // Source: 10.0.0.2
         reply[16..20].copy_from_slice(&[10, 0, 0, 1]); // Dest: 10.0.0.1
 
-        let total_len = handler
+        let udp_len = handler
             .write_reply(&mut reply)?
             .ok_or("failed to write reply")?;
 
@@ -202,11 +200,10 @@ mod tests {
         // Verify payload echoed
         assert_eq!(&reply[28..36], b"Hello!!!");
 
-        // Verify total length
-        assert_eq!(total_len, 20 + 8 + 8);
+        // Verify UDP length
+        assert_eq!(udp_len, 8 + 8);
 
         // Verify checksum is valid using pseudo-header
-        let udp_len = 16u16;
         let mut pseudo_header = [0u8; 12];
         pseudo_header[0..4].copy_from_slice(&reply[12..16]); // Source IP
         pseudo_header[4..8].copy_from_slice(&reply[16..20]); // Dest IP

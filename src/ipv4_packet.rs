@@ -1,4 +1,4 @@
-use crate::{ETHERNET_MTU, checksum, protocol::Protocol};
+use crate::{ETHERNET_MTU, checksum, protocol::Protocol, try_ops::TryAdd};
 use std::{fmt, net::Ipv4Addr};
 
 /// The minimum number of bytes for an IPv4 header (no options) as a `u8`.
@@ -39,13 +39,20 @@ impl<'a> Ipv4Packet<'a> {
         })
     }
 
-    /// Writes the IPv4 reply header into `reply` using `total_len` as the packet length.
-    /// Source and destination addresses are swapped from the original packet.
-    pub fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU], total_len: u16) {
+    /// Writes the IPv4 reply header into `reply`, using and returning the IPv4 header length +
+    /// `proto_len` as the total length. Source and destination addresses are swapped from the
+    /// original packet.
+    pub fn write_reply(
+        &self,
+        reply: &mut [u8; ETHERNET_MTU],
+        proto_len: u16,
+    ) -> Result<usize, String> {
+        let total_len = u16::from(IPV4_HDR_MIN_LEN_U8).try_add(proto_len)?;
+
         // IP header (no options, 20 bytes)
         reply[0] = 0x40 | (IPV4_HDR_MIN_LEN_U8 / 4); // Version 4, IHL 5 (20 bytes)
         reply[1] = 0x00; // DSCP/ECN
-        reply[2..4].copy_from_slice(&total_len.to_be_bytes());
+        reply[2..4].copy_from_slice(&total_len.to_be_bytes()); // Total length
         reply[4..6].copy_from_slice(&[0x00, 0x00]); // Identification
         reply[6..8].copy_from_slice(&[0x40, 0x00]); // Flags + Fragment offset (Don't Fragment)
         reply[8] = 64; // TTL
@@ -62,6 +69,8 @@ impl<'a> Ipv4Packet<'a> {
         // Recalculate IP header checksum (covers only the IP header, always 20 bytes for replies)
         let ip_checksum = checksum::calculate(&reply[..IPV4_HDR_MIN_LEN_USIZE]);
         reply[10..12].copy_from_slice(&ip_checksum.to_be_bytes());
+
+        Ok(total_len.into())
     }
 }
 
@@ -134,7 +143,9 @@ mod tests {
 
         let packet = Ipv4Packet::parse(&request)?;
         let mut reply = [0u8; ETHERNET_MTU];
-        packet.write_reply(&mut reply, 48);
+        let proto_len = 48 - 20; // Total length - IPv4 reply header length
+        let total_len = packet.write_reply(&mut reply, proto_len)?;
+        assert_eq!(total_len, 48);
 
         // Verify IPv4 header fields
         assert_eq!(reply[0], 0x45); // Version 4, IHL 5

@@ -36,8 +36,8 @@ impl<'a> ProtocolHandler<'a> {
         }
     }
 
-    /// Writes the protocol-specific sections of the reply into the buffer, returning the total
-    /// length of the reply packet in bytes (including the IP header and payload data), or
+    /// Writes the protocol-specific sections of the reply, returning the length of the
+    /// protocol-specific header and payload in bytes (excluding the length of the IP header), or
     /// `Ok(None)` if no reply should be sent.
     pub fn write_reply(&self, reply: &mut [u8; ETHERNET_MTU]) -> Result<Option<u16>, String> {
         match self {

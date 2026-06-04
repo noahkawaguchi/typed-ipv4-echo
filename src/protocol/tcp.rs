@@ -1,6 +1,6 @@
 use crate::{
     ETHERNET_MTU, checksum,
-    ipv4_packet::{IPV4_HDR_MIN_LEN_U8, IPV4_HDR_MIN_LEN_USIZE},
+    ipv4_packet::IPV4_HDR_MIN_LEN_USIZE,
     protocol::Protocol,
     try_ops::{TryAdd, TryGet, TryGetMut},
 };
@@ -137,12 +137,8 @@ impl<'a> TcpHandler<'a> {
         let tcp_checksum = checksum::calculate(checksum_data.try_get(..checksum_len)?);
         reply[TCP_START + 16..TCP_START + 18].copy_from_slice(&tcp_checksum.to_be_bytes());
 
-        // Total length: IPv4 header without options (20 bytes)
-        //               + minimum TCP header length (20 bytes)
-        //               + payload length (0+ bytes)
-        Ok(Some(
-            u16::from(IPV4_HDR_MIN_LEN_U8).try_add(tcp_segment_len)?,
-        ))
+        // TCP length: minimum TCP header length (20 bytes) + payload length (0+ bytes)
+        Ok(Some(tcp_segment_len))
     }
 
     /// Determines the nature of the reply to send based on the received packet type or returns
@@ -363,7 +359,7 @@ mod tests {
         reply[12..16].copy_from_slice(&[10, 0, 0, 2]); // Source: 10.0.0.2
         reply[16..20].copy_from_slice(&[10, 0, 0, 1]); // Dest: 10.0.0.1
 
-        let total_len = handler
+        let tcp_len = handler
             .write_reply(&mut reply)?
             .ok_or("failed to write reply")?;
 
@@ -374,11 +370,10 @@ mod tests {
         assert_eq!(&reply[28..32], &[0x00, 0x00, 0x10, 0x01]); // Ack: 4097 (client seq + 1)
         assert_eq!(reply[33], 0x12); // Flags: SYN|ACK
 
-        // Verify total length (no payload for SYN-ACK)
-        assert_eq!(total_len, 20 + 20);
+        // Verify TCP length (no payload for SYN-ACK)
+        assert_eq!(tcp_len, 20);
 
         // Verify checksum is valid using pseudo-header
-        let tcp_len = 20u16;
         let mut pseudo_header = [0u8; 12];
         pseudo_header[0..4].copy_from_slice(&reply[12..16]);
         pseudo_header[4..8].copy_from_slice(&reply[16..20]);
@@ -417,7 +412,7 @@ mod tests {
         reply[12..16].copy_from_slice(&[10, 0, 0, 2]);
         reply[16..20].copy_from_slice(&[10, 0, 0, 1]);
 
-        let total_len = handler
+        let tcp_len = handler
             .write_reply(&mut reply)?
             .ok_or("failed to write reply")?;
 
@@ -431,11 +426,10 @@ mod tests {
         // Verify payload echoed
         assert_eq!(&reply[40..45], b"Hello");
 
-        // Verify total length
-        assert_eq!(total_len, 20 + 20 + 5);
+        // Verify TCP length
+        assert_eq!(tcp_len, 20 + 5);
 
         // Verify checksum
-        let tcp_len = 25u16;
         let mut pseudo_header = [0u8; 12];
         pseudo_header[0..4].copy_from_slice(&reply[12..16]);
         pseudo_header[4..8].copy_from_slice(&reply[16..20]);

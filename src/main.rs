@@ -59,9 +59,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                             Ok(None) => {}
 
-                            Ok(Some(total_len)) => {
-                                packet.write_reply(&mut write_buf, total_len);
-                                tun.write_all(write_buf.try_get(..usize::from(total_len))?)?;
+                            Ok(Some(proto_len)) => {
+                                let total_len = packet.write_reply(&mut write_buf, proto_len)?;
+                                tun.write_all(write_buf.try_get(..total_len)?)?;
                                 println!("Reply packet sent!");
                             }
                         }

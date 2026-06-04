@@ -1,11 +1,11 @@
 use crate::{
     ETHERNET_MTU, checksum,
-    ipv4_packet::{IPV4_HDR_MIN_LEN_U8, IPV4_HDR_MIN_LEN_USIZE},
+    ipv4_packet::IPV4_HDR_MIN_LEN_USIZE,
     try_ops::{TryAdd, TryGet, TryGetMut},
 };
 use std::fmt;
 
-const ICMP_HEADER_LEN: u8 = 8;
+const ICMP_HEADER_LEN: u16 = 8;
 
 /// Struct for managing ICMP Echo Request packets and creating Echo Reply packets. Includes the ICMP
 /// type-specific data and the payload.
@@ -77,16 +77,12 @@ impl<'a> IcmpEchoHandler<'a> {
         )?);
         reply[ICMP_START + 2..ICMP_START + 4].copy_from_slice(&icmp_checksum.to_be_bytes());
 
+        // ICMP length: fixed ICMP header length (8 bytes) + length of echo payload
         #[expect(
             clippy::cast_possible_truncation,
             reason = "u16::MAX (65_535) > ETHERNET_MTU (1500)"
         )]
-        Ok(Some(
-            // Total length: IPv4 header without options (20 bytes)
-            //               + fixed ICMP header length (8 bytes)
-            //               + length of echo payload
-            u16::from(IPV4_HDR_MIN_LEN_U8 + ICMP_HEADER_LEN).try_add(self.payload.len() as u16)?,
-        ))
+        Ok(Some(ICMP_HEADER_LEN.try_add(self.payload.len() as u16)?))
     }
 }
 
@@ -196,7 +192,7 @@ mod tests {
         reply[12..16].copy_from_slice(&[10, 0, 0, 2]); // Source: 10.0.0.2
         reply[16..20].copy_from_slice(&[10, 0, 0, 1]); // Dest: 10.0.0.1
 
-        let total_len = handler
+        let icmp_len = handler
             .write_reply(&mut reply)?
             .ok_or("failed to write reply")?;
 
@@ -209,11 +205,10 @@ mod tests {
         // Verify payload echoed
         assert_eq!(&reply[28..33], b"Hello");
 
-        // Verify total length
-        assert_eq!(total_len, 20 + 8 + 5);
+        // Verify ICMP length
+        assert_eq!(icmp_len, 8 + 5);
 
         // Verify checksum is valid (checksum of ICMP message should be 0)
-        let icmp_len = total_len - 20;
         let checksum = checksum::calculate(reply.try_get(20..20 + usize::from(icmp_len))?);
         assert_eq!(checksum, 0x0000);
 
