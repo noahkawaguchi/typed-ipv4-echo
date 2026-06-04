@@ -54,16 +54,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                     Ok(handler) => {
                         println!("{handler}");
 
-                        match handler.write_reply(&mut write_buf) {
-                            Err(e) => eprintln!("Error writing reply: {e}"),
-
-                            Ok(None) => {}
-
-                            Ok(Some(proto_len)) => {
-                                let total_len = packet.write_reply(&mut write_buf, proto_len)?;
-                                tun.write_all(write_buf.try_get(..total_len)?)?;
-                                println!("Reply packet sent!");
-                            }
+                        if let Some(proto_len) = handler.write_reply(&mut write_buf)? {
+                            let total_len = packet.write_reply(&mut write_buf, proto_len)?;
+                            tun.write_all(write_buf.try_get(..total_len)?)?;
+                            println!("Reply packet sent!");
                         }
                     }
                 }
