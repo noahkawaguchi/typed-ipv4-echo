@@ -7,21 +7,21 @@ const IPV4_HDR_MIN_LEN_U8: u8 = 20;
 /// The minimum number of bytes for an IPv4 header (no options) as a `usize`.
 const IPV4_HDR_MIN_LEN_USIZE: usize = IPV4_HDR_MIN_LEN_U8 as usize;
 
-/// Parsed IPv4 header fields and the payload slice that follows the header.
-pub struct Ipv4Packet<'a> {
+/// Struct for managing IPv4 packet header fields and replies.
+pub struct Ipv4Packet {
     total_len: u16,
     pub protocol: Protocol,
     pub src_ip: Ipv4Addr,
     pub dst_ip: Ipv4Addr,
-    pub payload: &'a [u8],
 }
 
-impl<'a> Ipv4Packet<'a> {
+impl Ipv4Packet {
     /// The length in bytes of an IPv4 header for a reply packet (no options).
     pub const REPLY_HEADER_LEN: usize = IPV4_HDR_MIN_LEN_USIZE;
 
-    /// Parses `data` as an IPv4 header, returning the header fields and a slice of the payload.
-    pub fn parse(data: &'a [u8]) -> Result<Self, String> {
+    /// Parses `data` as an IPv4 packet, returning the header fields and a slice starting at the
+    /// beginning of the payload.
+    pub fn parse(data: &[u8]) -> Result<(Self, &[u8]), String> {
         let Some(ip_header) = data.first_chunk::<IPV4_HDR_MIN_LEN_USIZE>() else {
             return Err(format!("Too short for IPv4 header ({} bytes)", data.len()));
         };
@@ -33,13 +33,15 @@ impl<'a> Ipv4Packet<'a> {
 
         let ihl_bytes = usize::from(ip_header[0] & 0xF) * 4; // Convert 32-bit words to bytes
 
-        Ok(Self {
-            total_len: u16::from_be_bytes([ip_header[2], ip_header[3]]),
-            protocol: Protocol::from(ip_header[9]),
-            src_ip: Ipv4Addr::new(ip_header[12], ip_header[13], ip_header[14], ip_header[15]),
-            dst_ip: Ipv4Addr::new(ip_header[16], ip_header[17], ip_header[18], ip_header[19]),
-            payload: data.get(ihl_bytes..).ok_or("No data after IPv4 header")?,
-        })
+        Ok((
+            Self {
+                total_len: u16::from_be_bytes([ip_header[2], ip_header[3]]),
+                protocol: Protocol::from(ip_header[9]),
+                src_ip: Ipv4Addr::new(ip_header[12], ip_header[13], ip_header[14], ip_header[15]),
+                dst_ip: Ipv4Addr::new(ip_header[16], ip_header[17], ip_header[18], ip_header[19]),
+            },
+            data.get(ihl_bytes..).ok_or("No data after IPv4 header")?,
+        ))
     }
 
     /// Writes the IPv4 reply header into `reply`, using and returning the IPv4 header length +
@@ -77,7 +79,7 @@ impl<'a> Ipv4Packet<'a> {
     }
 }
 
-impl fmt::Display for Ipv4Packet<'_> {
+impl fmt::Display for Ipv4Packet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -102,12 +104,13 @@ mod tests {
             172, 16, 10, 12,         // Dest IP: 172.16.10.12
         ];
 
-        let packet = Ipv4Packet::parse(&data)?;
+        let (packet, payload) = Ipv4Packet::parse(&data)?;
 
         assert_eq!(packet.total_len, 60);
         assert_eq!(packet.protocol, Protocol::Tcp);
         assert_eq!(packet.src_ip, Ipv4Addr::new(192, 168, 1, 100));
         assert_eq!(packet.dst_ip, Ipv4Addr::new(172, 16, 10, 12));
+        assert_eq!(payload, &data[20..]);
 
         Ok(())
     }
@@ -144,7 +147,7 @@ mod tests {
             172, 16, 10, 12,         // Dest IP: 172.16.10.12
         ];
 
-        let packet = Ipv4Packet::parse(&request)?;
+        let (packet, _) = Ipv4Packet::parse(&request)?;
         let mut reply = [0u8; ETHERNET_MTU];
         let proto_len = 48 - 20; // Total length - IPv4 reply header length
         let total_len = packet.write_reply(&mut reply, proto_len)?;

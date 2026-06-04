@@ -45,10 +45,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         match Ipv4Packet::parse(read_buf.try_get(..n)?) {
             Err(e) => eprintln!("Skipping packet: {e}"),
 
-            Ok(packet) => {
+            Ok((packet, ipv4_payload)) => {
                 println!("{packet}");
 
-                match ProtocolHandler::parse(packet.payload, packet.protocol) {
+                match ProtocolHandler::parse(ipv4_payload, packet.protocol) {
                     Err(e) => eprintln!("Skipping packet: {e}"),
 
                     Ok(handler) => {
