@@ -7,81 +7,85 @@ const IPV4_HDR_MIN_LEN_U8: u8 = 20;
 /// The minimum number of bytes for an IPv4 header (no options) as a `usize`.
 const IPV4_HDR_MIN_LEN_USIZE: usize = IPV4_HDR_MIN_LEN_U8 as usize;
 
-/// Parsed IPv4 header fields and the payload slice that follows the header.
-pub struct Ipv4Packet<'a> {
-    total_len: u16,
+/// Struct for managing IPv4 packet header fields and replies.
+#[cfg_attr(test, derive(Debug))]
+pub struct Ipv4Header {
+    pub total_len: u16,
     pub protocol: Protocol,
     pub src_ip: Ipv4Addr,
     pub dst_ip: Ipv4Addr,
-    pub payload: &'a [u8],
 }
 
-impl<'a> Ipv4Packet<'a> {
+impl Ipv4Header {
     /// The length in bytes of an IPv4 header for a reply packet (no options).
     pub const REPLY_HEADER_LEN: usize = IPV4_HDR_MIN_LEN_USIZE;
 
-    /// Parses `data` as an IPv4 header, returning the header fields and a slice of the payload.
-    pub fn parse(data: &'a [u8]) -> Result<Self, String> {
+    /// Parses `data` as an IPv4 packet, returning the header fields and a slice starting at the
+    /// beginning of the payload.
+    pub fn parse(data: &[u8]) -> Result<(Self, &[u8]), String> {
         let Some(ip_header) = data.first_chunk::<IPV4_HDR_MIN_LEN_USIZE>() else {
             return Err(format!("Too short for IPv4 header ({} bytes)", data.len()));
         };
 
-        let version = ip_header[0] >> 4;
-        if version != 4 {
-            return Err(format!("Non-IPv4 packet (version {version})"));
+        // Must be IPv4
+        match ip_header[0] >> 4 {
+            4 => {}
+            6 => return Err(String::from("IPv6 packet")),
+            version => return Err(format!("Unexpected IP version {version}")),
         }
 
         let ihl_bytes = usize::from(ip_header[0] & 0xF) * 4; // Convert 32-bit words to bytes
 
+        Ok((
+            Self {
+                total_len: u16::from_be_bytes([ip_header[2], ip_header[3]]),
+                protocol: Protocol::from(ip_header[9]),
+                src_ip: Ipv4Addr::new(ip_header[12], ip_header[13], ip_header[14], ip_header[15]),
+                dst_ip: Ipv4Addr::new(ip_header[16], ip_header[17], ip_header[18], ip_header[19]),
+            },
+            data.get(ihl_bytes..).ok_or("No data after IPv4 header")?,
+        ))
+    }
+
+    /// Creates an IPv4 header for replying to `self`. Total length is the length of the IP header +
+    /// `proto_len`. Source and destination addresses are swapped from the original packet.
+    pub fn create_reply(&self, proto_len: u16) -> Result<Self, String> {
         Ok(Self {
-            total_len: u16::from_be_bytes([ip_header[2], ip_header[3]]),
-            protocol: Protocol::from(ip_header[9]),
-            src_ip: Ipv4Addr::new(ip_header[12], ip_header[13], ip_header[14], ip_header[15]),
-            dst_ip: Ipv4Addr::new(ip_header[16], ip_header[17], ip_header[18], ip_header[19]),
-            payload: data.get(ihl_bytes..).ok_or("No data after IPv4 header")?,
+            total_len: u16::from(IPV4_HDR_MIN_LEN_U8).try_add(proto_len)?,
+            protocol: self.protocol,
+            src_ip: self.dst_ip,
+            dst_ip: self.src_ip,
         })
     }
 
-    /// Writes the IPv4 reply header into `reply`, using and returning the IPv4 header length +
-    /// `proto_len` as the total length. Source and destination addresses are swapped from the
-    /// original packet.
-    pub fn write_reply(
-        &self,
-        reply: &mut [u8; ETHERNET_MTU],
-        proto_len: u16,
-    ) -> Result<usize, String> {
-        let total_len = u16::from(IPV4_HDR_MIN_LEN_U8).try_add(proto_len)?;
-
+    /// Writes an IPv4 header into `buf`, copying the header data from `self`.
+    pub fn write_into(&self, buf: &mut [u8; ETHERNET_MTU]) {
         // IP header (no options, 20 bytes)
-        reply[0] = 0x40 | (IPV4_HDR_MIN_LEN_U8 / 4); // Version 4, IHL 5 (20 bytes)
-        reply[1] = 0x00; // DSCP/ECN
-        reply[2..4].copy_from_slice(&total_len.to_be_bytes()); // Total length
-        reply[4..6].copy_from_slice(&[0x00, 0x00]); // Identification
-        reply[6..8].copy_from_slice(&[0x40, 0x00]); // Flags + Fragment offset (Don't Fragment)
-        reply[8] = 64; // TTL
-        reply[9] = self.protocol.into(); // Protocol
-
-        // Swap src and dst IP addresses
-        reply[12..16].copy_from_slice(&self.dst_ip.octets());
-        reply[16..20].copy_from_slice(&self.src_ip.octets());
+        buf[0] = 0x40 | (IPV4_HDR_MIN_LEN_U8 / 4); // Version 4, IHL 5 (20 bytes)
+        buf[1] = 0x00; // DSCP/ECN
+        buf[2..4].copy_from_slice(&self.total_len.to_be_bytes()); // Total length
+        buf[4..6].copy_from_slice(&[0x00, 0x00]); // Identification
+        buf[6..8].copy_from_slice(&[0x40, 0x00]); // Flags + Fragment offset (Don't Fragment)
+        buf[8] = 64; // TTL
+        buf[9] = self.protocol.into(); // Protocol
 
         // Clear IP header checksum field before recalculating
-        reply[10] = 0;
-        reply[11] = 0;
+        buf[10..12].copy_from_slice(&[0x00, 0x00]);
+
+        buf[12..16].copy_from_slice(&self.src_ip.octets());
+        buf[16..20].copy_from_slice(&self.dst_ip.octets());
 
         // Recalculate IP header checksum (covers only the IP header, always 20 bytes for replies)
-        let ip_checksum = checksum::calculate(&reply[..IPV4_HDR_MIN_LEN_USIZE]);
-        reply[10..12].copy_from_slice(&ip_checksum.to_be_bytes());
-
-        Ok(total_len.into())
+        let ip_checksum = checksum::calculate(&buf[..IPV4_HDR_MIN_LEN_USIZE]);
+        buf[10..12].copy_from_slice(&ip_checksum.to_be_bytes());
     }
 }
 
-impl fmt::Display for Ipv4Packet<'_> {
+impl fmt::Display for Ipv4Header {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "IPv4 | {} bytes | {} | {} -> {}",
+            "IPv4 | {} bytes total | {} | {} -> {}",
             self.total_len, self.protocol, self.src_ip, self.dst_ip,
         )
     }
@@ -90,6 +94,7 @@ impl fmt::Display for Ipv4Packet<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::assert_matches;
 
     #[test]
     fn correctly_parses_valid_packet() -> Result<(), String> {
@@ -102,12 +107,13 @@ mod tests {
             172, 16, 10, 12,         // Dest IP: 172.16.10.12
         ];
 
-        let packet = Ipv4Packet::parse(&data)?;
+        let (header, payload) = Ipv4Header::parse(&data)?;
 
-        assert_eq!(packet.total_len, 60);
-        assert_eq!(packet.protocol, Protocol::Tcp);
-        assert_eq!(packet.src_ip, Ipv4Addr::new(192, 168, 1, 100));
-        assert_eq!(packet.dst_ip, Ipv4Addr::new(172, 16, 10, 12));
+        assert_eq!(header.total_len, 60);
+        assert_eq!(header.protocol, Protocol::Tcp);
+        assert_eq!(header.src_ip, Ipv4Addr::new(192, 168, 1, 100));
+        assert_eq!(header.dst_ip, Ipv4Addr::new(172, 16, 10, 12));
+        assert_eq!(payload, &data[20..]);
 
         Ok(())
     }
@@ -115,7 +121,7 @@ mod tests {
     #[test]
     fn parsing_fails_if_too_short() {
         let data = [0x45, 0x00, 0x00]; // Only 3 bytes
-        assert!(Ipv4Packet::parse(&data).is_err_and(|e| e.contains("Too short")));
+        assert_matches!(Ipv4Header::parse(&data), Err(e) if e.contains("Too short"));
     }
 
     #[test]
@@ -130,7 +136,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x01,
         ];
 
-        assert!(Ipv4Packet::parse(&data).is_err_and(|e| e.contains("Non-IPv4")));
+        assert_matches!(Ipv4Header::parse(&data), Err(e) if e.contains("IPv6"));
     }
 
     #[test]
@@ -144,11 +150,12 @@ mod tests {
             172, 16, 10, 12,         // Dest IP: 172.16.10.12
         ];
 
-        let packet = Ipv4Packet::parse(&request)?;
+        let (header, _) = Ipv4Header::parse(&request)?;
         let mut reply = [0u8; ETHERNET_MTU];
         let proto_len = 48 - 20; // Total length - IPv4 reply header length
-        let total_len = packet.write_reply(&mut reply, proto_len)?;
-        assert_eq!(total_len, 48);
+        let reply_header = header.create_reply(proto_len)?;
+        reply_header.write_into(&mut reply);
+        assert_eq!(reply_header.total_len, 48);
 
         // Verify IPv4 header fields
         assert_eq!(reply[0], 0x45); // Version 4, IHL 5

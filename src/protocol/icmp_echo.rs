@@ -1,5 +1,6 @@
 use crate::{
     checksum,
+    protocol::payload_to_string,
     try_ops::{TryAdd, TryGet, TryGetMut},
 };
 use std::fmt;
@@ -7,9 +8,10 @@ use std::fmt;
 const ICMP_HEADER_LEN: u16 = 8;
 
 /// Struct for managing ICMP Echo Request packets and creating Echo Reply packets. Includes the ICMP
-/// type-specific data and the payload.
+/// header and the payload.
 pub struct IcmpEchoHandler<'a> {
-    // Type and code are omitted because they are constant (must be 8 and 0 for Echo Request)
+    icmp_type: u8,
+    // The code field is omitted because it is constant 0 for Echo Request/Reply
     identifier: u16,
     sequence: u16,
     payload: &'a [u8],
@@ -37,6 +39,7 @@ impl<'a> IcmpEchoHandler<'a> {
         }
 
         Ok(Self {
+            icmp_type,
             identifier: u16::from_be_bytes([icmp_header[4], icmp_header[5]]),
             sequence: u16::from_be_bytes([icmp_header[6], icmp_header[7]]),
             payload: data
@@ -45,34 +48,41 @@ impl<'a> IcmpEchoHandler<'a> {
         })
     }
 
-    pub fn write_reply(&self, reply: &mut [u8]) -> Result<Option<u16>, String> {
-        println!("Building ICMP Echo Reply...");
+    /// Creates an ICMP header and payload for replying to `self`.
+    pub const fn create_reply(&self) -> Self {
+        // ICMP Echo Reply:
+        // - Change type from 8 to 0
+        // - Keep the same identifier, sequence number, and payload data
+        Self {
+            icmp_type: Self::ICMP_TYPE_ECHO_REPLY,
+            identifier: self.identifier,
+            sequence: self.sequence,
+            payload: self.payload,
+        }
+    }
 
-        // Copy payload into reply
-        reply
-            .try_get_mut(
-                usize::from(ICMP_HEADER_LEN)
-                    ..usize::from(ICMP_HEADER_LEN).try_add(self.payload.len())?,
-            )?
-            .copy_from_slice(self.payload);
+    /// Copies data from `self` to write an ICMP header and payload into `buf`, returning the number
+    /// of bytes written.
+    pub fn write_into(&self, buf: &mut [u8]) -> Result<u16, String> {
+        // Copy echo payload
+        buf.try_get_mut(
+            usize::from(ICMP_HEADER_LEN)
+                ..usize::from(ICMP_HEADER_LEN).try_add(self.payload.len())?,
+        )?
+        .copy_from_slice(self.payload);
 
-        // ICMP Echo Reply header
-        *reply.try_get_mut(0)? = Self::ICMP_TYPE_ECHO_REPLY;
-        *reply.try_get_mut(1)? = Self::ICMP_CODE_ECHO;
-
-        // Checksum at bytes 2-3 calculated later
-
-        // Identifier and sequence for echo request/reply
-        reply
-            .try_get_mut(4..6)?
-            .copy_from_slice(&self.identifier.to_be_bytes());
-        reply
-            .try_get_mut(6..8)?
-            .copy_from_slice(&self.sequence.to_be_bytes());
+        // ICMP Echo type and code
+        *buf.try_get_mut(0)? = self.icmp_type;
+        *buf.try_get_mut(1)? = Self::ICMP_CODE_ECHO;
 
         // Clear ICMP checksum field before recalculating
-        *reply.try_get_mut(2)? = 0;
-        *reply.try_get_mut(3)? = 0;
+        buf.try_get_mut(2..4)?.copy_from_slice(&[0x00, 0x00]);
+
+        // Identifier and sequence for echo request/reply
+        buf.try_get_mut(4..6)?
+            .copy_from_slice(&self.identifier.to_be_bytes());
+        buf.try_get_mut(6..8)?
+            .copy_from_slice(&self.sequence.to_be_bytes());
 
         // ICMP length: fixed ICMP header length (8 bytes) + length of echo payload
         #[expect(
@@ -82,12 +92,11 @@ impl<'a> IcmpEchoHandler<'a> {
         let icmp_len = ICMP_HEADER_LEN.try_add(self.payload.len() as u16)?;
 
         // Calculate ICMP checksum (covers the entire ICMP message: header + payload)
-        let icmp_checksum = checksum::calculate(reply.try_get(..usize::from(icmp_len))?);
-        reply
-            .try_get_mut(2..4)?
+        let icmp_checksum = checksum::calculate(buf.try_get(..usize::from(icmp_len))?);
+        buf.try_get_mut(2..4)?
             .copy_from_slice(&icmp_checksum.to_be_bytes());
 
-        Ok(Some(icmp_len))
+        Ok(icmp_len)
     }
 }
 
@@ -95,11 +104,17 @@ impl fmt::Display for IcmpEchoHandler<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "ICMP type={} code={} (Echo Request) | identifier={} sequence={}",
-            Self::ICMP_TYPE_ECHO_REQUEST,
+            "ICMP | type={} code={} ({}) | identifier={} sequence={}\n{}",
+            self.icmp_type,
             Self::ICMP_CODE_ECHO,
+            match self.icmp_type {
+                Self::ICMP_TYPE_ECHO_REQUEST => "Echo Request",
+                Self::ICMP_TYPE_ECHO_REPLY => "Echo Reply",
+                _ => "unknown type",
+            },
             self.identifier,
             self.sequence,
+            payload_to_string(self.payload),
         )
     }
 }
@@ -198,9 +213,7 @@ mod tests {
         reply[12..16].copy_from_slice(&[10, 0, 0, 2]); // Source: 10.0.0.2
         reply[16..20].copy_from_slice(&[10, 0, 0, 1]); // Dest: 10.0.0.1
 
-        let icmp_len = handler
-            .write_reply(&mut reply[20..])?
-            .ok_or("failed to write reply")?;
+        let icmp_len = handler.create_reply().write_into(&mut reply[20..])?;
 
         // Verify ICMP header at offset 20
         assert_eq!(reply[20], 0); // Type 0 (Echo Reply)

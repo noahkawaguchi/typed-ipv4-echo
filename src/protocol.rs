@@ -9,6 +9,22 @@ const PROTOCOL_ICMP: u8 = 1;
 const PROTOCOL_TCP: u8 = 6;
 const PROTOCOL_UDP: u8 = 17;
 
+/// Converts raw payload bytes to a printable string representation of the payload's length and
+/// content. Escapes control and non-printable characters.
+fn payload_to_string(payload: &[u8]) -> String {
+    match str::from_utf8(payload) {
+        Err(_) => format!(
+            "{}-byte non-UTF-8 payload: {}",
+            payload.len(),
+            payload.escape_ascii()
+        ),
+
+        Ok("") => String::from("<no payload>"),
+
+        Ok(s) => format!("{}-byte payload: {}", payload.len(), s.escape_debug()),
+    }
+}
+
 pub enum ProtocolHandler<'a> {
     Tcp(TcpHandler<'a>),
     Udp(UdpHandler<'a>),
@@ -33,19 +49,29 @@ impl<'a> ProtocolHandler<'a> {
         }
     }
 
-    /// Writes the protocol-specific sections starting from the beginning of `reply`, returning the
-    /// length of the protocol-specific header and payload in bytes (excluding the IP header), or
-    /// `Ok(None)` if no reply should be sent.
-    pub fn write_reply(
+    /// Creates a protocol-specific header and payload for replying to `self`, or returns `None` for
+    /// no reply.
+    pub fn create_reply(&self) -> Option<Self> {
+        match self {
+            Self::Icmp(handler) => Some(Self::Icmp(handler.create_reply())),
+            // TCP is the only one that's actually optional
+            Self::Tcp(handler) => handler.create_reply().map(Self::Tcp),
+            Self::Udp(handler) => Some(Self::Udp(handler.create_reply())),
+        }
+    }
+
+    /// Copies data from `self` to write the protocol-specific header and payload into `buf`,
+    /// returning the number of bytes written.
+    pub fn write_into(
         &self,
-        reply: &mut [u8],
+        buf: &mut [u8],
         src_ip: Ipv4Addr,
         dst_ip: Ipv4Addr,
-    ) -> Result<Option<u16>, String> {
+    ) -> Result<u16, String> {
         match self {
-            Self::Icmp(handler) => handler.write_reply(reply),
-            Self::Tcp(handler) => handler.write_reply(reply, src_ip, dst_ip),
-            Self::Udp(handler) => handler.write_reply(reply, src_ip, dst_ip),
+            Self::Icmp(handler) => handler.write_into(buf),
+            Self::Tcp(handler) => handler.write_into(buf, src_ip, dst_ip),
+            Self::Udp(handler) => handler.write_into(buf, src_ip, dst_ip),
         }
     }
 }
