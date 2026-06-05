@@ -1,6 +1,6 @@
 use crate::{
     ETHERNET_MTU, checksum,
-    protocol::Protocol,
+    protocol::{Protocol, payload_to_string},
     try_ops::{TryAdd, TryGet, TryGetMut},
 };
 use std::{fmt, net::Ipv4Addr};
@@ -168,15 +168,13 @@ impl<'a> TcpHandler<'a> {
 
     /// Determines the nature of the reply to send based on the received packet type or returns
     /// `None` for no reply.
-    fn determine_reply(&self) -> Option<TcpReplyInfo> {
+    const fn determine_reply(&self) -> Option<TcpReplyInfo> {
         /// Local sequence number for SYN-ACK (can be random, using 0 for simplicity).
         const LOCAL_SEQ_SYN: u32 = 0;
 
         match (self.syn_flag, self.ack_flag, self.payload.len()) {
             // SYN packet (step 2 of handshake) -> send SYN-ACK, no payload echo
             (true, false, _) => {
-                println!("Received SYN, building SYN-ACK response...");
-
                 // SYN | ACK flags, seq = LOCAL_SEQ_SYN, local ack num = remote seq num + 1
                 Some(TcpReplyInfo {
                     syn_flag: true,
@@ -189,11 +187,6 @@ impl<'a> TcpHandler<'a> {
 
             // Data packet (ACK with payload) -> send ACK, echo payload
             (false, true, payload_len) if payload_len > 0 => {
-                println!(
-                    "Received {payload_len} bytes of data: {}\nEchoing data back...",
-                    str::from_utf8(self.payload).unwrap_or("<non-UTF-8>")
-                );
-
                 // ACK flag only
                 // Local seq num = what the client expects next (remote ack num)
                 // Local ack num = remote seq num + payload length (intentionally wrapping)
@@ -212,10 +205,7 @@ impl<'a> TcpHandler<'a> {
 
             // Handshake ACK (step 3) -> no reply needed
             // Remote ack num should be the previous local seq num + 1
-            (false, true, 0) if self.ack_num == LOCAL_SEQ_SYN.wrapping_add(1) => {
-                println!("Received ACK, connection established!");
-                None
-            }
+            (false, true, 0) if self.ack_num == LOCAL_SEQ_SYN.wrapping_add(1) => None,
 
             _ => None, // No reply implemented
         }
@@ -226,14 +216,14 @@ impl fmt::Display for TcpHandler<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "TCP {} -> {} | {} bytes | seq={} ack={} | SYN={} ACK={}",
+            "TCP | {} -> {} | seq={} ack={} | SYN={} ACK={}\n{}",
             self.src_port,
             self.dst_port,
-            self.offset_bytes,
             self.seq_num,
             self.ack_num,
             self.syn_flag,
             self.ack_flag,
+            payload_to_string(self.payload),
         )
     }
 }

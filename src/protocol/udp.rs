@@ -1,6 +1,6 @@
 use crate::{
     ETHERNET_MTU, checksum,
-    protocol::Protocol,
+    protocol::{Protocol, payload_to_string},
     try_ops::{TryAdd, TryGet, TryGetMut},
 };
 use std::{fmt, net::Ipv4Addr};
@@ -46,12 +46,6 @@ impl<'a> UdpHandler<'a> {
         src_ip: Ipv4Addr,
         dst_ip: Ipv4Addr,
     ) -> Result<u16, String> {
-        println!(
-            "Received {} bytes of data: {}\nEchoing data back...",
-            self.payload.len(),
-            str::from_utf8(self.payload).unwrap_or("<non-UTF-8>")
-        );
-
         // Source and destination ports
         buf.try_get_mut(..2)?
             .copy_from_slice(&self.src_port.to_be_bytes());
@@ -105,7 +99,13 @@ impl<'a> UdpHandler<'a> {
 
 impl fmt::Display for UdpHandler<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "UDP {} -> {}", self.src_port, self.dst_port)
+        write!(
+            f,
+            "UDP | {} -> {}\n{}",
+            self.src_port,
+            self.dst_port,
+            payload_to_string(self.payload)
+        )
     }
 }
 

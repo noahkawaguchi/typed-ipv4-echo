@@ -1,5 +1,6 @@
 use crate::{
     checksum,
+    protocol::payload_to_string,
     try_ops::{TryAdd, TryGet, TryGetMut},
 };
 use std::fmt;
@@ -63,8 +64,6 @@ impl<'a> IcmpEchoHandler<'a> {
     /// Copies data from `self` to write an ICMP header and payload into `buf`, returning the number
     /// of bytes written.
     pub fn write_into(&self, buf: &mut [u8]) -> Result<u16, String> {
-        println!("Writing ICMP Echo Reply...");
-
         // Copy echo payload
         buf.try_get_mut(
             usize::from(ICMP_HEADER_LEN)
@@ -105,7 +104,7 @@ impl fmt::Display for IcmpEchoHandler<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "ICMP type={} code={} ({}) | identifier={} sequence={}",
+            "ICMP | type={} code={} ({}) | identifier={} sequence={}\n{}",
             self.icmp_type,
             Self::ICMP_CODE_ECHO,
             match self.icmp_type {
@@ -115,6 +114,7 @@ impl fmt::Display for IcmpEchoHandler<'_> {
             },
             self.identifier,
             self.sequence,
+            payload_to_string(self.payload),
         )
     }
 }

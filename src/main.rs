@@ -24,11 +24,16 @@ const ETHERNET_MTU: usize = 1500;
 /// Runs an echo server that uses a TUN device to read and write IPv4 packets: TCP, UDP, and ICMP.
 /// Exits gracefully upon receiving a shutdown signal.
 fn main() -> Result<(), Box<dyn Error>> {
+    fn divider() { println!("\n{}\n", "=".repeat(60)) }
+
     let shutdown = ShutdownSignal::install()?;
 
     let tun_name = env::var("TUN_DEVICE_NAME").unwrap_or_else(|_| String::from("tun0"));
     let mut tun = tun::open(&tun_name)?;
-    println!("Attached to TUN device {tun_name}\nWaiting for packets... (Ctrl+C to stop)\n");
+    println!("Attached to TUN device {tun_name}");
+
+    println!("Waiting for packets... (Ctrl+C to stop)");
+    divider();
 
     let mut read_buf = [0u8; ETHERNET_MTU];
     let mut write_buf = [0u8; ETHERNET_MTU];
@@ -46,6 +51,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             Err(e) => eprintln!("Skipping packet: {e}"),
 
             Ok((ipv4_header, ipv4_payload)) => {
+                println!(" ==== Packet received ====");
                 println!("{ipv4_header}");
 
                 match ProtocolHandler::parse(ipv4_payload, ipv4_header.protocol) {
@@ -53,9 +59,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     Ok(handler) => {
                         println!("{handler}");
+                        println!("\n ==== Packet sent ====");
 
                         match handler.create_reply() {
-                            None => println!("No reply required"),
+                            None => println!("<no reply>"),
 
                             Some(reply_handler) => {
                                 // Write the protocol-specific portion of the reply packet first to
@@ -77,7 +84,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                                 println!("{reply_ipv4_header}");
                                 println!("{reply_handler}");
-                                println!("Reply packet sent!");
                             }
                         }
                     }
@@ -85,7 +91,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
 
-        println!();
+        divider();
     }
 
     println!("\nShutdown signal received, exiting");

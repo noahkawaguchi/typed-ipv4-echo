@@ -9,6 +9,22 @@ const PROTOCOL_ICMP: u8 = 1;
 const PROTOCOL_TCP: u8 = 6;
 const PROTOCOL_UDP: u8 = 17;
 
+/// Converts raw payload bytes to a printable string representation of the payload's length and
+/// content. Escapes control and non-printable characters.
+fn payload_to_string(payload: &[u8]) -> String {
+    match str::from_utf8(payload) {
+        Err(_) => format!(
+            "{}-byte non-UTF-8 payload: {}",
+            payload.len(),
+            payload.escape_ascii()
+        ),
+
+        Ok("") => String::from("<no payload>"),
+
+        Ok(s) => format!("{}-byte payload: {}", payload.len(), s.escape_debug()),
+    }
+}
+
 pub enum ProtocolHandler<'a> {
     Tcp(TcpHandler<'a>),
     Udp(UdpHandler<'a>),

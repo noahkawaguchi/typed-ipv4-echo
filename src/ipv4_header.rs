@@ -8,6 +8,7 @@ const IPV4_HDR_MIN_LEN_U8: u8 = 20;
 const IPV4_HDR_MIN_LEN_USIZE: usize = IPV4_HDR_MIN_LEN_U8 as usize;
 
 /// Struct for managing IPv4 packet header fields and replies.
+#[cfg_attr(test, derive(Debug))]
 pub struct Ipv4Header {
     pub total_len: u16,
     pub protocol: Protocol,
@@ -26,9 +27,11 @@ impl Ipv4Header {
             return Err(format!("Too short for IPv4 header ({} bytes)", data.len()));
         };
 
-        let version = ip_header[0] >> 4;
-        if version != 4 {
-            return Err(format!("Non-IPv4 packet (version {version})"));
+        // Must be IPv4
+        match ip_header[0] >> 4 {
+            4 => {}
+            6 => return Err(String::from("IPv6 packet")),
+            version => return Err(format!("Unexpected IP version {version}")),
         }
 
         let ihl_bytes = usize::from(ip_header[0] & 0xF) * 4; // Convert 32-bit words to bytes
@@ -82,7 +85,7 @@ impl fmt::Display for Ipv4Header {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "IPv4 | {} bytes | {} | {} -> {}",
+            "IPv4 | {} bytes total | {} | {} -> {}",
             self.total_len, self.protocol, self.src_ip, self.dst_ip,
         )
     }
@@ -91,6 +94,7 @@ impl fmt::Display for Ipv4Header {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::assert_matches;
 
     #[test]
     fn correctly_parses_valid_packet() -> Result<(), String> {
@@ -117,7 +121,7 @@ mod tests {
     #[test]
     fn parsing_fails_if_too_short() {
         let data = [0x45, 0x00, 0x00]; // Only 3 bytes
-        assert!(Ipv4Header::parse(&data).is_err_and(|e| e.contains("Too short")));
+        assert_matches!(Ipv4Header::parse(&data), Err(e) if e.contains("Too short"));
     }
 
     #[test]
@@ -132,7 +136,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x01,
         ];
 
-        assert!(Ipv4Header::parse(&data).is_err_and(|e| e.contains("Non-IPv4")));
+        assert_matches!(Ipv4Header::parse(&data), Err(e) if e.contains("IPv6"));
     }
 
     #[test]
