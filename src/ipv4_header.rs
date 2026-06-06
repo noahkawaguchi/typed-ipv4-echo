@@ -99,7 +99,7 @@ mod tests {
     #[test]
     fn correctly_parses_valid_packet() -> Result<(), String> {
         #[rustfmt::skip]
-        let data = [
+        const DATA: [u8; 20] = [
             0x45, 0x00, 0x00, 0x3c,  // Version 4, IHL 5, TOS 0, Total Length 60
             0x1c, 0x46, 0x40, 0x00,  // ID, Flags, Fragment Offset
             0x40, 0x06, 0xb1, 0xe6,  // TTL 64, Protocol 6 (TCP), Checksum
@@ -107,27 +107,27 @@ mod tests {
             172, 16, 10, 12,         // Dest IP: 172.16.10.12
         ];
 
-        let (header, payload) = Ipv4Header::parse(&data)?;
+        let (header, payload) = Ipv4Header::parse(&DATA)?;
 
         assert_eq!(header.total_len, 60);
         assert_eq!(header.protocol, Protocol::Tcp);
         assert_eq!(header.src_ip, Ipv4Addr::new(192, 168, 1, 100));
         assert_eq!(header.dst_ip, Ipv4Addr::new(172, 16, 10, 12));
-        assert_eq!(payload, &data[20..]);
+        assert_eq!(payload, &DATA[20..]);
 
         Ok(())
     }
 
     #[test]
     fn parsing_fails_if_too_short() {
-        let data = [0x45, 0x00, 0x00]; // Only 3 bytes
-        assert_matches!(Ipv4Header::parse(&data), Err(e) if e.contains("Too short"));
+        const DATA: [u8; 3] = [0x45, 0x00, 0x00]; // Only 3 bytes
+        assert_matches!(Ipv4Header::parse(&DATA), Err(e) if e.contains("Too short"));
     }
 
     #[test]
     fn parsing_fails_if_not_ipv4() {
         #[rustfmt::skip]
-        let data = [
+        const DATA: [u8; 24] = [
             0x60, 0x00, 0x00, 0x00,  // Version 6 (IPv6), not 4
             0x00, 0x14, 0x06, 0x40,
             0x20, 0x01, 0x0d, 0xb8,
@@ -136,13 +136,13 @@ mod tests {
             0x00, 0x00, 0x00, 0x01,
         ];
 
-        assert_matches!(Ipv4Header::parse(&data), Err(e) if e.contains("IPv6"));
+        assert_matches!(Ipv4Header::parse(&DATA), Err(e) if e.contains("IPv6"));
     }
 
     #[test]
     fn creates_valid_ipv4_header_for_reply() -> Result<(), String> {
         #[rustfmt::skip]
-        let request = [
+        const REQUEST: [u8; 20] = [
             0x45, 0x00, 0x00, 0x3c,  // Version 4, IHL 5, TOS 0, Total Length 60
             0x1c, 0x46, 0x40, 0x00,  // ID, Flags, Fragment Offset
             0x40, 0x11, 0xb1, 0xe6,  // TTL 64, Protocol 17 (UDP), Checksum
@@ -150,7 +150,7 @@ mod tests {
             172, 16, 10, 12,         // Dest IP: 172.16.10.12
         ];
 
-        let (header, _) = Ipv4Header::parse(&request)?;
+        let (header, _) = Ipv4Header::parse(&REQUEST)?;
         let mut reply = [0u8; ETHERNET_MTU];
         let proto_len = 48 - 20; // Total length - IPv4 reply header length
         let reply_header = header.create_reply(proto_len)?;
