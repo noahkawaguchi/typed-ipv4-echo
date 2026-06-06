@@ -18,10 +18,22 @@ use std::{
     env,
     error::Error,
     io::{self, Read, Write},
+    net::Ipv4Addr,
 };
 
 /// The Maximum Transmission Unit of standard Ethernet (frames up to 1500 bytes of IP packet data).
 const ETHERNET_MTU: usize = 1500;
+
+#[derive(Clone, Copy)]
+#[cfg_attr(test, derive(Debug))]
+struct Ipv4AddrPair {
+    src: Ipv4Addr,
+    dst: Ipv4Addr,
+}
+
+impl Ipv4AddrPair {
+    const fn swapped(self) -> Self { Self { src: self.dst, dst: self.src } }
+}
 
 /// Runs an echo server that uses a TUN device to read and write IPv4 packets: TCP, UDP, and ICMP.
 /// Exits gracefully upon receiving a shutdown signal.
@@ -60,8 +72,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 match ProtocolHandler::parse(
                     ipv4_payload,
                     ipv4_header.protocol,
-                    ipv4_header.src_ip,
-                    ipv4_header.dst_ip,
+                    ipv4_header.ip_pair,
                 ) {
                     Err(e) => eprintln!("Skipping packet: {e}"),
 

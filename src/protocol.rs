@@ -2,8 +2,11 @@ mod icmp_echo;
 mod tcp;
 mod udp;
 
-use crate::protocol::{icmp_echo::IcmpEchoHandler, tcp::TcpHandler, udp::UdpHandler};
-use std::{fmt, io, net::Ipv4Addr};
+use crate::{
+    Ipv4AddrPair,
+    protocol::{icmp_echo::IcmpEchoHandler, tcp::TcpHandler, udp::UdpHandler},
+};
+use std::{fmt, io};
 pub use tcp::TcpConnections;
 
 const PROTOCOL_ICMP: u8 = 1;
@@ -28,8 +31,8 @@ fn payload_to_string(payload: &[u8]) -> String {
 
 pub enum ProtocolHandler<'a> {
     Icmp(IcmpEchoHandler<'a>),
-    Tcp(TcpHandler<'a>, Ipv4Addr, Ipv4Addr),
-    Udp(UdpHandler<'a>, Ipv4Addr, Ipv4Addr),
+    Tcp(TcpHandler<'a>, Ipv4AddrPair),
+    Udp(UdpHandler<'a>, Ipv4AddrPair),
 }
 
 impl<'a> ProtocolHandler<'a> {
@@ -42,13 +45,12 @@ impl<'a> ProtocolHandler<'a> {
     pub fn parse(
         data: &'a [u8],
         protocol: Protocol,
-        src_ip: Ipv4Addr,
-        dst_ip: Ipv4Addr,
+        ip_pair: Ipv4AddrPair,
     ) -> Result<Self, String> {
         match protocol {
             Protocol::Icmp => IcmpEchoHandler::parse(data).map(Self::Icmp),
-            Protocol::Tcp => TcpHandler::parse(data).map(|h| Self::Tcp(h, src_ip, dst_ip)),
-            Protocol::Udp => UdpHandler::parse(data).map(|h| Self::Udp(h, src_ip, dst_ip)),
+            Protocol::Tcp => TcpHandler::parse(data).map(|h| Self::Tcp(h, ip_pair)),
+            Protocol::Udp => UdpHandler::parse(data).map(|h| Self::Udp(h, ip_pair)),
             Protocol::Other(other) => Err(format!(
                 "Protocol {other} not implemented, only ICMP Echo, TCP, and UDP"
             )),
@@ -65,14 +67,14 @@ impl<'a> ProtocolHandler<'a> {
             Self::Icmp(handler) => Ok(Some(Self::Icmp(handler.create_reply()))),
 
             // Swap the source and destination IP addresses for the reply for UDP and TCP
-            Self::Udp(handler, src_ip, dst_ip) => {
-                Ok(Some(Self::Udp(handler.create_reply(), *dst_ip, *src_ip)))
+            Self::Udp(handler, ip_pair) => {
+                Ok(Some(Self::Udp(handler.create_reply(), ip_pair.swapped())))
             }
 
             // TCP is the only one that's actually optional
-            Self::Tcp(handler, src_ip, dst_ip) => Ok(handler
-                .create_reply(*src_ip, *dst_ip, tcp_connections)?
-                .map(|h| Self::Tcp(h, *dst_ip, *src_ip))),
+            Self::Tcp(handler, ip_pair) => Ok(handler
+                .create_reply(tcp_connections, *ip_pair)?
+                .map(|h| Self::Tcp(h, ip_pair.swapped()))),
         }
     }
 
@@ -81,8 +83,8 @@ impl<'a> ProtocolHandler<'a> {
     pub fn write_into(&self, buf: &mut [u8]) -> Result<u16, String> {
         match self {
             Self::Icmp(handler) => handler.write_into(buf),
-            Self::Tcp(handler, src_ip, dst_ip) => handler.write_into(buf, *src_ip, *dst_ip),
-            Self::Udp(handler, src_ip, dst_ip) => handler.write_into(buf, *src_ip, *dst_ip),
+            Self::Tcp(handler, ip_pair) => handler.write_into(buf, *ip_pair),
+            Self::Udp(handler, ip_pair) => handler.write_into(buf, *ip_pair),
         }
     }
 }
@@ -91,8 +93,8 @@ impl fmt::Display for ProtocolHandler<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Icmp(handler) => write!(f, "{handler}"),
-            Self::Tcp(handler, _, _) => write!(f, "{handler}"),
-            Self::Udp(handler, _, _) => write!(f, "{handler}"),
+            Self::Tcp(handler, _) => write!(f, "{handler}"),
+            Self::Udp(handler, _) => write!(f, "{handler}"),
         }
     }
 }

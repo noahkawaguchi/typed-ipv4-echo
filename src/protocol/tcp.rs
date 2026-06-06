@@ -1,5 +1,5 @@
 use crate::{
-    ETHERNET_MTU, checksum,
+    ETHERNET_MTU, Ipv4AddrPair, checksum,
     protocol::{Protocol, payload_to_string},
     try_ops::{TryAdd, TryGet, TryGetMut},
 };
@@ -95,14 +95,13 @@ impl<'a> TcpHandler<'a> {
     /// Creates a TCP header and payload for replying to `self`, or returns `Ok(None)` for no reply.
     pub fn create_reply(
         &self,
-        src_ip: Ipv4Addr,
-        dst_ip: Ipv4Addr,
         connections: &mut TcpConnections,
+        ip_pair: Ipv4AddrPair,
     ) -> Result<Option<Self>, io::Error> {
         let key = ConnKey {
-            client_ip: src_ip,
+            client_ip: ip_pair.src,
             client_port: self.src_port,
-            server_ip: dst_ip,
+            server_ip: ip_pair.dst,
             server_port: self.dst_port,
         };
 
@@ -164,12 +163,7 @@ impl<'a> TcpHandler<'a> {
 
     /// Copies data from `self` to write a TCP header and payload into `buf`, returning the number
     /// of bytes written.
-    pub fn write_into(
-        &self,
-        buf: &mut [u8],
-        src_ip: Ipv4Addr,
-        dst_ip: Ipv4Addr,
-    ) -> Result<u16, String> {
+    pub fn write_into(&self, buf: &mut [u8], ip_pair: Ipv4AddrPair) -> Result<u16, String> {
         // Source and destination ports
         buf.try_get_mut(..2)?
             .copy_from_slice(&self.src_port.to_be_bytes());
@@ -216,8 +210,8 @@ impl<'a> TcpHandler<'a> {
 
         // Calculate TCP checksum with pseudo-header
         let mut pseudo_header = [0u8; Self::PSEUDO_HEADER_LEN];
-        pseudo_header[0..4].copy_from_slice(&src_ip.octets()); // Source IP
-        pseudo_header[4..8].copy_from_slice(&dst_ip.octets()); // Dest IP
+        pseudo_header[0..4].copy_from_slice(&ip_pair.src.octets());
+        pseudo_header[4..8].copy_from_slice(&ip_pair.dst.octets());
         pseudo_header[8] = 0; // Reserved padding for alignment
         pseudo_header[9] = Protocol::Tcp.into();
         pseudo_header[10..12].copy_from_slice(&tcp_segment_len.to_be_bytes());
@@ -408,10 +402,10 @@ mod tests {
         let mut reply = [0u8; ETHERNET_MTU];
 
         let tcp_len = handler
-            .create_reply(SRC_IP, DST_IP, &mut connections)
+            .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })
             .map_err(|e| e.to_string())?
             .ok_or("Unexpected None reply")?
-            .write_into(&mut reply[20..], SRC_IP, DST_IP)?;
+            .write_into(&mut reply[20..], Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?;
 
         // Verify TCP header at offset 20
         assert_eq!(&reply[20..22], &[0x00, 0x50]); // Source port: 80 (swapped)
@@ -480,9 +474,9 @@ mod tests {
         let mut reply = [0u8; ETHERNET_MTU];
 
         let tcp_len = handler
-            .create_reply(SRC_IP, DST_IP, &mut connections)?
+            .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?
             .ok_or("Unexpected None reply")?
-            .write_into(&mut reply[20..], SRC_IP, DST_IP)?;
+            .write_into(&mut reply[20..], Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?;
 
         // Verify TCP header
         assert_eq!(&reply[20..22], &[0x00, 0x50]); // Source port: 80
@@ -535,7 +529,8 @@ mod tests {
         let mut connections = TcpConnections::new();
 
         assert_matches!(
-            TcpHandler::parse(&ACK_PACKET)?.create_reply(SRC_IP, DST_IP, &mut connections)?,
+            TcpHandler::parse(&ACK_PACKET)?
+                .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?,
             None
         );
 

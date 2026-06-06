@@ -1,4 +1,4 @@
-use crate::{ETHERNET_MTU, checksum, protocol::Protocol, try_ops::TryAdd};
+use crate::{ETHERNET_MTU, Ipv4AddrPair, checksum, protocol::Protocol, try_ops::TryAdd};
 use std::{fmt, net::Ipv4Addr};
 
 /// The minimum number of bytes for an IPv4 header (no options) as a `u8`.
@@ -12,8 +12,7 @@ const IPV4_HDR_MIN_LEN_USIZE: usize = IPV4_HDR_MIN_LEN_U8 as usize;
 pub struct Ipv4Header {
     pub total_len: u16,
     pub protocol: Protocol,
-    pub src_ip: Ipv4Addr,
-    pub dst_ip: Ipv4Addr,
+    pub ip_pair: Ipv4AddrPair,
 }
 
 impl Ipv4Header {
@@ -40,8 +39,10 @@ impl Ipv4Header {
             Self {
                 total_len: u16::from_be_bytes([ip_header[2], ip_header[3]]),
                 protocol: Protocol::from(ip_header[9]),
-                src_ip: Ipv4Addr::new(ip_header[12], ip_header[13], ip_header[14], ip_header[15]),
-                dst_ip: Ipv4Addr::new(ip_header[16], ip_header[17], ip_header[18], ip_header[19]),
+                ip_pair: Ipv4AddrPair {
+                    src: Ipv4Addr::new(ip_header[12], ip_header[13], ip_header[14], ip_header[15]),
+                    dst: Ipv4Addr::new(ip_header[16], ip_header[17], ip_header[18], ip_header[19]),
+                },
             },
             data.get(ihl_bytes..).ok_or("No data after IPv4 header")?,
         ))
@@ -53,8 +54,7 @@ impl Ipv4Header {
         Ok(Self {
             total_len: u16::from(IPV4_HDR_MIN_LEN_U8).try_add(proto_len)?,
             protocol: self.protocol,
-            src_ip: self.dst_ip,
-            dst_ip: self.src_ip,
+            ip_pair: self.ip_pair.swapped(),
         })
     }
 
@@ -72,8 +72,8 @@ impl Ipv4Header {
         // Clear IP header checksum field before recalculating
         buf[10..12].copy_from_slice(&[0x00, 0x00]);
 
-        buf[12..16].copy_from_slice(&self.src_ip.octets());
-        buf[16..20].copy_from_slice(&self.dst_ip.octets());
+        buf[12..16].copy_from_slice(&self.ip_pair.src.octets());
+        buf[16..20].copy_from_slice(&self.ip_pair.dst.octets());
 
         // Recalculate IP header checksum (covers only the IP header, always 20 bytes for replies)
         let ip_checksum = checksum::calculate(&buf[..IPV4_HDR_MIN_LEN_USIZE]);
@@ -86,7 +86,7 @@ impl fmt::Display for Ipv4Header {
         write!(
             f,
             "IPv4 | {} bytes total | {} | {} -> {}",
-            self.total_len, self.protocol, self.src_ip, self.dst_ip,
+            self.total_len, self.protocol, self.ip_pair.src, self.ip_pair.dst,
         )
     }
 }
@@ -111,8 +111,8 @@ mod tests {
 
         assert_eq!(header.total_len, 60);
         assert_eq!(header.protocol, Protocol::Tcp);
-        assert_eq!(header.src_ip, Ipv4Addr::new(192, 168, 1, 100));
-        assert_eq!(header.dst_ip, Ipv4Addr::new(172, 16, 10, 12));
+        assert_eq!(header.ip_pair.src, Ipv4Addr::new(192, 168, 1, 100));
+        assert_eq!(header.ip_pair.dst, Ipv4Addr::new(172, 16, 10, 12));
         assert_eq!(payload, &DATA[20..]);
 
         Ok(())
