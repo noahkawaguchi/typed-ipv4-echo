@@ -57,30 +57,26 @@ fn main() -> Result<(), Box<dyn Error>> {
                 println!(" ==== Packet received ====");
                 println!("{ipv4_header}");
 
-                match ProtocolHandler::parse(ipv4_payload, ipv4_header.protocol) {
+                match ProtocolHandler::parse(
+                    ipv4_payload,
+                    ipv4_header.protocol,
+                    ipv4_header.src_ip,
+                    ipv4_header.dst_ip,
+                ) {
                     Err(e) => eprintln!("Skipping packet: {e}"),
 
                     Ok(handler) => {
                         println!("{handler}");
                         println!("\n ==== Packet sent ====");
 
-                        match handler.create_reply(
-                            ipv4_header.src_ip,
-                            ipv4_header.dst_ip,
-                            &mut tcp_connections,
-                        )? {
+                        match handler.create_reply(&mut tcp_connections)? {
                             None => println!("<no reply>"),
 
                             Some(reply_handler) => {
                                 // Write the protocol-specific portion of the reply packet first to
                                 // have the total length for the IPv4 header
-                                let proto_len = reply_handler.write_into(
-                                    &mut write_buf[Ipv4Header::REPLY_HEADER_LEN..],
-                                    // Swap the source and destination IP addresses from the
-                                    // received packet for the reply packet
-                                    ipv4_header.dst_ip,
-                                    ipv4_header.src_ip,
-                                )?;
+                                let proto_len = reply_handler
+                                    .write_into(&mut write_buf[Ipv4Header::REPLY_HEADER_LEN..])?;
 
                                 let reply_ipv4_header = ipv4_header.create_reply(proto_len)?;
                                 reply_ipv4_header.write_into(&mut write_buf);
