@@ -9,6 +9,7 @@ const ICMP_HEADER_LEN: u16 = 8;
 
 /// Struct for managing ICMP Echo Request packets and creating Echo Reply packets. Includes the ICMP
 /// header and the payload.
+#[cfg_attr(test, derive(Debug))]
 pub struct IcmpEchoHandler<'a> {
     icmp_type: u8,
     // The code field is omitted because it is constant 0 for Echo Request/Reply
@@ -123,11 +124,12 @@ impl fmt::Display for IcmpEchoHandler<'_> {
 mod tests {
     use super::*;
     use crate::ETHERNET_MTU;
+    use std::assert_matches;
 
     #[test]
     fn correctly_parses_valid_request() -> Result<(), String> {
         #[rustfmt::skip]
-        let data = [
+        const DATA: [u8; 11] = [
             8, 0,              // Type 8 (Echo Request), Code 0
             0x3a, 0x4b,        // Checksum
             0x12, 0x34,        // Identifier: 0x1234
@@ -135,7 +137,7 @@ mod tests {
             0x41, 0x42, 0x43,  // Payload: "ABC"
         ];
 
-        let handler = IcmpEchoHandler::parse(&data)?;
+        let handler = IcmpEchoHandler::parse(&DATA)?;
 
         assert_eq!(handler.identifier, 0x1234);
         assert_eq!(handler.sequence, 0x5678);
@@ -146,47 +148,47 @@ mod tests {
 
     #[test]
     fn parsing_fails_when_too_short() {
-        let data = [8, 0, 0x3a, 0x4b, 0x12]; // Only 5 bytes
-        assert!(IcmpEchoHandler::parse(&data).is_err_and(|e| e.contains("Too short")));
+        const DATA: [u8; 5] = [8, 0, 0x3a, 0x4b, 0x12]; // Only 5 bytes
+        assert_matches!(IcmpEchoHandler::parse(&DATA), Err(e) if e.contains("Too short"));
     }
 
     #[test]
     fn parsing_fails_when_wrong_icmp_type() {
         #[rustfmt::skip]
-        let data = [
+        const DATA: [u8; 8] = [
             0, 0,              // Type 0 (Echo Reply), Code 0
             0x3a, 0x4b,        // Checksum
             0x12, 0x34,        // Identifier
             0x56, 0x78,        // Sequence
         ];
 
-        assert!(IcmpEchoHandler::parse(&data).is_err_and(|e| e.contains("Not an Echo Request")));
+        assert_matches!(IcmpEchoHandler::parse(&DATA), Err(e) if e.contains("Not an Echo Request"));
     }
 
     #[test]
     fn parsing_fails_when_wrong_icmp_code() {
         #[rustfmt::skip]
-        let data = [
+        const DATA: [u8; 8] = [
             8, 1,              // Type 8 (Echo Request), Code 1 (invalid)
             0x3a, 0x4b,        // Checksum
             0x12, 0x34,        // Identifier
             0x56, 0x78,        // Sequence
         ];
 
-        assert!(IcmpEchoHandler::parse(&data).is_err_and(|e| e.contains("Not an Echo Request")));
+        assert_matches!(IcmpEchoHandler::parse(&DATA), Err(e) if e.contains("Not an Echo Request"));
     }
 
     #[test]
     fn handles_empty_payload() -> Result<(), String> {
         #[rustfmt::skip]
-        let data = [
+        const DATA: [u8; 8] = [
             8, 0,              // Type 8 (Echo Request), Code 0
             0x3a, 0x4b,        // Checksum
             0x00, 0x00,        // Identifier: 0
             0x00, 0x01,        // Sequence: 1
         ];
 
-        let handler = IcmpEchoHandler::parse(&data)?;
+        let handler = IcmpEchoHandler::parse(&DATA)?;
 
         assert_eq!(handler.identifier, 0);
         assert_eq!(handler.sequence, 1);
@@ -198,7 +200,7 @@ mod tests {
     #[test]
     fn creates_valid_echo_reply() -> Result<(), String> {
         #[rustfmt::skip]
-        let request = [
+        const REQUEST: [u8; 13] = [
             8, 0,                          // Type 8 (Echo Request), Code 0
             0x3a, 0x4b,                    // Checksum
             0x12, 0x34,                    // Identifier: 0x1234
@@ -206,7 +208,7 @@ mod tests {
             0x48, 0x65, 0x6c, 0x6c, 0x6f,  // Payload: "Hello"
         ];
 
-        let handler = IcmpEchoHandler::parse(&request)?;
+        let handler = IcmpEchoHandler::parse(&REQUEST)?;
         let mut reply = [0u8; ETHERNET_MTU];
 
         // Set up IP header portion (bytes 12-19 are source and dest IPs)

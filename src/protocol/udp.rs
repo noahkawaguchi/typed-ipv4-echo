@@ -8,6 +8,7 @@ use std::{fmt, net::Ipv4Addr};
 const UDP_HEADER_LEN: u16 = 8;
 
 /// Struct for managing and replying to UDP packets. Includes the UDP header and the payload.
+#[cfg_attr(test, derive(Debug))]
 pub struct UdpHandler<'a> {
     src_port: u16,
     dst_port: u16,
@@ -112,11 +113,12 @@ impl fmt::Display for UdpHandler<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::assert_matches;
 
     #[test]
     fn correctly_parses_valid_packet() -> Result<(), String> {
         #[rustfmt::skip]
-        let data = [
+        const DATA: [u8; 16] = [
             0x04, 0xd2,              // Source port: 1234
             0x00, 0x35,              // Dest port: 53 (DNS)
             0x00, 0x10,              // Length: 16 (8 byte header + 8 byte payload)
@@ -125,7 +127,7 @@ mod tests {
             0x6f, 0x21, 0x21, 0x21,  // Payload: "o!!!"
         ];
 
-        let handler = UdpHandler::parse(&data)?;
+        let handler = UdpHandler::parse(&DATA)?;
 
         assert_eq!(handler.src_port, 1234);
         assert_eq!(handler.dst_port, 53);
@@ -136,21 +138,21 @@ mod tests {
 
     #[test]
     fn parsing_fails_when_too_short() {
-        let data = [0x04, 0xd2, 0x00]; // Only 3 bytes
-        assert!(UdpHandler::parse(&data).is_err_and(|e| e.contains("Too short")));
+        const DATA: [u8; 3] = [0x04, 0xd2, 0x00]; // Only 3 bytes
+        assert_matches!(UdpHandler::parse(&DATA), Err(e) if e.contains("Too short"));
     }
 
     #[test]
     fn parsing_handles_empty_payload() -> Result<(), String> {
         #[rustfmt::skip]
-        let data = [
+        const DATA: [u8; 8] = [
             0x1f, 0x90,              // Source port: 8080
             0x00, 0x50,              // Dest port: 80
             0x00, 0x08,              // Length: 8 (header only, no payload)
             0x00, 0x00,              // Checksum
         ];
 
-        let handler = UdpHandler::parse(&data)?;
+        let handler = UdpHandler::parse(&DATA)?;
 
         assert_eq!(handler.src_port, 8080);
         assert_eq!(handler.dst_port, 80);
@@ -162,7 +164,7 @@ mod tests {
     #[test]
     fn extracts_ports_correctly() -> Result<(), String> {
         #[rustfmt::skip]
-        let data = [
+        const DATA: [u8; 12] = [
             0xff, 0xff,              // Source port: 65535 (max)
             0x00, 0x01,              // Dest port: 1 (min non-zero)
             0x00, 0x0c,              // Length: 12
@@ -170,7 +172,7 @@ mod tests {
             0x74, 0x65, 0x73, 0x74,  // Payload: "test"
         ];
 
-        let handler = UdpHandler::parse(&data)?;
+        let handler = UdpHandler::parse(&DATA)?;
 
         assert_eq!(handler.src_port, 65535);
         assert_eq!(handler.dst_port, 1);
@@ -181,7 +183,7 @@ mod tests {
     #[test]
     fn creates_valid_echo_reply() -> Result<(), String> {
         #[rustfmt::skip]
-        let request = [
+        const REQUEST: [u8; 16] = [
             0x04, 0xd2,              // Source port: 1234
             0x00, 0x35,              // Dest port: 53
             0x00, 0x10,              // Length: 16
@@ -189,16 +191,16 @@ mod tests {
             0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x21, 0x21, 0x21,  // Payload: "Hello!!!"
         ];
 
-        let handler = UdpHandler::parse(&request)?;
-        let mut reply = [0u8; ETHERNET_MTU];
-
         // Set up addresses from IP header
-        let src_ip = Ipv4Addr::new(10, 0, 0, 2); // Source: 10.0.0.2
-        let dst_ip = Ipv4Addr::new(10, 0, 0, 1); // Dest: 10.0.0.1
+        const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2); // Source: 10.0.0.2
+        const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1); // Dest: 10.0.0.1
+
+        let handler = UdpHandler::parse(&REQUEST)?;
+        let mut reply = [0u8; ETHERNET_MTU];
 
         let udp_len = handler
             .create_reply()
-            .write_into(&mut reply[20..], src_ip, dst_ip)?;
+            .write_into(&mut reply[20..], SRC_IP, DST_IP)?;
 
         // Verify UDP header at offset 20
         assert_eq!(&reply[20..22], &[0x00, 0x35]); // Source port: 53 (swapped)
@@ -213,8 +215,8 @@ mod tests {
 
         // Verify checksum is valid using pseudo-header
         let mut pseudo_header = [0u8; 12];
-        pseudo_header[0..4].copy_from_slice(&src_ip.octets()); // Source IP
-        pseudo_header[4..8].copy_from_slice(&dst_ip.octets()); // Dest IP
+        pseudo_header[0..4].copy_from_slice(&SRC_IP.octets()); // Source IP
+        pseudo_header[4..8].copy_from_slice(&DST_IP.octets()); // Dest IP
         pseudo_header[8] = 0; // Reserved
         pseudo_header[9] = Protocol::Udp.into();
         pseudo_header[10..12].copy_from_slice(&udp_len.to_be_bytes());

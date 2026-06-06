@@ -236,7 +236,7 @@ mod tests {
     #[test]
     fn correctly_parses_valid_packet() -> Result<(), String> {
         #[rustfmt::skip]
-        let data = [
+        const DATA: [u8; 25] = [
             0x04, 0xd2,                          // Source port: 1234
             0x00, 0x50,                          // Dest port: 80
             0x00, 0x00, 0x00, 0x01,              // Sequence number: 1
@@ -248,7 +248,7 @@ mod tests {
             0x48, 0x65, 0x6c, 0x6c, 0x6f,        // Payload: "Hello"
         ];
 
-        let handler = TcpHandler::parse(&data)?;
+        let handler = TcpHandler::parse(&DATA)?;
 
         assert_eq!(handler.src_port, 1234);
         assert_eq!(handler.dst_port, 80);
@@ -264,14 +264,14 @@ mod tests {
 
     #[test]
     fn parsing_fails_when_too_short() {
-        let data = [0x04, 0xd2, 0x00, 0x50]; // Only 4 bytes
-        assert!(TcpHandler::parse(&data).is_err_and(|e| e.contains("Too short")));
+        const DATA: [u8; 4] = [0x04, 0xd2, 0x00, 0x50]; // Only 4 bytes
+        assert_matches!(TcpHandler::parse(&DATA), Err(e) if e.contains("Too short"));
     }
 
     #[test]
     fn extracts_syn_flag_correctly() -> Result<(), String> {
         #[rustfmt::skip]
-        let data = [
+        const DATA: [u8; 20] = [
             0x04, 0xd2,                          // Source port: 1234
             0x00, 0x50,                          // Dest port: 80
             0x00, 0x00, 0x00, 0x00,              // Sequence number: 0
@@ -282,7 +282,7 @@ mod tests {
             0x00, 0x00,                          // Urgent pointer
         ];
 
-        let handler = TcpHandler::parse(&data)?;
+        let handler = TcpHandler::parse(&DATA)?;
 
         assert!(handler.syn_flag);
         assert!(!handler.ack_flag);
@@ -293,7 +293,7 @@ mod tests {
     #[test]
     fn extracts_ack_flag_correctly() -> Result<(), String> {
         #[rustfmt::skip]
-        let data = [
+        const DATA: [u8; 20] = [
             0x04, 0xd2,                          // Source port: 1234
             0x00, 0x50,                          // Dest port: 80
             0x00, 0x00, 0x00, 0x01,              // Sequence number: 1
@@ -304,7 +304,7 @@ mod tests {
             0x00, 0x00,                          // Urgent pointer
         ];
 
-        let handler = TcpHandler::parse(&data)?;
+        let handler = TcpHandler::parse(&DATA)?;
 
         assert!(!handler.syn_flag);
         assert!(handler.ack_flag);
@@ -315,7 +315,7 @@ mod tests {
     #[test]
     fn parsing_handles_no_flags_set() -> Result<(), String> {
         #[rustfmt::skip]
-        let data = [
+        const DATA: [u8; 20] = [
             0x04, 0xd2,                          // Source port: 1234
             0x00, 0x50,                          // Dest port: 80
             0x00, 0x00, 0x00, 0x00,              // Sequence number: 0
@@ -326,7 +326,7 @@ mod tests {
             0x00, 0x00,                          // Urgent pointer
         ];
 
-        let handler = TcpHandler::parse(&data)?;
+        let handler = TcpHandler::parse(&DATA)?;
 
         assert!(!handler.syn_flag);
         assert!(!handler.ack_flag);
@@ -337,7 +337,7 @@ mod tests {
     #[test]
     fn parsing_handles_large_sequence_numbers() -> Result<(), String> {
         #[rustfmt::skip]
-        let data = [
+        const DATA: [u8; 20] = [
             0x04, 0xd2,                          // Source port: 1234
             0x00, 0x50,                          // Dest port: 80
             0xff, 0xff, 0xff, 0xff,              // Sequence number: u32::MAX
@@ -348,7 +348,7 @@ mod tests {
             0x00, 0x00,                          // Urgent pointer
         ];
 
-        let handler = TcpHandler::parse(&data)?;
+        let handler = TcpHandler::parse(&DATA)?;
 
         assert_eq!(handler.seq_num, u32::MAX);
         assert_eq!(handler.ack_num, 0xfedc_ba98);
@@ -359,7 +359,7 @@ mod tests {
     #[test]
     fn reply_creates_valid_syn_ack() -> Result<(), String> {
         #[rustfmt::skip]
-        let syn_packet = [
+        const SYN_PACKET: [u8; 20] = [
             0x04, 0xd2,                          // Source port: 1234
             0x00, 0x50,                          // Dest port: 80
             0x00, 0x00, 0x10, 0x00,              // Sequence number: 4096
@@ -370,17 +370,17 @@ mod tests {
             0x00, 0x00,                          // Urgent pointer
         ];
 
-        let handler = TcpHandler::parse(&syn_packet)?;
-        let mut reply = [0u8; ETHERNET_MTU];
-
         // Set up addresses from IP header
-        let src_ip = Ipv4Addr::new(10, 0, 0, 2); // Source: 10.0.0.2
-        let dst_ip = Ipv4Addr::new(10, 0, 0, 1); // Dest: 10.0.0.1
+        const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2); // Source: 10.0.0.2
+        const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1); // Dest: 10.0.0.1
+
+        let handler = TcpHandler::parse(&SYN_PACKET)?;
+        let mut reply = [0u8; ETHERNET_MTU];
 
         let tcp_len = handler
             .create_reply()
             .ok_or("Unexpected None reply")?
-            .write_into(&mut reply[20..], src_ip, dst_ip)?;
+            .write_into(&mut reply[20..], SRC_IP, DST_IP)?;
 
         // Verify TCP header at offset 20
         assert_eq!(&reply[20..22], &[0x00, 0x50]); // Source port: 80 (swapped)
@@ -394,8 +394,8 @@ mod tests {
 
         // Verify checksum is valid using pseudo-header
         let mut pseudo_header = [0u8; 12];
-        pseudo_header[0..4].copy_from_slice(&src_ip.octets());
-        pseudo_header[4..8].copy_from_slice(&dst_ip.octets());
+        pseudo_header[0..4].copy_from_slice(&SRC_IP.octets());
+        pseudo_header[4..8].copy_from_slice(&DST_IP.octets());
         pseudo_header[8] = 0;
         pseudo_header[9] = Protocol::Tcp.into();
         pseudo_header[10..12].copy_from_slice(&tcp_len.to_be_bytes());
@@ -413,7 +413,7 @@ mod tests {
     #[test]
     fn reply_creates_valid_data_echo() -> Result<(), String> {
         #[rustfmt::skip]
-        let data_packet = [
+        const DATA_PACKET: [u8; 25] = [
             0x04, 0xd2,                          // Source port: 1234
             0x00, 0x50,                          // Dest port: 80
             0x00, 0x00, 0x10, 0x01,              // Sequence number: 4097
@@ -425,17 +425,17 @@ mod tests {
             0x48, 0x65, 0x6c, 0x6c, 0x6f,        // Payload: "Hello"
         ];
 
-        let handler = TcpHandler::parse(&data_packet)?;
-        let mut reply = [0u8; ETHERNET_MTU];
-
         // Set up addresses from IP header
-        let src_ip = Ipv4Addr::new(10, 0, 0, 2); // Source: 10.0.0.2
-        let dst_ip = Ipv4Addr::new(10, 0, 0, 1); // Dest: 10.0.0.1
+        const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2); // Source: 10.0.0.2
+        const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1); // Dest: 10.0.0.1
+
+        let handler = TcpHandler::parse(&DATA_PACKET)?;
+        let mut reply = [0u8; ETHERNET_MTU];
 
         let tcp_len = handler
             .create_reply()
             .ok_or("Unexpected None reply")?
-            .write_into(&mut reply[20..], src_ip, dst_ip)?;
+            .write_into(&mut reply[20..], SRC_IP, DST_IP)?;
 
         // Verify TCP header
         assert_eq!(&reply[20..22], &[0x00, 0x50]); // Source port: 80
@@ -452,8 +452,8 @@ mod tests {
 
         // Verify checksum
         let mut pseudo_header = [0u8; 12];
-        pseudo_header[0..4].copy_from_slice(&src_ip.octets());
-        pseudo_header[4..8].copy_from_slice(&dst_ip.octets());
+        pseudo_header[0..4].copy_from_slice(&SRC_IP.octets());
+        pseudo_header[4..8].copy_from_slice(&DST_IP.octets());
         pseudo_header[8] = 0;
         pseudo_header[9] = Protocol::Tcp.into();
         pseudo_header[10..12].copy_from_slice(&tcp_len.to_be_bytes());
@@ -471,7 +471,7 @@ mod tests {
     #[test]
     fn reply_returns_none_for_handshake_ack() -> Result<(), String> {
         #[rustfmt::skip]
-        let ack_packet = [
+        const ACK_PACKET: [u8; 20] = [
             0x04, 0xd2,                          // Source port: 1234
             0x00, 0x50,                          // Dest port: 80
             0x00, 0x00, 0x10, 0x01,              // Sequence number: 4097
@@ -483,7 +483,7 @@ mod tests {
         ];
 
         // Handshake ACK should not generate a reply
-        assert_matches!(TcpHandler::parse(&ack_packet)?.create_reply(), None);
+        assert_matches!(TcpHandler::parse(&ACK_PACKET)?.create_reply(), None);
         Ok(())
     }
 }
