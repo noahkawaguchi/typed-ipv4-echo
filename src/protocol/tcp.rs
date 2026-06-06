@@ -52,16 +52,6 @@ pub struct TcpHandler<'a> {
     payload: &'a [u8],
 }
 
-/// Struct for managing the TCP reply data that varies depending on the received packet.
-struct TcpReplyInfo {
-    seq_num: u32,
-    ack_num: u32,
-    syn_flag: bool,
-    ack_flag: bool,
-    /// Whether to echo the payload.
-    echo: bool,
-}
-
 impl<'a> TcpHandler<'a> {
     const PSEUDO_HEADER_LEN: usize = 12;
     const SYN_FLAG: u8 = 0x02;
@@ -102,7 +92,7 @@ impl<'a> TcpHandler<'a> {
         })
     }
 
-    /// Creates a TCP header and payload for replying to `self`, or returns `None` for no reply.
+    /// Creates a TCP header and payload for replying to `self`, or returns `Ok(None)` for no reply.
     pub fn create_reply(
         &self,
         src_ip: Ipv4Addr,
@@ -116,19 +106,60 @@ impl<'a> TcpHandler<'a> {
             server_port: self.dst_port,
         };
 
-        let Some(reply_info) = self.determine_reply(key, connections)? else { return Ok(None) };
+        match (self.syn_flag, self.ack_flag, self.payload.len()) {
+            // SYN packet (step 1 of handshake)
+            // Reply with SYN-ACK (step 2), no payload echo
+            (true, false, _) => {
+                // seq num = random ISN, local ack num = remote seq num + 1
+                let isn = random_u32()?;
+                connections.store_isn(key, isn);
 
-        Ok(Some(Self {
-            // Swap source and destination ports
-            src_port: self.dst_port,
-            dst_port: self.src_port,
-            seq_num: reply_info.seq_num,
-            ack_num: reply_info.ack_num,
-            offset_bytes: TCP_HEADER_MIN_LEN,
-            syn_flag: reply_info.syn_flag,
-            ack_flag: reply_info.ack_flag,
-            payload: if reply_info.echo { self.payload } else { &[] },
-        }))
+                Ok(Some(Self {
+                    // Swap source and destination ports
+                    src_port: self.dst_port,
+                    dst_port: self.src_port,
+                    seq_num: isn,
+                    ack_num: self.seq_num.wrapping_add(1),
+                    offset_bytes: TCP_HEADER_MIN_LEN,
+                    syn_flag: true,
+                    ack_flag: true,
+                    payload: &[],
+                }))
+            }
+
+            // Handshake ACK (step 3) -> no reply needed
+            // Remote ack num should be the previous local ISN + 1
+            (false, true, 0)
+                if connections
+                    .get_isn(&key)
+                    .is_some_and(|isn| isn.wrapping_add(1) == self.ack_num) =>
+            {
+                Ok(None)
+            }
+
+            // Data packet (ACK with payload) -> send ACK, echo payload
+            (false, true, 1..) => {
+                // Local seq num = what the client expects next (remote ack num)
+                // Local ack num = remote seq num + payload length (intentionally wrapping)
+                Ok(Some(Self {
+                    // Swap source and destination ports
+                    src_port: self.dst_port,
+                    dst_port: self.src_port,
+                    seq_num: self.ack_num,
+                    #[expect(
+                        clippy::cast_possible_truncation,
+                        reason = "`u32::MAX` (4_294_967_295) > `ETHERNET_MTU` (1500)"
+                    )]
+                    ack_num: self.seq_num.wrapping_add(self.payload.len() as u32),
+                    offset_bytes: TCP_HEADER_MIN_LEN,
+                    syn_flag: false,
+                    ack_flag: true,
+                    payload: self.payload,
+                }))
+            }
+
+            _ => Ok(None), // No reply implemented
+        }
     }
 
     /// Copies data from `self` to write a TCP header and payload into `buf`, returning the number
@@ -208,61 +239,6 @@ impl<'a> TcpHandler<'a> {
             .copy_from_slice(&tcp_checksum.to_be_bytes());
 
         Ok(tcp_segment_len)
-    }
-
-    /// Determines the nature of the reply to send based on the received packet type, or returns
-    /// `Ok(None)` for no reply.
-    fn determine_reply(
-        &self,
-        key: ConnKey,
-        connections: &mut TcpConnections,
-    ) -> Result<Option<TcpReplyInfo>, io::Error> {
-        match (self.syn_flag, self.ack_flag, self.payload.len()) {
-            // SYN packet (step 1 of handshake)
-            // Reply with SYN-ACK (step 2), no payload echo
-            (true, false, _) => {
-                // seq num = random ISN, local ack num = remote seq num + 1
-                let isn = random_u32()?;
-                connections.store_isn(key, isn);
-
-                Ok(Some(TcpReplyInfo {
-                    syn_flag: true,
-                    ack_flag: true,
-                    seq_num: isn,
-                    ack_num: self.seq_num.wrapping_add(1),
-                    echo: false,
-                }))
-            }
-
-            // Data packet (ACK with payload) -> send ACK, echo payload
-            (false, true, payload_len) if payload_len > 0 => {
-                // Local seq num = what the client expects next (remote ack num)
-                // Local ack num = remote seq num + payload length (intentionally wrapping)
-                Ok(Some(TcpReplyInfo {
-                    syn_flag: false,
-                    ack_flag: true,
-                    seq_num: self.ack_num,
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "`u32::MAX` (4_294_967_295) > `ETHERNET_MTU` (1500)"
-                    )]
-                    ack_num: self.seq_num.wrapping_add(payload_len as u32),
-                    echo: true,
-                }))
-            }
-
-            // Handshake ACK (step 3) -> no reply needed
-            // Remote ack num should be the previous local ISN + 1
-            (false, true, 0)
-                if connections
-                    .get_isn(&key)
-                    .is_some_and(|isn| isn.wrapping_add(1) == self.ack_num) =>
-            {
-                Ok(None)
-            }
-
-            _ => Ok(None), // No reply implemented
-        }
     }
 }
 
