@@ -1,5 +1,5 @@
 #[cfg(not(target_os = "linux"))]
-compile_error!("This crate only supports Linux because it directly uses Linux TUN devices");
+compile_error!("This crate only supports Linux because it uses Linux APIs directly");
 
 mod checksum;
 mod ipv4_header;
