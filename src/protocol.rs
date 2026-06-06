@@ -3,7 +3,8 @@ mod tcp;
 mod udp;
 
 use crate::protocol::{icmp_echo::IcmpEchoHandler, tcp::TcpHandler, udp::UdpHandler};
-use std::{fmt, net::Ipv4Addr};
+use std::{fmt, io, net::Ipv4Addr};
+pub use tcp::TcpConnections;
 
 const PROTOCOL_ICMP: u8 = 1;
 const PROTOCOL_TCP: u8 = 6;
@@ -49,14 +50,22 @@ impl<'a> ProtocolHandler<'a> {
         }
     }
 
-    /// Creates a protocol-specific header and payload for replying to `self`, or returns `None` for
-    /// no reply.
-    pub fn create_reply(&self) -> Option<Self> {
+    /// Creates a protocol-specific header and payload for replying to `self`, or returns `Ok(None)`
+    /// for no reply.
+    pub fn create_reply(
+        &self,
+        src_ip: Ipv4Addr,
+        dst_ip: Ipv4Addr,
+        tcp_connections: &mut TcpConnections,
+    ) -> Result<Option<Self>, io::Error> {
         match self {
-            Self::Icmp(handler) => Some(Self::Icmp(handler.create_reply())),
+            Self::Icmp(handler) => Ok(Some(Self::Icmp(handler.create_reply()))),
+            Self::Udp(handler) => Ok(Some(Self::Udp(handler.create_reply()))),
+
             // TCP is the only one that's actually optional
-            Self::Tcp(handler) => handler.create_reply().map(Self::Tcp),
-            Self::Udp(handler) => Some(Self::Udp(handler.create_reply())),
+            Self::Tcp(handler) => Ok(handler
+                .create_reply(src_ip, dst_ip, tcp_connections)?
+                .map(Self::Tcp)),
         }
     }
 

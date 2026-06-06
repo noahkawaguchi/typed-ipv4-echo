@@ -9,7 +9,9 @@ mod try_ops;
 mod tun;
 
 use crate::{
-    ipv4_header::Ipv4Header, protocol::ProtocolHandler, shutdown_signal::ShutdownSignal,
+    ipv4_header::Ipv4Header,
+    protocol::{ProtocolHandler, TcpConnections},
+    shutdown_signal::ShutdownSignal,
     try_ops::TryGet,
 };
 use std::{
@@ -35,6 +37,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Waiting for packets... (Ctrl+C to stop)");
     divider();
 
+    let mut tcp_connections = TcpConnections::new();
     let mut read_buf = [0u8; ETHERNET_MTU];
     let mut write_buf = [0u8; ETHERNET_MTU];
 
@@ -61,7 +64,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                         println!("{handler}");
                         println!("\n ==== Packet sent ====");
 
-                        match handler.create_reply() {
+                        match handler.create_reply(
+                            ipv4_header.src_ip,
+                            ipv4_header.dst_ip,
+                            &mut tcp_connections,
+                        )? {
                             None => println!("<no reply>"),
 
                             Some(reply_handler) => {
