@@ -25,7 +25,8 @@ impl<'a> IcmpEchoHandler<'a> {
 
     /// Parses `data` as an ICMP Echo Request header and payload.
     pub fn parse(data: &'a [u8]) -> Result<Self, String> {
-        let Some(icmp_header) = data.first_chunk::<{ ICMP_HEADER_LEN as usize }>() else {
+        let Some((icmp_header, payload)) = data.split_first_chunk::<{ ICMP_HEADER_LEN as usize }>()
+        else {
             return Err(format!("Too short for ICMP header ({} bytes)", data.len()));
         };
 
@@ -43,9 +44,7 @@ impl<'a> IcmpEchoHandler<'a> {
             icmp_type,
             identifier: u16::from_be_bytes([icmp_header[4], icmp_header[5]]),
             sequence: u16::from_be_bytes([icmp_header[6], icmp_header[7]]),
-            payload: data
-                .get(ICMP_HEADER_LEN.into()..)
-                .ok_or("No data after ICMP header")?,
+            payload,
         })
     }
 
