@@ -2,8 +2,12 @@ mod icmp_echo;
 mod tcp;
 mod udp;
 
-use crate::protocol::{icmp_echo::IcmpEchoHandler, tcp::TcpHandler, udp::UdpHandler};
-use std::{fmt, net::Ipv4Addr};
+use crate::{
+    Ipv4AddrPair,
+    protocol::{icmp_echo::IcmpEchoHandler, tcp::TcpHandler, udp::UdpHandler},
+};
+use std::{fmt, io};
+pub use tcp::TcpConnections;
 
 const PROTOCOL_ICMP: u8 = 1;
 const PROTOCOL_TCP: u8 = 6;
@@ -26,9 +30,9 @@ fn payload_to_string(payload: &[u8]) -> String {
 }
 
 pub enum ProtocolHandler<'a> {
-    Tcp(TcpHandler<'a>),
-    Udp(UdpHandler<'a>),
     Icmp(IcmpEchoHandler<'a>),
+    Tcp(TcpHandler<'a>, Ipv4AddrPair),
+    Udp(UdpHandler<'a>, Ipv4AddrPair),
 }
 
 impl<'a> ProtocolHandler<'a> {
@@ -38,40 +42,49 @@ impl<'a> ProtocolHandler<'a> {
     /// # Errors
     ///
     /// Returns `Err` if the packet cannot be parsed as its type or is of an unimplemented type.
-    pub fn parse(data: &'a [u8], protocol: Protocol) -> Result<Self, String> {
+    pub fn parse(
+        data: &'a [u8],
+        protocol: Protocol,
+        ip_pair: Ipv4AddrPair,
+    ) -> Result<Self, String> {
         match protocol {
             Protocol::Icmp => IcmpEchoHandler::parse(data).map(Self::Icmp),
-            Protocol::Tcp => TcpHandler::parse(data).map(Self::Tcp),
-            Protocol::Udp => UdpHandler::parse(data).map(Self::Udp),
-            Protocol::Other(n) => Err(format!(
-                "Protocol {n} not implemented, only ICMP Echo, TCP, and UDP"
+            Protocol::Tcp => TcpHandler::parse(data).map(|h| Self::Tcp(h, ip_pair)),
+            Protocol::Udp => UdpHandler::parse(data).map(|h| Self::Udp(h, ip_pair)),
+            Protocol::Other(other) => Err(format!(
+                "Protocol {other} not implemented, only ICMP Echo, TCP, and UDP"
             )),
         }
     }
 
-    /// Creates a protocol-specific header and payload for replying to `self`, or returns `None` for
-    /// no reply.
-    pub fn create_reply(&self) -> Option<Self> {
+    /// Creates a protocol-specific header and payload for replying to `self`, or returns `Ok(None)`
+    /// for no reply.
+    pub fn create_reply(
+        &self,
+        tcp_connections: &mut TcpConnections,
+    ) -> Result<Option<Self>, io::Error> {
         match self {
-            Self::Icmp(handler) => Some(Self::Icmp(handler.create_reply())),
+            Self::Icmp(handler) => Ok(Some(Self::Icmp(handler.create_reply()))),
+
+            // Swap the source and destination IP addresses for the reply for UDP and TCP
+            Self::Udp(handler, ip_pair) => {
+                Ok(Some(Self::Udp(handler.create_reply(), ip_pair.swapped())))
+            }
+
             // TCP is the only one that's actually optional
-            Self::Tcp(handler) => handler.create_reply().map(Self::Tcp),
-            Self::Udp(handler) => Some(Self::Udp(handler.create_reply())),
+            Self::Tcp(handler, ip_pair) => Ok(handler
+                .create_reply(tcp_connections, *ip_pair)?
+                .map(|h| Self::Tcp(h, ip_pair.swapped()))),
         }
     }
 
     /// Copies data from `self` to write the protocol-specific header and payload into `buf`,
     /// returning the number of bytes written.
-    pub fn write_into(
-        &self,
-        buf: &mut [u8],
-        src_ip: Ipv4Addr,
-        dst_ip: Ipv4Addr,
-    ) -> Result<u16, String> {
+    pub fn write_into(&self, buf: &mut [u8]) -> Result<u16, String> {
         match self {
             Self::Icmp(handler) => handler.write_into(buf),
-            Self::Tcp(handler) => handler.write_into(buf, src_ip, dst_ip),
-            Self::Udp(handler) => handler.write_into(buf, src_ip, dst_ip),
+            Self::Tcp(handler, ip_pair) => handler.write_into(buf, *ip_pair),
+            Self::Udp(handler, ip_pair) => handler.write_into(buf, *ip_pair),
         }
     }
 }
@@ -80,8 +93,8 @@ impl fmt::Display for ProtocolHandler<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Icmp(handler) => write!(f, "{handler}"),
-            Self::Tcp(handler) => write!(f, "{handler}"),
-            Self::Udp(handler) => write!(f, "{handler}"),
+            Self::Tcp(handler, _) => write!(f, "{handler}"),
+            Self::Udp(handler, _) => write!(f, "{handler}"),
         }
     }
 }

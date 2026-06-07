@@ -1,5 +1,5 @@
 #[cfg(not(target_os = "linux"))]
-compile_error!("This crate only supports Linux because it directly uses Linux TUN devices");
+compile_error!("This crate only supports Linux because it uses Linux APIs directly");
 
 mod checksum;
 mod ipv4_header;
@@ -9,17 +9,31 @@ mod try_ops;
 mod tun;
 
 use crate::{
-    ipv4_header::Ipv4Header, protocol::ProtocolHandler, shutdown_signal::ShutdownSignal,
+    ipv4_header::Ipv4Header,
+    protocol::{ProtocolHandler, TcpConnections},
+    shutdown_signal::ShutdownSignal,
     try_ops::TryGet,
 };
 use std::{
     env,
     error::Error,
     io::{self, Read, Write},
+    net::Ipv4Addr,
 };
 
 /// The Maximum Transmission Unit of standard Ethernet (frames up to 1500 bytes of IP packet data).
 const ETHERNET_MTU: usize = 1500;
+
+#[derive(Clone, Copy)]
+#[cfg_attr(test, derive(Debug))]
+struct Ipv4AddrPair {
+    src: Ipv4Addr,
+    dst: Ipv4Addr,
+}
+
+impl Ipv4AddrPair {
+    const fn swapped(self) -> Self { Self { src: self.dst, dst: self.src } }
+}
 
 /// Runs an echo server that uses a TUN device to read and write IPv4 packets: TCP, UDP, and ICMP.
 /// Exits gracefully upon receiving a shutdown signal.
@@ -35,6 +49,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Waiting for packets... (Ctrl+C to stop)");
     divider();
 
+    let mut tcp_connections = TcpConnections::new();
     let mut read_buf = [0u8; ETHERNET_MTU];
     let mut write_buf = [0u8; ETHERNET_MTU];
 
@@ -54,26 +69,25 @@ fn main() -> Result<(), Box<dyn Error>> {
                 println!(" ==== Packet received ====");
                 println!("{ipv4_header}");
 
-                match ProtocolHandler::parse(ipv4_payload, ipv4_header.protocol) {
+                match ProtocolHandler::parse(
+                    ipv4_payload,
+                    ipv4_header.protocol,
+                    ipv4_header.ip_pair,
+                ) {
                     Err(e) => eprintln!("Skipping packet: {e}"),
 
                     Ok(handler) => {
                         println!("{handler}");
                         println!("\n ==== Packet sent ====");
 
-                        match handler.create_reply() {
+                        match handler.create_reply(&mut tcp_connections)? {
                             None => println!("<no reply>"),
 
                             Some(reply_handler) => {
                                 // Write the protocol-specific portion of the reply packet first to
                                 // have the total length for the IPv4 header
-                                let proto_len = reply_handler.write_into(
-                                    &mut write_buf[Ipv4Header::REPLY_HEADER_LEN..],
-                                    // Swap the source and destination IP addresses from the
-                                    // received packet for the reply packet
-                                    ipv4_header.dst_ip,
-                                    ipv4_header.src_ip,
-                                )?;
+                                let proto_len = reply_handler
+                                    .write_into(&mut write_buf[Ipv4Header::REPLY_HEADER_LEN..])?;
 
                                 let reply_ipv4_header = ipv4_header.create_reply(proto_len)?;
                                 reply_ipv4_header.write_into(&mut write_buf);

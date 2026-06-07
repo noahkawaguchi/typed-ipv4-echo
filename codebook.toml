@@ -2,6 +2,7 @@ words = [
     "DSCP",
     "IFNAMSIZ",
     "IHL",
+    "ISN",
     "MTU",
     "NUL",
     "Swatinem",

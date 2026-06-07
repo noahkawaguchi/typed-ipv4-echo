@@ -1,9 +1,9 @@
 use crate::{
-    ETHERNET_MTU, checksum,
+    ETHERNET_MTU, Ipv4AddrPair, checksum,
     protocol::{Protocol, payload_to_string},
     try_ops::{TryAdd, TryGet, TryGetMut},
 };
-use std::{fmt, net::Ipv4Addr};
+use std::fmt;
 
 const UDP_HEADER_LEN: u16 = 8;
 
@@ -41,12 +41,7 @@ impl<'a> UdpHandler<'a> {
 
     /// Copies data from `self` to write a UDP header and payload into `buf`, returning the number
     /// of bytes written.
-    pub fn write_into(
-        &self,
-        buf: &mut [u8],
-        src_ip: Ipv4Addr,
-        dst_ip: Ipv4Addr,
-    ) -> Result<u16, String> {
+    pub fn write_into(&self, buf: &mut [u8], ip_pair: Ipv4AddrPair) -> Result<u16, String> {
         // Source and destination ports
         buf.try_get_mut(..2)?
             .copy_from_slice(&self.src_port.to_be_bytes());
@@ -72,8 +67,8 @@ impl<'a> UdpHandler<'a> {
 
         // Calculate UDP checksum with pseudo-header
         let mut pseudo_header = [0u8; Self::PSEUDO_HEADER_LEN];
-        pseudo_header[0..4].copy_from_slice(&src_ip.octets()); // Source IP
-        pseudo_header[4..8].copy_from_slice(&dst_ip.octets()); // Dest IP
+        pseudo_header[0..4].copy_from_slice(&ip_pair.src.octets()); // Source IP
+        pseudo_header[4..8].copy_from_slice(&ip_pair.dst.octets()); // Dest IP
         pseudo_header[8] = 0; // Reserved padding for alignment
         pseudo_header[9] = Protocol::Udp.into();
         pseudo_header[10..12].copy_from_slice(&udp_len.to_be_bytes());
@@ -113,7 +108,7 @@ impl fmt::Display for UdpHandler<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::assert_matches;
+    use std::{assert_matches, net::Ipv4Addr};
 
     #[test]
     fn correctly_parses_valid_packet() -> Result<(), String> {
@@ -200,7 +195,7 @@ mod tests {
 
         let udp_len = handler
             .create_reply()
-            .write_into(&mut reply[20..], SRC_IP, DST_IP)?;
+            .write_into(&mut reply[20..], Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?;
 
         // Verify UDP header at offset 20
         assert_eq!(&reply[20..22], &[0x00, 0x35]); // Source port: 53 (swapped)
