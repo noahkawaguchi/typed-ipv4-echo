@@ -20,16 +20,15 @@ impl<'a> UdpHandler<'a> {
 
     /// Parses `data` as a UDP header and payload.
     pub fn parse(data: &'a [u8]) -> Result<Self, String> {
-        let Some(udp_header) = data.first_chunk::<{ UDP_HEADER_LEN as usize }>() else {
+        let Some((udp_header, payload)) = data.split_first_chunk::<{ UDP_HEADER_LEN as usize }>()
+        else {
             return Err(format!("Too short for UDP header ({} bytes)", data.len()));
         };
 
         Ok(Self {
             src_port: u16::from_be_bytes([udp_header[0], udp_header[1]]),
             dst_port: u16::from_be_bytes([udp_header[2], udp_header[3]]),
-            payload: data
-                .get(UDP_HEADER_LEN.into()..)
-                .ok_or("No data after UDP header")?,
+            payload,
         })
     }
 
