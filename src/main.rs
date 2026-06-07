@@ -43,7 +43,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let shutdown = ShutdownSignal::install()?;
 
     let tun_name = env::var("TUN_DEVICE_NAME").unwrap_or_else(|_| String::from("tun0"));
-    let mut tun = sys::tun::open(&tun_name)?;
+    let mut tun = sys::tun::attach(&tun_name)?;
     println!("Attached to TUN device {tun_name}");
 
     println!("Waiting for packets... (Ctrl+C to stop)");

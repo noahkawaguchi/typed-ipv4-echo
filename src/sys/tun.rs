@@ -26,7 +26,7 @@ const IFRU_FLAGS: libc::c_short = (IFF_TUN | IFF_NO_PI) as libc::c_short;
 
 /// Attaches to the TUN device with name `device_name` as an opened `File`.
 #[expect(unsafe_code, reason = "libc FFI to attach to TUN device")]
-pub fn open(device_name: &str) -> io::Result<File> {
+pub fn attach(device_name: &str) -> io::Result<File> {
     // The interface must already exist, otherwise the `ioctl` call will try to create it and fail
     // with permission denied
     if !Path::new(SYSFS_NET_DEVICES)
@@ -91,7 +91,7 @@ mod tests {
     #[test]
     fn errors_for_nonexistent_tun() {
         assert_matches!(
-            open("abcdefghijklmnopqrstuvwxyz"),
+            attach("abcdefghijklmnopqrstuvwxyz"),
             Err(e) if e.kind() == io::ErrorKind::NotFound
         );
     }
@@ -100,7 +100,7 @@ mod tests {
     #[ignore = "requires TUN setup"]
     fn successfully_attaches_to_existing_tun() {
         let tun_name = env::var("TUN_DEVICE_NAME").unwrap_or_else(|_| String::from("tun0"));
-        assert_matches!(open(&tun_name), Ok(_));
+        assert_matches!(attach(&tun_name), Ok(_));
     }
 
     #[test]
