@@ -1,3 +1,5 @@
+pub mod tun;
+
 use std::{
     fs::File,
     io::{self, Read},
