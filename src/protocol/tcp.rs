@@ -1,6 +1,8 @@
+mod flags;
+
 use crate::{
     ETHERNET_MTU, Ipv4AddrPair, checksum,
-    protocol::{Protocol, payload_to_string},
+    protocol::{Protocol, payload_to_string, tcp::flags::TcpFlags},
     sys,
     try_ops::{TryAdd, TryGet, TryGetMut},
 };
@@ -10,6 +12,7 @@ const TCP_HEADER_MIN_LEN: u8 = 20;
 
 /// Key identifying a TCP connection.
 #[derive(PartialEq, Eq, Hash)]
+#[cfg_attr(test, derive(Clone, Copy))]
 struct ConnKey {
     client_ip: Ipv4Addr,
     client_port: u16,
@@ -26,6 +29,8 @@ impl TcpConnections {
     fn store_isn(&mut self, key: ConnKey, isn: u32) { self.0.insert(key, isn); }
 
     fn get_isn(&self, key: &ConnKey) -> Option<u32> { self.0.get(key).copied() }
+
+    fn remove(&mut self, key: &ConnKey) { self.0.remove(key); }
 }
 
 /// Struct for managing and replying to TCP packets. Includes the TCP header and the payload.
@@ -36,15 +41,12 @@ pub struct TcpHandler<'a> {
     seq_num: u32,
     ack_num: u32,
     offset_bytes: u8,
-    syn_flag: bool,
-    ack_flag: bool,
+    flags: TcpFlags,
     payload: &'a [u8],
 }
 
 impl<'a> TcpHandler<'a> {
     const PSEUDO_HEADER_LEN: usize = 12;
-    const SYN_FLAG: u8 = 0x02;
-    const ACK_FLAG: u8 = 0x10;
 
     /// Parses `data` as a TCP header and payload.
     pub fn parse(data: &'a [u8]) -> Result<Self, String> {
@@ -54,8 +56,6 @@ impl<'a> TcpHandler<'a> {
 
         // Convert length in 32-bit words in the upper 4 bits to length in bytes in the full 8 bits
         let offset_bytes = tcp_header[12] >> 4 << 2;
-
-        let flags = tcp_header[13];
 
         Ok(Self {
             src_port: u16::from_be_bytes([tcp_header[0], tcp_header[1]]),
@@ -73,8 +73,7 @@ impl<'a> TcpHandler<'a> {
                 tcp_header[11],
             ]),
             offset_bytes,
-            syn_flag: flags & Self::SYN_FLAG != 0,
-            ack_flag: flags & Self::ACK_FLAG != 0,
+            flags: tcp_header[13].try_into()?,
             payload: data
                 .get(offset_bytes.into()..)
                 .ok_or("No data after TCP header")?,
@@ -94,10 +93,10 @@ impl<'a> TcpHandler<'a> {
             server_port: self.dst_port,
         };
 
-        match (self.syn_flag, self.ack_flag, self.payload.len()) {
+        match (self.flags, self.payload.len()) {
             // SYN packet (step 1 of handshake)
             // Reply with SYN-ACK (step 2), no payload echo
-            (true, false, _) => {
+            (TcpFlags::Syn, _) => {
                 // seq num = random ISN, local ack num = remote seq num + 1
                 let isn = sys::random_u32()?;
                 connections.store_isn(key, isn);
@@ -109,15 +108,14 @@ impl<'a> TcpHandler<'a> {
                     seq_num: isn,
                     ack_num: self.seq_num.wrapping_add(1),
                     offset_bytes: TCP_HEADER_MIN_LEN,
-                    syn_flag: true,
-                    ack_flag: true,
+                    flags: TcpFlags::SynAck,
                     payload: &[],
                 }))
             }
 
             // Handshake ACK (step 3) -> no reply needed
             // Remote ack num should be the previous local ISN + 1
-            (false, true, 0)
+            (TcpFlags::Ack, 0)
                 if connections
                     .get_isn(&key)
                     .is_some_and(|isn| isn.wrapping_add(1) == self.ack_num) =>
@@ -126,7 +124,7 @@ impl<'a> TcpHandler<'a> {
             }
 
             // Data packet (ACK with payload) -> send ACK, echo payload
-            (false, true, 1..) => {
+            (TcpFlags::Ack, 1..) => {
                 // Local seq num = what the client expects next (remote ack num)
                 // Local ack num = remote seq num + payload length (intentionally wrapping)
                 Ok(Some(Self {
@@ -140,9 +138,23 @@ impl<'a> TcpHandler<'a> {
                     )]
                     ack_num: self.seq_num.wrapping_add(self.payload.len() as u32),
                     offset_bytes: TCP_HEADER_MIN_LEN,
-                    syn_flag: false,
-                    ack_flag: true,
+                    flags: TcpFlags::Ack,
                     payload: self.payload,
+                }))
+            }
+
+            // FIN-ACK (connection teardown) -> clean up local state and reply with FIN-ACK
+            (TcpFlags::FinAck, _) => {
+                connections.remove(&key);
+
+                Ok(Some(Self {
+                    src_port: self.dst_port,
+                    dst_port: self.src_port,
+                    seq_num: self.ack_num,
+                    ack_num: self.seq_num.wrapping_add(1),
+                    offset_bytes: TCP_HEADER_MIN_LEN,
+                    flags: TcpFlags::FinAck,
+                    payload: &[],
                 }))
             }
 
@@ -170,9 +182,8 @@ impl<'a> TcpHandler<'a> {
         // Data offset in upper 4 bits (bytes / 4 = 32-bit words), reserved zeros in lower 4 bits
         *buf.try_get_mut(12)? = (self.offset_bytes / 4) << 4;
 
-        // Flags (SYN | ACK for handshake, ACK for data)
-        *buf.try_get_mut(13)? = if self.syn_flag { Self::SYN_FLAG } else { 0 }
-            | if self.ack_flag { Self::ACK_FLAG } else { 0 };
+        // Flags
+        *buf.try_get_mut(13)? = self.flags.into();
 
         // Window size for flow control, left at max for simplicity
         buf.try_get_mut(14..16)?
@@ -229,13 +240,12 @@ impl fmt::Display for TcpHandler<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "TCP | {} -> {} | seq={} ack={} | SYN={} ACK={}\n{}",
+            "TCP | {} -> {} | seq={} ack={} | {}\n{}",
             self.src_port,
             self.dst_port,
             self.seq_num,
             self.ack_num,
-            self.syn_flag,
-            self.ack_flag,
+            self.flags,
             payload_to_string(self.payload),
         )
     }
@@ -268,8 +278,7 @@ mod tests {
         assert_eq!(handler.seq_num, 1);
         assert_eq!(handler.ack_num, 2);
         assert_eq!(handler.offset_bytes, 20);
-        assert!(handler.syn_flag);
-        assert!(handler.ack_flag);
+        assert_eq!(handler.flags, TcpFlags::SynAck);
         assert_eq!(handler.payload, b"Hello");
 
         Ok(())
@@ -295,10 +304,7 @@ mod tests {
             0x00, 0x00,                          // Urgent pointer
         ];
 
-        let handler = TcpHandler::parse(&DATA)?;
-
-        assert!(handler.syn_flag);
-        assert!(!handler.ack_flag);
+        assert_eq!(TcpHandler::parse(&DATA)?.flags, TcpFlags::Syn);
 
         Ok(())
     }
@@ -317,16 +323,32 @@ mod tests {
             0x00, 0x00,                          // Urgent pointer
         ];
 
-        let handler = TcpHandler::parse(&DATA)?;
-
-        assert!(!handler.syn_flag);
-        assert!(handler.ack_flag);
+        assert_eq!(TcpHandler::parse(&DATA)?.flags, TcpFlags::Ack);
 
         Ok(())
     }
 
     #[test]
-    fn parsing_handles_no_flags_set() -> Result<(), String> {
+    fn extracts_fin_flag_correctly() -> Result<(), String> {
+        #[rustfmt::skip]
+        const DATA: [u8; 20] = [
+            0x04, 0xd2,                          // Source port: 1234
+            0x00, 0x50,                          // Dest port: 80
+            0x00, 0x00, 0x00, 0x00,              // Sequence number: 0
+            0x00, 0x00, 0x00, 0x00,              // Ack number: 0
+            0x50, 0x11,                          // Data offset: 5, Flags: FIN|ACK
+            0xff, 0xff,                          // Window size
+            0x00, 0x00,                          // Checksum
+            0x00, 0x00,                          // Urgent pointer
+        ];
+
+        assert_eq!(TcpHandler::parse(&DATA)?.flags, TcpFlags::FinAck);
+
+        Ok(())
+    }
+
+    #[test]
+    fn parsing_fails_when_no_flags_set() {
         #[rustfmt::skip]
         const DATA: [u8; 20] = [
             0x04, 0xd2,                          // Source port: 1234
@@ -339,12 +361,10 @@ mod tests {
             0x00, 0x00,                          // Urgent pointer
         ];
 
-        let handler = TcpHandler::parse(&DATA)?;
-
-        assert!(!handler.syn_flag);
-        assert!(!handler.ack_flag);
-
-        Ok(())
+        assert_matches!(
+            TcpHandler::parse(&DATA),
+            Err(e) if e.contains("Invalid TCP flag combination")
+        );
     }
 
     #[test]
@@ -441,6 +461,34 @@ mod tests {
     }
 
     #[test]
+    fn reply_returns_none_for_handshake_ack() -> Result<(), Box<dyn Error>> {
+        #[rustfmt::skip]
+        const ACK_PACKET: [u8; 20] = [
+            0x04, 0xd2,                          // Source port: 1234
+            0x00, 0x50,                          // Dest port: 80
+            0x00, 0x00, 0x10, 0x01,              // Sequence number: 4097
+            0x00, 0x00, 0x00, 0x01,              // Ack number: 1 (LOCAL_SEQ_SYN + 1)
+            0x50, 0x10,                          // Data offset: 5, Flags: ACK
+            0xff, 0xff,                          // Window size
+            0x00, 0x00,                          // Checksum
+            0x00, 0x00,                          // Urgent pointer
+        ];
+
+        const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
+        const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
+
+        let mut connections = TcpConnections::new();
+
+        assert_matches!(
+            TcpHandler::parse(&ACK_PACKET)?
+                .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?,
+            None
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn reply_creates_valid_data_echo() -> Result<(), Box<dyn Error>> {
         #[rustfmt::skip]
         const DATA_PACKET: [u8; 25] = [
@@ -499,14 +547,14 @@ mod tests {
     }
 
     #[test]
-    fn reply_returns_none_for_handshake_ack() -> Result<(), Box<dyn Error>> {
+    fn reply_creates_valid_fin_ack() -> Result<(), Box<dyn Error>> {
         #[rustfmt::skip]
-        const ACK_PACKET: [u8; 20] = [
+        const FIN_ACK_PACKET: [u8; 20] = [
             0x04, 0xd2,                          // Source port: 1234
             0x00, 0x50,                          // Dest port: 80
             0x00, 0x00, 0x10, 0x01,              // Sequence number: 4097
-            0x00, 0x00, 0x00, 0x01,              // Ack number: 1 (LOCAL_SEQ_SYN + 1)
-            0x50, 0x10,                          // Data offset: 5, Flags: ACK
+            0x00, 0x00, 0x00, 0x01,              // Ack number: 1 (our ISN + 1)
+            0x50, 0x11,                          // Data offset: 5, Flags: FIN|ACK
             0xff, 0xff,                          // Window size
             0x00, 0x00,                          // Checksum
             0x00, 0x00,                          // Urgent pointer
@@ -515,13 +563,51 @@ mod tests {
         const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
         const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
 
+        let handler = TcpHandler::parse(&FIN_ACK_PACKET)?;
         let mut connections = TcpConnections::new();
 
-        assert_matches!(
-            TcpHandler::parse(&ACK_PACKET)?
-                .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?,
-            None
-        );
+        // Simulate an established connection
+        let conn_key =
+            ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
+        connections.store_isn(conn_key, 0);
+
+        let mut reply = [0u8; ETHERNET_MTU];
+        let ip_pair = Ipv4AddrPair { src: SRC_IP, dst: DST_IP };
+        let tcp_len = handler
+            .create_reply(&mut connections, ip_pair)?
+            .ok_or("Unexpected None reply")?
+            .write_into(&mut reply[20..], ip_pair)?;
+
+        // Ports swapped
+        assert_eq!(&reply[20..22], &[0x00, 0x50]); // src: 80
+        assert_eq!(&reply[22..24], &[0x04, 0xd2]); // dst: 1234
+
+        // seq = client's ack_num (1), ack = client's seq_num + 1 (4098 = 0x1002)
+        assert_eq!(&reply[24..28], &[0x00, 0x00, 0x00, 0x01]);
+        assert_eq!(&reply[28..32], &[0x00, 0x00, 0x10, 0x02]);
+
+        // Flags: FIN|ACK = 0x11
+        assert_eq!(reply[33], 0x11);
+
+        // No payload
+        assert_eq!(tcp_len, 20);
+
+        // Connection removed from map
+        assert_matches!(connections.get_isn(&conn_key), None);
+
+        // Checksum over pseudo-header + TCP segment must be zero
+        let mut pseudo_header = [0u8; 12];
+        pseudo_header[0..4].copy_from_slice(&SRC_IP.octets());
+        pseudo_header[4..8].copy_from_slice(&DST_IP.octets());
+        pseudo_header[8] = 0;
+        pseudo_header[9] = Protocol::Tcp.into();
+        pseudo_header[10..12].copy_from_slice(&tcp_len.to_be_bytes());
+
+        let mut checksum_data = [0u8; 12 + 20];
+        checksum_data[0..12].copy_from_slice(&pseudo_header);
+        checksum_data[12..32].copy_from_slice(&reply[20..40]);
+
+        assert_eq!(checksum::calculate(&checksum_data), 0x0000);
 
         Ok(())
     }
