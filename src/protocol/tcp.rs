@@ -1,69 +1,20 @@
+pub use connections::TcpConnections;
+
+mod connections;
 mod flags;
 
 use crate::{
     ETHERNET_MTU, Ipv4AddrPair, checksum,
-    protocol::{Protocol, payload_to_string, tcp::flags::TcpFlags},
+    protocol::{
+        Protocol, payload_to_string,
+        tcp::{connections::ConnKey, flags::TcpFlags},
+    },
     sys,
     try_ops::{TryAdd, TryGet, TryGetMut},
 };
-use std::{collections::HashMap, fmt, io, net::Ipv4Addr};
+use std::{fmt, io};
 
 const TCP_HEADER_MIN_LEN: u8 = 20;
-
-/// Key identifying a TCP connection.
-#[derive(PartialEq, Eq, Hash)]
-#[cfg_attr(test, derive(Clone, Copy))]
-struct ConnKey {
-    client_ip: Ipv4Addr,
-    client_port: u16,
-    server_ip: Ipv4Addr,
-    server_port: u16,
-}
-
-#[derive(PartialEq, Eq)]
-enum TcpState {
-    SynReceived,
-    Established,
-}
-
-struct ConnState {
-    tcp_state: TcpState,
-    isn: u32,
-}
-
-/// Tracks per-connection state keyed by the 4-tuple.
-pub struct TcpConnections(HashMap<ConnKey, ConnState>);
-
-impl TcpConnections {
-    pub fn new() -> Self { Self(HashMap::new()) }
-
-    fn store_isn(&mut self, key: ConnKey, isn: u32) {
-        self.0
-            .insert(key, ConnState { tcp_state: TcpState::SynReceived, isn });
-    }
-
-    /// Returns the ISN only while the connection is still in `SynReceived` state.
-    fn pending_isn(&self, key: &ConnKey) -> Option<u32> {
-        self.0
-            .get(key)
-            .filter(|s| s.tcp_state == TcpState::SynReceived)
-            .map(|s| s.isn)
-    }
-
-    fn establish(&mut self, key: &ConnKey) {
-        if let Some(conn) = self.0.get_mut(key) {
-            conn.tcp_state = TcpState::Established;
-        }
-    }
-
-    fn is_established(&self, key: &ConnKey) -> bool {
-        self.0
-            .get(key)
-            .is_some_and(|s| s.tcp_state == TcpState::Established)
-    }
-
-    fn remove(&mut self, key: &ConnKey) { self.0.remove(key); }
-}
 
 /// Struct for managing and replying to TCP packets. Includes the TCP header and the payload.
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
@@ -287,7 +238,7 @@ impl fmt::Display for TcpHandler<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{assert_matches, error::Error};
+    use std::{assert_matches, error::Error, net::Ipv4Addr};
 
     #[test]
     fn correctly_parses_valid_packet() -> Result<(), String> {
