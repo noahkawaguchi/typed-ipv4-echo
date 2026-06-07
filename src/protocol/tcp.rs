@@ -20,21 +20,53 @@ struct ConnKey {
     server_port: u16,
 }
 
-/// Tracks the ISN sent in each SYN-ACK, keyed by connection.
-pub struct TcpConnections(HashMap<ConnKey, u32>);
+#[derive(PartialEq, Eq)]
+enum TcpState {
+    SynReceived,
+    Established,
+}
+
+struct ConnState {
+    tcp_state: TcpState,
+    isn: u32,
+}
+
+/// Tracks per-connection state keyed by the 4-tuple.
+pub struct TcpConnections(HashMap<ConnKey, ConnState>);
 
 impl TcpConnections {
     pub fn new() -> Self { Self(HashMap::new()) }
 
-    fn store_isn(&mut self, key: ConnKey, isn: u32) { self.0.insert(key, isn); }
+    fn store_isn(&mut self, key: ConnKey, isn: u32) {
+        self.0
+            .insert(key, ConnState { tcp_state: TcpState::SynReceived, isn });
+    }
 
-    fn get_isn(&self, key: &ConnKey) -> Option<u32> { self.0.get(key).copied() }
+    /// Returns the ISN only while the connection is still in `SynReceived` state.
+    fn pending_isn(&self, key: &ConnKey) -> Option<u32> {
+        self.0
+            .get(key)
+            .filter(|s| s.tcp_state == TcpState::SynReceived)
+            .map(|s| s.isn)
+    }
+
+    fn establish(&mut self, key: &ConnKey) {
+        if let Some(conn) = self.0.get_mut(key) {
+            conn.tcp_state = TcpState::Established;
+        }
+    }
+
+    fn is_established(&self, key: &ConnKey) -> bool {
+        self.0
+            .get(key)
+            .is_some_and(|s| s.tcp_state == TcpState::Established)
+    }
 
     fn remove(&mut self, key: &ConnKey) { self.0.remove(key); }
 }
 
 /// Struct for managing and replying to TCP packets. Includes the TCP header and the payload.
-#[cfg_attr(test, derive(Debug))]
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 pub struct TcpHandler<'a> {
     src_port: u16,
     dst_port: u16,
@@ -113,18 +145,19 @@ impl<'a> TcpHandler<'a> {
                 }))
             }
 
-            // Handshake ACK (step 3) -> no reply needed
+            // Handshake ACK (step 3) -> transition to Established, no reply needed
             // Remote ack num should be the previous local ISN + 1
             (TcpFlags::Ack, 0)
                 if connections
-                    .get_isn(&key)
+                    .pending_isn(&key)
                     .is_some_and(|isn| isn.wrapping_add(1) == self.ack_num) =>
             {
+                connections.establish(&key);
                 Ok(None)
             }
 
             // Data packet (ACK with payload) -> send ACK, echo payload
-            (TcpFlags::Ack, 1..) => {
+            (TcpFlags::Ack, 1..) if connections.is_established(&key) => {
                 // Local seq num = what the client expects next (remote ack num)
                 // Local ack num = remote seq num + payload length (intentionally wrapping)
                 Ok(Some(Self {
@@ -422,7 +455,7 @@ mod tests {
 
         // Seq: the random ISN that was stored in the connection table
         let stored_isn = connections
-            .get_isn(&ConnKey {
+            .pending_isn(&ConnKey {
                 client_ip: SRC_IP,
                 client_port: 1234,
                 server_ip: DST_IP,
@@ -461,6 +494,40 @@ mod tests {
     }
 
     #[test]
+    fn data_packet_before_complete_handshake_is_dropped() -> Result<(), Box<dyn Error>> {
+        #[rustfmt::skip]
+        const DATA_PACKET: [u8; 25] = [
+            0x04, 0xd2,                          // Source port: 1234
+            0x00, 0x50,                          // Dest port: 80
+            0x00, 0x00, 0x10, 0x01,              // Sequence number: 4097
+            0x00, 0x00, 0x00, 0x01,              // Ack number: 1
+            0x50, 0x10,                          // Data offset: 5, Flags: ACK
+            0xff, 0xff,                          // Window size
+            0x00, 0x00,                          // Checksum
+            0x00, 0x00,                          // Urgent pointer
+            0x48, 0x65, 0x6c, 0x6c, 0x6f,        // Payload: "Hello"
+        ];
+
+        const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
+        const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
+
+        let mut connections = TcpConnections::new();
+
+        // Store an ISN as if we sent a SYN-ACK, but never transition to Established
+        let key =
+            ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
+        connections.store_isn(key, 0);
+
+        assert_eq!(
+            TcpHandler::parse(&DATA_PACKET)?
+                .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?,
+            None
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn reply_returns_none_for_handshake_ack() -> Result<(), Box<dyn Error>> {
         #[rustfmt::skip]
         const ACK_PACKET: [u8; 20] = [
@@ -479,7 +546,7 @@ mod tests {
 
         let mut connections = TcpConnections::new();
 
-        assert_matches!(
+        assert_eq!(
             TcpHandler::parse(&ACK_PACKET)?
                 .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?,
             None
@@ -508,12 +575,20 @@ mod tests {
 
         let handler = TcpHandler::parse(&DATA_PACKET)?;
         let mut connections = TcpConnections::new();
+
+        // Simulate a completed handshake (ISN=0, so client's ack_num of 1 is consistent)
+        let key =
+            ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
+        connections.store_isn(key, 0);
+        connections.establish(&key);
+
         let mut reply = [0u8; ETHERNET_MTU];
 
+        let ip_pair = Ipv4AddrPair { src: SRC_IP, dst: DST_IP };
         let tcp_len = handler
-            .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?
+            .create_reply(&mut connections, ip_pair)?
             .ok_or("Unexpected None reply")?
-            .write_into(&mut reply[20..], Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?;
+            .write_into(&mut reply[20..], ip_pair)?;
 
         // Verify TCP header
         assert_eq!(&reply[20..22], &[0x00, 0x50]); // Source port: 80
@@ -593,7 +668,7 @@ mod tests {
         assert_eq!(tcp_len, 20);
 
         // Connection removed from map
-        assert_matches!(connections.get_isn(&conn_key), None);
+        assert_eq!(connections.pending_isn(&conn_key), None);
 
         // Checksum over pseudo-header + TCP segment must be zero
         let mut pseudo_header = [0u8; 12];
