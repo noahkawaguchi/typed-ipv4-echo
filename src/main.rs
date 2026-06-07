@@ -5,6 +5,7 @@ mod checksum;
 mod ipv4_header;
 mod protocol;
 mod shutdown_signal;
+mod sys;
 mod try_ops;
 mod tun;
 
