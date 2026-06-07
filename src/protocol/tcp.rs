@@ -76,7 +76,7 @@ impl<'a> TcpHandler<'a> {
             flags: tcp_header[13].try_into()?,
             payload: data
                 .get(offset_bytes.into()..)
-                .ok_or("No data after TCP header")?,
+                .ok_or("Data shorter than its Data Offset")?,
         })
     }
 
