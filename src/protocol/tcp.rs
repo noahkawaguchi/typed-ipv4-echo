@@ -1,15 +1,10 @@
 use crate::{
     ETHERNET_MTU, Ipv4AddrPair, checksum,
     protocol::{Protocol, payload_to_string},
+    sys,
     try_ops::{TryAdd, TryGet, TryGetMut},
 };
-use std::{
-    collections::HashMap,
-    fmt,
-    fs::File,
-    io::{self, Read},
-    net::Ipv4Addr,
-};
+use std::{collections::HashMap, fmt, io, net::Ipv4Addr};
 
 const TCP_HEADER_MIN_LEN: u8 = 20;
 
@@ -31,12 +26,6 @@ impl TcpConnections {
     fn store_isn(&mut self, key: ConnKey, isn: u32) { self.0.insert(key, isn); }
 
     fn get_isn(&self, key: &ConnKey) -> Option<u32> { self.0.get(key).copied() }
-}
-
-fn random_u32() -> Result<u32, io::Error> {
-    let mut buf = [0u8; 4];
-    File::open("/dev/urandom")?.read_exact(&mut buf)?;
-    Ok(u32::from_ne_bytes(buf))
 }
 
 /// Struct for managing and replying to TCP packets. Includes the TCP header and the payload.
@@ -110,7 +99,7 @@ impl<'a> TcpHandler<'a> {
             // Reply with SYN-ACK (step 2), no payload echo
             (true, false, _) => {
                 // seq num = random ISN, local ack num = remote seq num + 1
-                let isn = random_u32()?;
+                let isn = sys::random_u32()?;
                 connections.store_isn(key, isn);
 
                 Ok(Some(Self {
