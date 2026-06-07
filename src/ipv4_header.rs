@@ -44,7 +44,8 @@ impl Ipv4Header {
                     dst: Ipv4Addr::new(ip_header[16], ip_header[17], ip_header[18], ip_header[19]),
                 },
             },
-            data.get(ihl_bytes..).ok_or("Data shorter than its IHL")?,
+            data.get(ihl_bytes..)
+                .ok_or("IPv4 data shorter than its IHL")?,
         ))
     }
 
