@@ -4,14 +4,12 @@ compile_error!("This crate only supports Linux because it uses Linux APIs direct
 mod checksum;
 mod ipv4_header;
 mod protocol;
-mod shutdown_signal;
 mod sys;
 mod try_ops;
 
 use crate::{
     ipv4_header::Ipv4Header,
     protocol::{ProtocolHandler, TcpConnections},
-    shutdown_signal::ShutdownSignal,
     try_ops::TryGet,
 };
 use std::{
@@ -40,7 +38,7 @@ impl Ipv4AddrPair {
 fn main() -> Result<(), Box<dyn Error>> {
     fn divider() { println!("\n{}\n", "=".repeat(60)) }
 
-    let shutdown = ShutdownSignal::install()?;
+    let shutdown = sys::ShutdownSignal::install()?;
 
     let tun_name = env::var("TUN_DEVICE_NAME").unwrap_or_else(|_| String::from("tun0"));
     let mut tun = sys::tun::attach(&tun_name)?;

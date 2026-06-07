@@ -1,4 +1,7 @@
 pub mod tun;
+pub use shutdown_signal::ShutdownSignal;
+
+mod shutdown_signal;
 
 use std::{
     fs::File,
