@@ -1,3 +1,5 @@
+pub use tcp::TcpConnections;
+
 mod icmp_echo;
 mod tcp;
 mod udp;
@@ -7,7 +9,6 @@ use crate::{
     protocol::{icmp_echo::IcmpEchoHandler, tcp::TcpHandler, udp::UdpHandler},
 };
 use std::{fmt, io};
-pub use tcp::TcpConnections;
 
 const PROTOCOL_ICMP: u8 = 1;
 const PROTOCOL_TCP: u8 = 6;
