@@ -7,7 +7,7 @@ port := "8080"
 
 # Connect to the server using TCP (telnet)
 tcp:
-    telnet {{addr}} {{port}}
+    telnet {{ addr }} {{ port }}
 
 # Connect to the server using TCP (netcat)
 tcp-nc:
@@ -15,11 +15,11 @@ tcp-nc:
 
 # Connect to the server using ICMP
 icmp:
-    ping {{addr}}
+    ping {{ addr }}
 
 # Connect to the server using UDP
 udp:
-    nc -u {{addr}} {{port}}
+    nc -u {{ addr }} {{ port }}
 
 ####################################################################################################
 # Development tasks
