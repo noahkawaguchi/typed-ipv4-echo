@@ -91,7 +91,8 @@ The server will attach to the TUN device, listen for and reply to packets, and l
 With the server running, the different protocols can be tested from another terminal. If connecting with TCP or UDP, type a message and press Enter to see it echoed back.
 
 ```bash
-just tcp
+just tcp     # TCP using telnet
+just tcp-nc  # TCP using netcat
 just udp
 just icmp
 ```
@@ -100,6 +101,7 @@ Or manually:
 
 ```bash
 telnet 10.0.0.2 8080  # TCP
+nc 10.0.0.2 8080      # TCP
 nc -u 10.0.0.2 8080   # UDP
 ping 10.0.0.2         # ICMP
 ```
