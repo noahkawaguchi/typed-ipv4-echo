@@ -110,6 +110,10 @@ impl<'a> TcpHandler<'a> {
                 Ok(None)
             }
 
+            // Pure ACK (no payload) on an established connection (acknowledgment of data sent by
+            // the server) -> no reply
+            (TcpFlags::Ack, 0) if connections.is_established(&key) => Ok(None),
+
             // Data packet (ACK with payload) -> send ACK, echo payload
             (TcpFlags::Ack, 1..) if connections.is_established(&key) => {
                 // Local seq num = what the client expects next (remote ack num)
@@ -145,7 +149,23 @@ impl<'a> TcpHandler<'a> {
                 }))
             }
 
-            _ => Ok(None), // No reply implemented
+            // RST -> clean up without replying (never RST a RST)
+            (TcpFlags::Rst | TcpFlags::RstAck, _) => {
+                connections.remove(&key);
+                Ok(None)
+            }
+
+            // Something else unrecognized -> RST so the peer fails fast instead of hanging
+            // (ack num is 0 because sending bare RST with no ACK flag leaves ack num undefined)
+            _ => Ok(Some(Self {
+                src_port: self.dst_port,
+                dst_port: self.src_port,
+                seq_num: self.ack_num,
+                ack_num: 0,
+                offset_bytes: TCP_HEADER_MIN_LEN,
+                flags: TcpFlags::Rst,
+                payload: &[],
+            })),
         }
     }
 

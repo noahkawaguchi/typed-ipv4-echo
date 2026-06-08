@@ -206,7 +206,7 @@ fn reply_creates_valid_syn_ack() -> Result<(), String> {
 }
 
 #[test]
-fn data_packet_before_complete_handshake_is_dropped() -> Result<(), Box<dyn Error>> {
+fn data_packet_before_complete_handshake_gets_rst() -> Result<(), Box<dyn Error>> {
     #[rustfmt::skip]
         const DATA_PACKET: [u8; 25] = [
             0x04, 0xd2,                          // Source port: 1234
@@ -229,23 +229,23 @@ fn data_packet_before_complete_handshake_is_dropped() -> Result<(), Box<dyn Erro
     let key = ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
     connections.store_isn(key, 0);
 
-    assert_eq!(
+    assert_matches!(
         TcpHandler::parse(&DATA_PACKET)?
             .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?,
-        None
+        Some(reply) if reply.flags == TcpFlags::Rst
     );
 
     Ok(())
 }
 
 #[test]
-fn reply_returns_none_for_handshake_ack() -> Result<(), Box<dyn Error>> {
+fn handshake_ack_establishes_connection_and_returns_none() -> Result<(), Box<dyn Error>> {
     #[rustfmt::skip]
         const ACK_PACKET: [u8; 20] = [
             0x04, 0xd2,                          // Source port: 1234
             0x00, 0x50,                          // Dest port: 80
             0x00, 0x00, 0x10, 0x01,              // Sequence number: 4097
-            0x00, 0x00, 0x00, 0x01,              // Ack number: 1 (LOCAL_SEQ_SYN + 1)
+            0x00, 0x00, 0x00, 0x01,              // Ack number: 1 (our ISN 0 + 1)
             0x50, 0x10,                          // Data offset: 5, Flags: ACK
             0xff, 0xff,                          // Window size
             0x00, 0x00,                          // Checksum
@@ -257,11 +257,17 @@ fn reply_returns_none_for_handshake_ack() -> Result<(), Box<dyn Error>> {
 
     let mut connections = TcpConnections::new();
 
+    // Simulate having sent a SYN-ACK with ISN=0 so ack_num=1 is the correct completion
+    let key = ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
+    connections.store_isn(key, 0);
+
     assert_eq!(
         TcpHandler::parse(&ACK_PACKET)?
             .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?,
         None
     );
+
+    assert!(connections.is_established(&key));
 
     Ok(())
 }
@@ -393,6 +399,115 @@ fn reply_creates_valid_fin_ack() -> Result<(), Box<dyn Error>> {
     checksum_data[12..32].copy_from_slice(&reply[20..40]);
 
     assert_eq!(checksum::calculate(&checksum_data), 0x0000);
+
+    Ok(())
+}
+
+#[test]
+fn pure_ack_on_established_connection_returns_none() -> Result<(), Box<dyn Error>> {
+    // Simulates the client ACKing the server's echo reply. This should get no reply (not RST) so
+    // the connection stays open for more data.
+    #[rustfmt::skip]
+    const ACK_PACKET: [u8; 20] = [
+        0x04, 0xd2,                          // Source port: 1234
+        0x00, 0x50,                          // Dest port: 80
+        0x00, 0x00, 0x10, 0x06,              // Sequence number: 4102
+        0x00, 0x00, 0x00, 0x06,              // Ack number: 6 (our ISN 0 + 5 bytes echoed + 1)
+        0x50, 0x10,                          // Data offset: 5, Flags: ACK
+        0xff, 0xff,                          // Window size
+        0x00, 0x00,                          // Checksum
+        0x00, 0x00,                          // Urgent pointer
+    ];
+
+    const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
+    const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
+
+    let mut connections = TcpConnections::new();
+    let key = ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
+    connections.store_isn(key, 0);
+    connections.establish(&key);
+
+    assert_eq!(
+        TcpHandler::parse(&ACK_PACKET)?
+            .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?,
+        None
+    );
+
+    assert!(
+        connections.is_established(&key),
+        "connection should remain open after pure ACK"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn rst_packet_cleans_up_connection_and_returns_none() -> Result<(), Box<dyn Error>> {
+    #[rustfmt::skip]
+    const RST_PACKET: [u8; 20] = [
+        0x04, 0xd2,                          // Source port: 1234
+        0x00, 0x50,                          // Dest port: 80
+        0x00, 0x00, 0x10, 0x01,              // Sequence number: 4097
+        0x00, 0x00, 0x00, 0x01,              // Ack number: 1
+        0x50, 0x04,                          // Data offset: 5, Flags: RST
+        0xff, 0xff,                          // Window size
+        0x00, 0x00,                          // Checksum
+        0x00, 0x00,                          // Urgent pointer
+    ];
+
+    const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
+    const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
+
+    let mut connections = TcpConnections::new();
+    let key = ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
+    connections.store_isn(key, 0);
+    connections.establish(&key);
+
+    assert_eq!(
+        TcpHandler::parse(&RST_PACKET)?
+            .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?,
+        None
+    );
+
+    assert!(
+        !connections.is_established(&key),
+        "connection should be removed after RST"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn unrecognized_packet_for_unknown_connection_gets_rst() -> Result<(), Box<dyn Error>> {
+    // ACK with payload for a connection the server has no record of (e.g. after restart)
+    #[rustfmt::skip]
+    const DATA_PACKET: [u8; 25] = [
+        0x04, 0xd2,                          // Source port: 1234
+        0x00, 0x50,                          // Dest port: 80
+        0x00, 0x00, 0x10, 0x01,              // Sequence number: 4097
+        0x00, 0x00, 0x00, 0x01,              // Ack number: 1
+        0x50, 0x10,                          // Data offset: 5, Flags: ACK
+        0xff, 0xff,                          // Window size
+        0x00, 0x00,                          // Checksum
+        0x00, 0x00,                          // Urgent pointer
+        0x48, 0x65, 0x6c, 0x6c, 0x6f,        // Payload: "Hello"
+    ];
+
+    const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
+    const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
+
+    let mut connections = TcpConnections::new(); // Empty, no known connections
+
+    let reply = TcpHandler::parse(&DATA_PACKET)?
+        .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?
+        .ok_or("expected RST reply, got None")?;
+
+    let mut buf = [0u8; ETHERNET_MTU];
+    reply.write_into(&mut buf, Ipv4AddrPair { src: DST_IP, dst: SRC_IP })?;
+
+    assert_eq!(&buf[0..2], &[0x00, 0x50]); // src port: 80 (swapped)
+    assert_eq!(&buf[2..4], &[0x04, 0xd2]); // dst port: 1234 (swapped)
+    assert_eq!(buf[13], 0x04); // flags: RST only
 
     Ok(())
 }
