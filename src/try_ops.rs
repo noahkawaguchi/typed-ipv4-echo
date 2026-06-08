@@ -79,7 +79,7 @@ mod tests {
     fn try_add_errors_for_overflow() { assert_matches!(u16::MAX.try_add(1), Err(_)) }
 
     #[test]
-    fn try_add_adds_successfully() { assert_matches!((u16::MAX - 1).try_add(1), Ok(u16::MAX)) }
+    fn try_add_adds_successfully() { assert_eq!((u16::MAX - 1).try_add(1), Ok(u16::MAX)) }
 
     #[test]
     fn try_get_and_try_get_mut_error_out_of_bounds() {
@@ -95,11 +95,11 @@ mod tests {
     #[test]
     fn try_get_and_try_get_mut_succeed_in_bounds() {
         let data1 = [1, 2, 3, 4, 5];
-        assert_matches!(data1.try_get(2), Ok(&3));
-        assert_matches!(data1.try_get(1..3), Ok(&[2, 3]));
+        assert_eq!(data1.try_get(2), Ok(&3));
+        assert_eq!(data1.try_get(1..3), Ok(&[2, 3][..]));
 
         let mut data2 = [10, 20, 30, 40, 50];
-        assert_matches!(data2.try_get_mut(2), Ok(&mut 30));
-        assert_matches!(data2.try_get_mut(1..3), Ok(&mut [20, 30]));
+        assert_eq!(data2.try_get_mut(2), Ok(&mut 30));
+        assert_eq!(data2.try_get_mut(1..3), Ok(&mut [20, 30][..]));
     }
 }

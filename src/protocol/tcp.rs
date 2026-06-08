@@ -3,9 +3,6 @@ pub use connections::TcpConnections;
 mod connections;
 mod flags;
 
-#[cfg(test)]
-mod tests;
-
 use crate::{
     ETHERNET_MTU, Ipv4AddrPair, checksum,
     protocol::{
@@ -263,4 +260,13 @@ impl fmt::Display for TcpHandler<'_> {
             payload_to_string(self.payload),
         )
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::assert_matches;
+
+    mod parse;
+    mod reply;
 }

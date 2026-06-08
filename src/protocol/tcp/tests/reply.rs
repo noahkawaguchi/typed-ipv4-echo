@@ -1,141 +1,9 @@
 use super::*;
-use std::{assert_matches, error::Error, net::Ipv4Addr};
+use crate::protocol::test_utils::{DST_IP, IP_PAIR, SRC_IP, tcp_udp_test_checksum};
+use std::error::Error;
 
 #[test]
-fn correctly_parses_valid_packet() -> Result<(), String> {
-    #[rustfmt::skip]
-        const DATA: [u8; 25] = [
-            0x04, 0xd2,                          // Source port: 1234
-            0x00, 0x50,                          // Dest port: 80
-            0x00, 0x00, 0x00, 0x01,              // Sequence number: 1
-            0x00, 0x00, 0x00, 0x02,              // Ack number: 2
-            0x50, 0x12,                          // Data offset: 5 (20 bytes), Flags: SYN|ACK
-            0xff, 0xff,                          // Window size
-            0x00, 0x00,                          // Checksum
-            0x00, 0x00,                          // Urgent pointer
-            0x48, 0x65, 0x6c, 0x6c, 0x6f,        // Payload: "Hello"
-        ];
-
-    let handler = TcpHandler::parse(&DATA)?;
-
-    assert_eq!(handler.src_port, 1234);
-    assert_eq!(handler.dst_port, 80);
-    assert_eq!(handler.seq_num, 1);
-    assert_eq!(handler.ack_num, 2);
-    assert_eq!(handler.offset_bytes, 20);
-    assert_eq!(handler.flags, TcpFlags::SynAck);
-    assert_eq!(handler.payload, b"Hello");
-
-    Ok(())
-}
-
-#[test]
-fn parsing_fails_when_too_short() {
-    const DATA: [u8; 4] = [0x04, 0xd2, 0x00, 0x50]; // Only 4 bytes
-    assert_matches!(TcpHandler::parse(&DATA), Err(e) if e.contains("Too short"));
-}
-
-#[test]
-fn extracts_syn_flag_correctly() -> Result<(), String> {
-    #[rustfmt::skip]
-        const DATA: [u8; 20] = [
-            0x04, 0xd2,                          // Source port: 1234
-            0x00, 0x50,                          // Dest port: 80
-            0x00, 0x00, 0x00, 0x00,              // Sequence number: 0
-            0x00, 0x00, 0x00, 0x00,              // Ack number: 0
-            0x50, 0x02,                          // Data offset: 5, Flags: SYN only
-            0xff, 0xff,                          // Window size
-            0x00, 0x00,                          // Checksum
-            0x00, 0x00,                          // Urgent pointer
-        ];
-
-    assert_eq!(TcpHandler::parse(&DATA)?.flags, TcpFlags::Syn);
-
-    Ok(())
-}
-
-#[test]
-fn extracts_ack_flag_correctly() -> Result<(), String> {
-    #[rustfmt::skip]
-        const DATA: [u8; 20] = [
-            0x04, 0xd2,                          // Source port: 1234
-            0x00, 0x50,                          // Dest port: 80
-            0x00, 0x00, 0x00, 0x01,              // Sequence number: 1
-            0x00, 0x00, 0x00, 0x01,              // Ack number: 1
-            0x50, 0x10,                          // Data offset: 5, Flags: ACK only
-            0xff, 0xff,                          // Window size
-            0x00, 0x00,                          // Checksum
-            0x00, 0x00,                          // Urgent pointer
-        ];
-
-    assert_eq!(TcpHandler::parse(&DATA)?.flags, TcpFlags::Ack);
-
-    Ok(())
-}
-
-#[test]
-fn extracts_fin_flag_correctly() -> Result<(), String> {
-    #[rustfmt::skip]
-        const DATA: [u8; 20] = [
-            0x04, 0xd2,                          // Source port: 1234
-            0x00, 0x50,                          // Dest port: 80
-            0x00, 0x00, 0x00, 0x00,              // Sequence number: 0
-            0x00, 0x00, 0x00, 0x00,              // Ack number: 0
-            0x50, 0x11,                          // Data offset: 5, Flags: FIN|ACK
-            0xff, 0xff,                          // Window size
-            0x00, 0x00,                          // Checksum
-            0x00, 0x00,                          // Urgent pointer
-        ];
-
-    assert_eq!(TcpHandler::parse(&DATA)?.flags, TcpFlags::FinAck);
-
-    Ok(())
-}
-
-#[test]
-fn parsing_fails_when_no_flags_set() {
-    #[rustfmt::skip]
-        const DATA: [u8; 20] = [
-            0x04, 0xd2,                          // Source port: 1234
-            0x00, 0x50,                          // Dest port: 80
-            0x00, 0x00, 0x00, 0x00,              // Sequence number: 0
-            0x00, 0x00, 0x00, 0x00,              // Ack number: 0
-            0x50, 0x00,                          // Data offset: 5, Flags: none
-            0xff, 0xff,                          // Window size
-            0x00, 0x00,                          // Checksum
-            0x00, 0x00,                          // Urgent pointer
-        ];
-
-    assert_matches!(
-        TcpHandler::parse(&DATA),
-        Err(e) if e.contains("Invalid TCP flag combination")
-    );
-}
-
-#[test]
-fn parsing_handles_large_sequence_numbers() -> Result<(), String> {
-    #[rustfmt::skip]
-        const DATA: [u8; 20] = [
-            0x04, 0xd2,                          // Source port: 1234
-            0x00, 0x50,                          // Dest port: 80
-            0xff, 0xff, 0xff, 0xff,              // Sequence number: u32::MAX
-            0xfe, 0xdc, 0xba, 0x98,              // Ack number: 4275878552
-            0x50, 0x10,                          // Data offset: 5, Flags: ACK
-            0xff, 0xff,                          // Window size
-            0x00, 0x00,                          // Checksum
-            0x00, 0x00,                          // Urgent pointer
-        ];
-
-    let handler = TcpHandler::parse(&DATA)?;
-
-    assert_eq!(handler.seq_num, u32::MAX);
-    assert_eq!(handler.ack_num, 0xfedc_ba98);
-
-    Ok(())
-}
-
-#[test]
-fn reply_creates_valid_syn_ack() -> Result<(), String> {
+fn reply_creates_valid_syn_ack() -> Result<(), Box<dyn Error>> {
     #[rustfmt::skip]
         const SYN_PACKET: [u8; 20] = [
             0x04, 0xd2,                          // Source port: 1234
@@ -148,18 +16,14 @@ fn reply_creates_valid_syn_ack() -> Result<(), String> {
             0x00, 0x00,                          // Urgent pointer
         ];
 
-    const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2); // Source: 10.0.0.2
-    const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1); // Dest: 10.0.0.1
-
     let handler = TcpHandler::parse(&SYN_PACKET)?;
     let mut connections = TcpConnections::new();
     let mut reply = [0u8; ETHERNET_MTU];
 
     let tcp_len = handler
-        .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })
-        .map_err(|e| e.to_string())?
+        .create_reply(&mut connections, IP_PAIR)?
         .ok_or("Unexpected None reply")?
-        .write_into(&mut reply[20..], Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?;
+        .write_into(&mut reply[20..], IP_PAIR)?;
 
     // Verify TCP header at offset 20
     assert_eq!(&reply[20..22], &[0x00, 0x50]); // Source port: 80 (swapped)
@@ -187,20 +51,11 @@ fn reply_creates_valid_syn_ack() -> Result<(), String> {
     // Verify TCP length (no payload for SYN-ACK)
     assert_eq!(tcp_len, 20);
 
-    // Verify checksum is valid using pseudo-header
-    let mut pseudo_header = [0u8; 12];
-    pseudo_header[0..4].copy_from_slice(&SRC_IP.octets());
-    pseudo_header[4..8].copy_from_slice(&DST_IP.octets());
-    pseudo_header[8] = 0;
-    pseudo_header[9] = Protocol::Tcp.into();
-    pseudo_header[10..12].copy_from_slice(&tcp_len.to_be_bytes());
-
-    let mut checksum_data = [0u8; 12 + 20];
-    checksum_data[0..12].copy_from_slice(&pseudo_header);
-    checksum_data[12..32].copy_from_slice(&reply[20..40]);
-
-    let checksum = checksum::calculate(&checksum_data);
-    assert_eq!(checksum, 0x0000);
+    // Verify checksum
+    assert_eq!(
+        tcp_udp_test_checksum(&reply, Protocol::Tcp, tcp_len, IP_PAIR)?,
+        0x0000
+    );
 
     Ok(())
 }
@@ -220,9 +75,6 @@ fn data_packet_before_complete_handshake_gets_rst() -> Result<(), Box<dyn Error>
             0x48, 0x65, 0x6c, 0x6c, 0x6f,        // Payload: "Hello"
         ];
 
-    const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
-    const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
-
     let mut connections = TcpConnections::new();
 
     // Store an ISN as if we sent a SYN-ACK, but never transition to Established
@@ -230,8 +82,7 @@ fn data_packet_before_complete_handshake_gets_rst() -> Result<(), Box<dyn Error>
     connections.store_isn(key, 0);
 
     assert_matches!(
-        TcpHandler::parse(&DATA_PACKET)?
-            .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?,
+        TcpHandler::parse(&DATA_PACKET)?.create_reply(&mut connections, IP_PAIR)?,
         Some(reply) if reply.flags == TcpFlags::Rst
     );
 
@@ -252,9 +103,6 @@ fn handshake_ack_establishes_connection_and_returns_none() -> Result<(), Box<dyn
             0x00, 0x00,                          // Urgent pointer
         ];
 
-    const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
-    const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
-
     let mut connections = TcpConnections::new();
 
     // Simulate having sent a SYN-ACK with ISN=0 so ack_num=1 is the correct completion
@@ -262,8 +110,7 @@ fn handshake_ack_establishes_connection_and_returns_none() -> Result<(), Box<dyn
     connections.store_isn(key, 0);
 
     assert_eq!(
-        TcpHandler::parse(&ACK_PACKET)?
-            .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?,
+        TcpHandler::parse(&ACK_PACKET)?.create_reply(&mut connections, IP_PAIR)?,
         None
     );
 
@@ -287,9 +134,6 @@ fn reply_creates_valid_data_echo() -> Result<(), Box<dyn Error>> {
             0x48, 0x65, 0x6c, 0x6c, 0x6f,        // Payload: "Hello"
         ];
 
-    const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2); // Source: 10.0.0.2
-    const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1); // Dest: 10.0.0.1
-
     let handler = TcpHandler::parse(&DATA_PACKET)?;
     let mut connections = TcpConnections::new();
 
@@ -300,11 +144,10 @@ fn reply_creates_valid_data_echo() -> Result<(), Box<dyn Error>> {
 
     let mut reply = [0u8; ETHERNET_MTU];
 
-    let ip_pair = Ipv4AddrPair { src: SRC_IP, dst: DST_IP };
     let tcp_len = handler
-        .create_reply(&mut connections, ip_pair)?
+        .create_reply(&mut connections, IP_PAIR)?
         .ok_or("Unexpected None reply")?
-        .write_into(&mut reply[20..], ip_pair)?;
+        .write_into(&mut reply[20..], IP_PAIR)?;
 
     // Verify TCP header
     assert_eq!(&reply[20..22], &[0x00, 0x50]); // Source port: 80
@@ -320,19 +163,10 @@ fn reply_creates_valid_data_echo() -> Result<(), Box<dyn Error>> {
     assert_eq!(tcp_len, 20 + 5);
 
     // Verify checksum
-    let mut pseudo_header = [0u8; 12];
-    pseudo_header[0..4].copy_from_slice(&SRC_IP.octets());
-    pseudo_header[4..8].copy_from_slice(&DST_IP.octets());
-    pseudo_header[8] = 0;
-    pseudo_header[9] = Protocol::Tcp.into();
-    pseudo_header[10..12].copy_from_slice(&tcp_len.to_be_bytes());
-
-    let mut checksum_data = [0u8; 12 + 25];
-    checksum_data[0..12].copy_from_slice(&pseudo_header);
-    checksum_data[12..37].copy_from_slice(&reply[20..45]);
-
-    let checksum = checksum::calculate(&checksum_data);
-    assert_eq!(checksum, 0x0000);
+    assert_eq!(
+        tcp_udp_test_checksum(&reply, Protocol::Tcp, tcp_len, IP_PAIR)?,
+        0x0000
+    );
 
     Ok(())
 }
@@ -351,9 +185,6 @@ fn reply_creates_valid_fin_ack() -> Result<(), Box<dyn Error>> {
             0x00, 0x00,                          // Urgent pointer
         ];
 
-    const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
-    const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
-
     let handler = TcpHandler::parse(&FIN_ACK_PACKET)?;
     let mut connections = TcpConnections::new();
 
@@ -363,11 +194,10 @@ fn reply_creates_valid_fin_ack() -> Result<(), Box<dyn Error>> {
     connections.store_isn(conn_key, 0);
 
     let mut reply = [0u8; ETHERNET_MTU];
-    let ip_pair = Ipv4AddrPair { src: SRC_IP, dst: DST_IP };
     let tcp_len = handler
-        .create_reply(&mut connections, ip_pair)?
+        .create_reply(&mut connections, IP_PAIR)?
         .ok_or("Unexpected None reply")?
-        .write_into(&mut reply[20..], ip_pair)?;
+        .write_into(&mut reply[20..], IP_PAIR)?;
 
     // Ports swapped
     assert_eq!(&reply[20..22], &[0x00, 0x50]); // src: 80
@@ -386,19 +216,11 @@ fn reply_creates_valid_fin_ack() -> Result<(), Box<dyn Error>> {
     // Connection is now in Closing state (waiting for client's final ACK), not yet removed
     assert!(connections.is_closing(&conn_key));
 
-    // Checksum over pseudo-header + TCP segment must be zero
-    let mut pseudo_header = [0u8; 12];
-    pseudo_header[0..4].copy_from_slice(&SRC_IP.octets());
-    pseudo_header[4..8].copy_from_slice(&DST_IP.octets());
-    pseudo_header[8] = 0;
-    pseudo_header[9] = Protocol::Tcp.into();
-    pseudo_header[10..12].copy_from_slice(&tcp_len.to_be_bytes());
-
-    let mut checksum_data = [0u8; 12 + 20];
-    checksum_data[0..12].copy_from_slice(&pseudo_header);
-    checksum_data[12..32].copy_from_slice(&reply[20..40]);
-
-    assert_eq!(checksum::calculate(&checksum_data), 0x0000);
+    // Verify checksum
+    assert_eq!(
+        tcp_udp_test_checksum(&reply, Protocol::Tcp, tcp_len, IP_PAIR)?,
+        0x0000
+    );
 
     Ok(())
 }
@@ -419,9 +241,6 @@ fn final_ack_after_fin_ack_removes_connection_and_returns_none() -> Result<(), B
         0x00, 0x00,                          // Urgent pointer
     ];
 
-    const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
-    const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
-
     let mut connections = TcpConnections::new();
     let key = ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
     connections.store_isn(key, 0);
@@ -429,8 +248,7 @@ fn final_ack_after_fin_ack_removes_connection_and_returns_none() -> Result<(), B
     connections.start_closing(&key);
 
     assert_eq!(
-        TcpHandler::parse(&FINAL_ACK)?
-            .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?,
+        TcpHandler::parse(&FINAL_ACK)?.create_reply(&mut connections, IP_PAIR)?,
         None
     );
 
@@ -458,17 +276,13 @@ fn pure_ack_on_established_connection_returns_none() -> Result<(), Box<dyn Error
         0x00, 0x00,                          // Urgent pointer
     ];
 
-    const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
-    const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
-
     let mut connections = TcpConnections::new();
     let key = ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
     connections.store_isn(key, 0);
     connections.establish(&key);
 
     assert_eq!(
-        TcpHandler::parse(&ACK_PACKET)?
-            .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?,
+        TcpHandler::parse(&ACK_PACKET)?.create_reply(&mut connections, IP_PAIR)?,
         None
     );
 
@@ -494,17 +308,13 @@ fn rst_packet_cleans_up_connection_and_returns_none() -> Result<(), Box<dyn Erro
         0x00, 0x00,                          // Urgent pointer
     ];
 
-    const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
-    const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
-
     let mut connections = TcpConnections::new();
     let key = ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
     connections.store_isn(key, 0);
     connections.establish(&key);
 
     assert_eq!(
-        TcpHandler::parse(&RST_PACKET)?
-            .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?,
+        TcpHandler::parse(&RST_PACKET)?.create_reply(&mut connections, IP_PAIR)?,
         None
     );
 
@@ -532,17 +342,14 @@ fn unrecognized_packet_for_unknown_connection_gets_rst() -> Result<(), Box<dyn E
         0x48, 0x65, 0x6c, 0x6c, 0x6f,        // Payload: "Hello"
     ];
 
-    const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
-    const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
-
     let mut connections = TcpConnections::new(); // Empty, no known connections
 
     let reply = TcpHandler::parse(&DATA_PACKET)?
-        .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?
+        .create_reply(&mut connections, IP_PAIR)?
         .ok_or("expected RST reply, got None")?;
 
     let mut buf = [0u8; ETHERNET_MTU];
-    reply.write_into(&mut buf, Ipv4AddrPair { src: DST_IP, dst: SRC_IP })?;
+    reply.write_into(&mut buf, IP_PAIR)?;
 
     assert_eq!(&buf[0..2], &[0x00, 0x50]); // src port: 80 (swapped)
     assert_eq!(&buf[2..4], &[0x04, 0xd2]); // dst port: 1234 (swapped)
