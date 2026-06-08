@@ -210,10 +210,6 @@ mod tests {
         let handler = IcmpEchoHandler::parse(&REQUEST)?;
         let mut reply = [0u8; ETHERNET_MTU];
 
-        // Set up IP header portion (bytes 12-19 are source and dest IPs)
-        reply[12..16].copy_from_slice(&[10, 0, 0, 2]); // Source: 10.0.0.2
-        reply[16..20].copy_from_slice(&[10, 0, 0, 1]); // Dest: 10.0.0.1
-
         let icmp_len = handler.create_reply().write_into(&mut reply[20..])?;
 
         // Verify ICMP header at offset 20
