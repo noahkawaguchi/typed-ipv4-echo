@@ -1,6 +1,11 @@
 use super::*;
 use std::{error::Error, net::Ipv4Addr};
 
+/// Test source IP address: 10.0.0.2
+const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
+/// Test destination IP address: 10.0.0.1
+const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
+
 #[test]
 fn reply_creates_valid_syn_ack() -> Result<(), String> {
     #[rustfmt::skip]
@@ -14,9 +19,6 @@ fn reply_creates_valid_syn_ack() -> Result<(), String> {
             0x00, 0x00,                          // Checksum
             0x00, 0x00,                          // Urgent pointer
         ];
-
-    const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2); // Source: 10.0.0.2
-    const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1); // Dest: 10.0.0.1
 
     let handler = TcpHandler::parse(&SYN_PACKET)?;
     let mut connections = TcpConnections::new();
@@ -87,9 +89,6 @@ fn data_packet_before_complete_handshake_gets_rst() -> Result<(), Box<dyn Error>
             0x48, 0x65, 0x6c, 0x6c, 0x6f,        // Payload: "Hello"
         ];
 
-    const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
-    const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
-
     let mut connections = TcpConnections::new();
 
     // Store an ISN as if we sent a SYN-ACK, but never transition to Established
@@ -118,9 +117,6 @@ fn handshake_ack_establishes_connection_and_returns_none() -> Result<(), Box<dyn
             0x00, 0x00,                          // Checksum
             0x00, 0x00,                          // Urgent pointer
         ];
-
-    const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
-    const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
 
     let mut connections = TcpConnections::new();
 
@@ -153,9 +149,6 @@ fn reply_creates_valid_data_echo() -> Result<(), Box<dyn Error>> {
             0x00, 0x00,                          // Urgent pointer
             0x48, 0x65, 0x6c, 0x6c, 0x6f,        // Payload: "Hello"
         ];
-
-    const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2); // Source: 10.0.0.2
-    const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1); // Dest: 10.0.0.1
 
     let handler = TcpHandler::parse(&DATA_PACKET)?;
     let mut connections = TcpConnections::new();
@@ -217,9 +210,6 @@ fn reply_creates_valid_fin_ack() -> Result<(), Box<dyn Error>> {
             0x00, 0x00,                          // Checksum
             0x00, 0x00,                          // Urgent pointer
         ];
-
-    const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
-    const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
 
     let handler = TcpHandler::parse(&FIN_ACK_PACKET)?;
     let mut connections = TcpConnections::new();
@@ -286,9 +276,6 @@ fn final_ack_after_fin_ack_removes_connection_and_returns_none() -> Result<(), B
         0x00, 0x00,                          // Urgent pointer
     ];
 
-    const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
-    const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
-
     let mut connections = TcpConnections::new();
     let key = ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
     connections.store_isn(key, 0);
@@ -325,9 +312,6 @@ fn pure_ack_on_established_connection_returns_none() -> Result<(), Box<dyn Error
         0x00, 0x00,                          // Urgent pointer
     ];
 
-    const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
-    const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
-
     let mut connections = TcpConnections::new();
     let key = ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
     connections.store_isn(key, 0);
@@ -360,9 +344,6 @@ fn rst_packet_cleans_up_connection_and_returns_none() -> Result<(), Box<dyn Erro
         0x00, 0x00,                          // Checksum
         0x00, 0x00,                          // Urgent pointer
     ];
-
-    const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
-    const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
 
     let mut connections = TcpConnections::new();
     let key = ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
@@ -398,9 +379,6 @@ fn unrecognized_packet_for_unknown_connection_gets_rst() -> Result<(), Box<dyn E
         0x00, 0x00,                          // Urgent pointer
         0x48, 0x65, 0x6c, 0x6c, 0x6f,        // Payload: "Hello"
     ];
-
-    const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
-    const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
 
     let mut connections = TcpConnections::new(); // Empty, no known connections
 
