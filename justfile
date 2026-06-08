@@ -5,9 +5,13 @@
 addr := "10.0.0.2"
 port := "8080"
 
-# Connect to the server using TCP
+# Connect to the server using TCP (telnet)
 tcp:
     telnet {{addr}} {{port}}
+
+# Connect to the server using TCP (netcat)
+tcp-nc:
+    nc {{ addr }} {{ port }}
 
 # Connect to the server using ICMP
 icmp:
