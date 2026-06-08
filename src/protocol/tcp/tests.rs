@@ -383,8 +383,8 @@ fn reply_creates_valid_fin_ack() -> Result<(), Box<dyn Error>> {
     // No payload
     assert_eq!(tcp_len, 20);
 
-    // Connection removed from map
-    assert_eq!(connections.pending_isn(&conn_key), None);
+    // Connection is now in Closing state (waiting for client's final ACK), not yet removed
+    assert!(connections.is_closing(&conn_key));
 
     // Checksum over pseudo-header + TCP segment must be zero
     let mut pseudo_header = [0u8; 12];
@@ -399,6 +399,45 @@ fn reply_creates_valid_fin_ack() -> Result<(), Box<dyn Error>> {
     checksum_data[12..32].copy_from_slice(&reply[20..40]);
 
     assert_eq!(checksum::calculate(&checksum_data), 0x0000);
+
+    Ok(())
+}
+
+#[test]
+fn final_ack_after_fin_ack_removes_connection_and_returns_none() -> Result<(), Box<dyn Error>> {
+    // Simulates the client's final ACK completing the 4-step close. Should get no reply (not RST)
+    // so the client can close cleanly from TIME-WAIT.
+    #[rustfmt::skip]
+    const FINAL_ACK: [u8; 20] = [
+        0x04, 0xd2,                          // Source port: 1234
+        0x00, 0x50,                          // Dest port: 80
+        0x00, 0x00, 0x10, 0x02,              // Sequence number: 4098
+        0x00, 0x00, 0x00, 0x02,              // Ack number: 2 (our FIN-ACK seq + 1)
+        0x50, 0x10,                          // Data offset: 5, Flags: ACK
+        0xff, 0xff,                          // Window size
+        0x00, 0x00,                          // Checksum
+        0x00, 0x00,                          // Urgent pointer
+    ];
+
+    const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
+    const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
+
+    let mut connections = TcpConnections::new();
+    let key = ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
+    connections.store_isn(key, 0);
+    connections.establish(&key);
+    connections.start_closing(&key);
+
+    assert_eq!(
+        TcpHandler::parse(&FINAL_ACK)?
+            .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?,
+        None
+    );
+
+    assert!(
+        !connections.is_closing(&key),
+        "connection should be removed after final ACK"
+    );
 
     Ok(())
 }

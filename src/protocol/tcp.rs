@@ -134,9 +134,10 @@ impl<'a> TcpHandler<'a> {
                 }))
             }
 
-            // FIN-ACK (connection teardown) -> clean up local state and reply with FIN-ACK
+            // FIN-ACK (connection teardown) -> start closing to wait for client's final ACK, reply
+            // with FIN-ACK
             (TcpFlags::FinAck, _) => {
-                connections.remove(&key);
+                connections.start_closing(&key);
 
                 Ok(Some(Self {
                     src_port: self.dst_port,
@@ -147,6 +148,12 @@ impl<'a> TcpHandler<'a> {
                     flags: TcpFlags::FinAck,
                     payload: &[],
                 }))
+            }
+
+            // Final ACK completing teardown -> remove connection, no reply
+            (TcpFlags::Ack, 0) if connections.is_closing(&key) => {
+                connections.remove(&key);
+                Ok(None)
             }
 
             // RST -> clean up without replying (never RST a RST)
