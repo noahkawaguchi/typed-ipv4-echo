@@ -14,6 +14,7 @@ pub(super) struct ConnKey {
 enum TcpState {
     SynReceived,
     Established,
+    Closing,
 }
 
 struct ConnState {
@@ -50,6 +51,18 @@ impl TcpConnections {
         self.0
             .get(key)
             .is_some_and(|s| s.tcp_state == TcpState::Established)
+    }
+
+    pub(super) fn start_closing(&mut self, key: &ConnKey) {
+        if let Some(conn) = self.0.get_mut(key) {
+            conn.tcp_state = TcpState::Closing;
+        }
+    }
+
+    pub(super) fn is_closing(&self, key: &ConnKey) -> bool {
+        self.0
+            .get(key)
+            .is_some_and(|s| s.tcp_state == TcpState::Closing)
     }
 
     pub(super) fn remove(&mut self, key: &ConnKey) { self.0.remove(key); }
