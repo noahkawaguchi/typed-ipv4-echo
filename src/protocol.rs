@@ -4,6 +4,9 @@ mod icmp_echo;
 mod tcp;
 mod udp;
 
+#[cfg(test)]
+mod test_utils;
+
 use crate::{
     Ipv4AddrPair,
     protocol::{icmp_echo::IcmpEchoHandler, tcp::TcpHandler, udp::UdpHandler},
