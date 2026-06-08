@@ -1,13 +1,6 @@
 use super::*;
-use crate::protocol::test_utils::tcp_udp_test_checksum;
-use std::{error::Error, net::Ipv4Addr};
-
-/// Test source IP address: 10.0.0.2
-const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
-/// Test destination IP address: 10.0.0.1
-const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
-/// An `Ipv4AddrPair` of `SRC_IP` and `DST_IP`.
-const IP_PAIR: Ipv4AddrPair = Ipv4AddrPair { src: SRC_IP, dst: DST_IP };
+use crate::protocol::test_utils::{DST_IP, IP_PAIR, SRC_IP, tcp_udp_test_checksum};
+use std::error::Error;
 
 #[test]
 fn reply_creates_valid_syn_ack() -> Result<(), Box<dyn Error>> {

@@ -1,8 +1,20 @@
+//! Test utilities shared between multiple protocols.
+
 use crate::{
     ETHERNET_MTU, Ipv4AddrPair, checksum,
     protocol::Protocol,
     try_ops::{TryGet, TryGetMut},
 };
+use std::net::Ipv4Addr;
+
+/// Test source IP address: 10.0.0.2
+pub const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
+
+/// Test destination IP address: 10.0.0.1
+pub const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
+
+/// An `Ipv4AddrPair` of `SRC_IP` and `DST_IP`.
+pub const IP_PAIR: Ipv4AddrPair = Ipv4AddrPair { src: SRC_IP, dst: DST_IP };
 
 /// Calculates a TCP or UDP checksum for tests using a pseudo-header.
 pub fn tcp_udp_test_checksum(

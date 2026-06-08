@@ -107,8 +107,8 @@ impl fmt::Display for UdpHandler<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::test_utils::tcp_udp_test_checksum;
-    use std::{assert_matches, net::Ipv4Addr};
+    use crate::protocol::test_utils::{IP_PAIR, tcp_udp_test_checksum};
+    use std::assert_matches;
 
     #[test]
     fn correctly_parses_valid_packet() -> Result<(), String> {
@@ -186,16 +186,12 @@ mod tests {
             0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x21, 0x21, 0x21,  // Payload: "Hello!!!"
         ];
 
-        // Set up addresses from IP header
-        const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2); // Source: 10.0.0.2
-        const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1); // Dest: 10.0.0.1
-
         let handler = UdpHandler::parse(&REQUEST)?;
         let mut reply = [0u8; ETHERNET_MTU];
 
         let udp_len = handler
             .create_reply()
-            .write_into(&mut reply[20..], Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?;
+            .write_into(&mut reply[20..], IP_PAIR)?;
 
         // Verify UDP header at offset 20
         assert_eq!(&reply[20..22], &[0x00, 0x35]); // Source port: 53 (swapped)
@@ -210,12 +206,7 @@ mod tests {
 
         // Verify checksum
         assert_eq!(
-            tcp_udp_test_checksum(
-                &reply,
-                Protocol::Udp,
-                udp_len,
-                Ipv4AddrPair { src: SRC_IP, dst: DST_IP },
-            )?,
+            tcp_udp_test_checksum(&reply, Protocol::Udp, udp_len, IP_PAIR)?,
             0x0000
         );
 
