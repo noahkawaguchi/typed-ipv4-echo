@@ -5,9 +5,11 @@ use std::{error::Error, net::Ipv4Addr};
 const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
 /// Test destination IP address: 10.0.0.1
 const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
+/// An `Ipv4AddrPair` of `SRC_IP` and `DST_IP`.
+const IP_PAIR: Ipv4AddrPair = Ipv4AddrPair { src: SRC_IP, dst: DST_IP };
 
 #[test]
-fn reply_creates_valid_syn_ack() -> Result<(), String> {
+fn reply_creates_valid_syn_ack() -> Result<(), Box<dyn Error>> {
     #[rustfmt::skip]
         const SYN_PACKET: [u8; 20] = [
             0x04, 0xd2,                          // Source port: 1234
@@ -25,10 +27,9 @@ fn reply_creates_valid_syn_ack() -> Result<(), String> {
     let mut reply = [0u8; ETHERNET_MTU];
 
     let tcp_len = handler
-        .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })
-        .map_err(|e| e.to_string())?
+        .create_reply(&mut connections, IP_PAIR)?
         .ok_or("Unexpected None reply")?
-        .write_into(&mut reply[20..], Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?;
+        .write_into(&mut reply[20..], IP_PAIR)?;
 
     // Verify TCP header at offset 20
     assert_eq!(&reply[20..22], &[0x00, 0x50]); // Source port: 80 (swapped)
@@ -96,8 +97,7 @@ fn data_packet_before_complete_handshake_gets_rst() -> Result<(), Box<dyn Error>
     connections.store_isn(key, 0);
 
     assert_matches!(
-        TcpHandler::parse(&DATA_PACKET)?
-            .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?,
+        TcpHandler::parse(&DATA_PACKET)?.create_reply(&mut connections, IP_PAIR)?,
         Some(reply) if reply.flags == TcpFlags::Rst
     );
 
@@ -125,8 +125,7 @@ fn handshake_ack_establishes_connection_and_returns_none() -> Result<(), Box<dyn
     connections.store_isn(key, 0);
 
     assert_eq!(
-        TcpHandler::parse(&ACK_PACKET)?
-            .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?,
+        TcpHandler::parse(&ACK_PACKET)?.create_reply(&mut connections, IP_PAIR)?,
         None
     );
 
@@ -160,11 +159,10 @@ fn reply_creates_valid_data_echo() -> Result<(), Box<dyn Error>> {
 
     let mut reply = [0u8; ETHERNET_MTU];
 
-    let ip_pair = Ipv4AddrPair { src: SRC_IP, dst: DST_IP };
     let tcp_len = handler
-        .create_reply(&mut connections, ip_pair)?
+        .create_reply(&mut connections, IP_PAIR)?
         .ok_or("Unexpected None reply")?
-        .write_into(&mut reply[20..], ip_pair)?;
+        .write_into(&mut reply[20..], IP_PAIR)?;
 
     // Verify TCP header
     assert_eq!(&reply[20..22], &[0x00, 0x50]); // Source port: 80
@@ -220,11 +218,10 @@ fn reply_creates_valid_fin_ack() -> Result<(), Box<dyn Error>> {
     connections.store_isn(conn_key, 0);
 
     let mut reply = [0u8; ETHERNET_MTU];
-    let ip_pair = Ipv4AddrPair { src: SRC_IP, dst: DST_IP };
     let tcp_len = handler
-        .create_reply(&mut connections, ip_pair)?
+        .create_reply(&mut connections, IP_PAIR)?
         .ok_or("Unexpected None reply")?
-        .write_into(&mut reply[20..], ip_pair)?;
+        .write_into(&mut reply[20..], IP_PAIR)?;
 
     // Ports swapped
     assert_eq!(&reply[20..22], &[0x00, 0x50]); // src: 80
@@ -283,8 +280,7 @@ fn final_ack_after_fin_ack_removes_connection_and_returns_none() -> Result<(), B
     connections.start_closing(&key);
 
     assert_eq!(
-        TcpHandler::parse(&FINAL_ACK)?
-            .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?,
+        TcpHandler::parse(&FINAL_ACK)?.create_reply(&mut connections, IP_PAIR)?,
         None
     );
 
@@ -318,8 +314,7 @@ fn pure_ack_on_established_connection_returns_none() -> Result<(), Box<dyn Error
     connections.establish(&key);
 
     assert_eq!(
-        TcpHandler::parse(&ACK_PACKET)?
-            .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?,
+        TcpHandler::parse(&ACK_PACKET)?.create_reply(&mut connections, IP_PAIR)?,
         None
     );
 
@@ -351,8 +346,7 @@ fn rst_packet_cleans_up_connection_and_returns_none() -> Result<(), Box<dyn Erro
     connections.establish(&key);
 
     assert_eq!(
-        TcpHandler::parse(&RST_PACKET)?
-            .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?,
+        TcpHandler::parse(&RST_PACKET)?.create_reply(&mut connections, IP_PAIR)?,
         None
     );
 
@@ -383,11 +377,11 @@ fn unrecognized_packet_for_unknown_connection_gets_rst() -> Result<(), Box<dyn E
     let mut connections = TcpConnections::new(); // Empty, no known connections
 
     let reply = TcpHandler::parse(&DATA_PACKET)?
-        .create_reply(&mut connections, Ipv4AddrPair { src: SRC_IP, dst: DST_IP })?
+        .create_reply(&mut connections, IP_PAIR)?
         .ok_or("expected RST reply, got None")?;
 
     let mut buf = [0u8; ETHERNET_MTU];
-    reply.write_into(&mut buf, Ipv4AddrPair { src: DST_IP, dst: SRC_IP })?;
+    reply.write_into(&mut buf, IP_PAIR)?;
 
     assert_eq!(&buf[0..2], &[0x00, 0x50]); // src port: 80 (swapped)
     assert_eq!(&buf[2..4], &[0x04, 0xd2]); // dst port: 1234 (swapped)
