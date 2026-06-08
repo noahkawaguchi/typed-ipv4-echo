@@ -107,6 +107,7 @@ impl fmt::Display for UdpHandler<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::test_utils::tcp_udp_test_checksum;
     use std::{assert_matches, net::Ipv4Addr};
 
     #[test]
@@ -207,20 +208,16 @@ mod tests {
         // Verify UDP length
         assert_eq!(udp_len, 8 + 8);
 
-        // Verify checksum is valid using pseudo-header
-        let mut pseudo_header = [0u8; 12];
-        pseudo_header[0..4].copy_from_slice(&SRC_IP.octets()); // Source IP
-        pseudo_header[4..8].copy_from_slice(&DST_IP.octets()); // Dest IP
-        pseudo_header[8] = 0; // Reserved
-        pseudo_header[9] = Protocol::Udp.into();
-        pseudo_header[10..12].copy_from_slice(&udp_len.to_be_bytes());
-
-        let mut checksum_data = [0u8; 12 + 16];
-        checksum_data[0..12].copy_from_slice(&pseudo_header);
-        checksum_data[12..28].copy_from_slice(&reply[20..36]);
-
-        let checksum = checksum::calculate(&checksum_data);
-        assert_eq!(checksum, 0x0000);
+        // Verify checksum
+        assert_eq!(
+            tcp_udp_test_checksum(
+                &reply,
+                Protocol::Udp,
+                udp_len,
+                Ipv4AddrPair { src: SRC_IP, dst: DST_IP },
+            )?,
+            0x0000
+        );
 
         Ok(())
     }

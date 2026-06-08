@@ -1,4 +1,5 @@
 use super::*;
+use crate::protocol::test_utils::tcp_udp_test_checksum;
 use std::{error::Error, net::Ipv4Addr};
 
 /// Test source IP address: 10.0.0.2
@@ -57,20 +58,11 @@ fn reply_creates_valid_syn_ack() -> Result<(), Box<dyn Error>> {
     // Verify TCP length (no payload for SYN-ACK)
     assert_eq!(tcp_len, 20);
 
-    // Verify checksum is valid using pseudo-header
-    let mut pseudo_header = [0u8; 12];
-    pseudo_header[0..4].copy_from_slice(&SRC_IP.octets());
-    pseudo_header[4..8].copy_from_slice(&DST_IP.octets());
-    pseudo_header[8] = 0;
-    pseudo_header[9] = Protocol::Tcp.into();
-    pseudo_header[10..12].copy_from_slice(&tcp_len.to_be_bytes());
-
-    let mut checksum_data = [0u8; 12 + 20];
-    checksum_data[0..12].copy_from_slice(&pseudo_header);
-    checksum_data[12..32].copy_from_slice(&reply[20..40]);
-
-    let checksum = checksum::calculate(&checksum_data);
-    assert_eq!(checksum, 0x0000);
+    // Verify checksum
+    assert_eq!(
+        tcp_udp_test_checksum(&reply, Protocol::Tcp, tcp_len, IP_PAIR)?,
+        0x0000
+    );
 
     Ok(())
 }
@@ -178,19 +170,10 @@ fn reply_creates_valid_data_echo() -> Result<(), Box<dyn Error>> {
     assert_eq!(tcp_len, 20 + 5);
 
     // Verify checksum
-    let mut pseudo_header = [0u8; 12];
-    pseudo_header[0..4].copy_from_slice(&SRC_IP.octets());
-    pseudo_header[4..8].copy_from_slice(&DST_IP.octets());
-    pseudo_header[8] = 0;
-    pseudo_header[9] = Protocol::Tcp.into();
-    pseudo_header[10..12].copy_from_slice(&tcp_len.to_be_bytes());
-
-    let mut checksum_data = [0u8; 12 + 25];
-    checksum_data[0..12].copy_from_slice(&pseudo_header);
-    checksum_data[12..37].copy_from_slice(&reply[20..45]);
-
-    let checksum = checksum::calculate(&checksum_data);
-    assert_eq!(checksum, 0x0000);
+    assert_eq!(
+        tcp_udp_test_checksum(&reply, Protocol::Tcp, tcp_len, IP_PAIR)?,
+        0x0000
+    );
 
     Ok(())
 }
@@ -240,19 +223,11 @@ fn reply_creates_valid_fin_ack() -> Result<(), Box<dyn Error>> {
     // Connection is now in Closing state (waiting for client's final ACK), not yet removed
     assert!(connections.is_closing(&conn_key));
 
-    // Checksum over pseudo-header + TCP segment must be zero
-    let mut pseudo_header = [0u8; 12];
-    pseudo_header[0..4].copy_from_slice(&SRC_IP.octets());
-    pseudo_header[4..8].copy_from_slice(&DST_IP.octets());
-    pseudo_header[8] = 0;
-    pseudo_header[9] = Protocol::Tcp.into();
-    pseudo_header[10..12].copy_from_slice(&tcp_len.to_be_bytes());
-
-    let mut checksum_data = [0u8; 12 + 20];
-    checksum_data[0..12].copy_from_slice(&pseudo_header);
-    checksum_data[12..32].copy_from_slice(&reply[20..40]);
-
-    assert_eq!(checksum::calculate(&checksum_data), 0x0000);
+    // Verify checksum
+    assert_eq!(
+        tcp_udp_test_checksum(&reply, Protocol::Tcp, tcp_len, IP_PAIR)?,
+        0x0000
+    );
 
     Ok(())
 }
