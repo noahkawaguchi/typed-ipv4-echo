@@ -295,6 +295,74 @@ fn pure_ack_on_established_connection_returns_none() -> Result<(), Box<dyn Error
 }
 
 #[test]
+fn consecutive_replies_use_snd_nxt_for_seq_num() -> Result<(), Box<dyn Error>> {
+    // Verifies that the server updates and uses its own snd_nxt for seq_num rather than simply
+    // mirroring the client's ack_num. After sending a 5-byte echo, snd_nxt=6, then the next reply's
+    // seq_num must be 6 even when the client sends a stale ack_num=1.
+
+    const KEY: ConnKey =
+        ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
+
+    let mut connections = TcpConnections::new();
+    connections.store_isn(KEY, 0);
+    connections.establish(&KEY);
+
+    // First data packet: "Hello" (5 bytes), ack=1 (acknowledges our ISN+1)
+    #[rustfmt::skip]
+    let first_packet = [
+        0x04, 0xd2, 0x00, 0x50,              // Ports: 1234 -> 80
+        0x00, 0x00, 0x10, 0x01,              // seq: 4097
+        0x00, 0x00, 0x00, 0x01,              // ack: 1
+        0x50, 0x10,                          // Data offset: 5, Flags: ACK
+        0xff, 0xff, 0x00, 0x00, 0x00, 0x00,  // Window, checksum, urgent
+        0x48, 0x65, 0x6c, 0x6c, 0x6f,        // "Hello"
+    ];
+
+    let mut reply1 = [0u8; ETHERNET_MTU];
+    TcpHandler::parse(&first_packet)?
+        .create_reply(&mut connections, IP_PAIR)?
+        .ok_or("Unexpected None reply to first packet")?
+        .write_into(&mut reply1[20..], IP_PAIR)?;
+
+    assert_eq!(
+        connections.get_snd_nxt(&KEY),
+        Some(6),
+        "Stored snd_nxt should be 6 (1 + 5 bytes echoed) between replies"
+    );
+
+    // Second data packet: "Hi" (2 bytes), but with stale ack=1 (hasn't ACKed our "Hello" echo)
+    #[rustfmt::skip]
+    let second_packet = [
+        0x04, 0xd2, 0x00, 0x50,              // Ports: 1234 -> 80
+        0x00, 0x00, 0x10, 0x06,              // seq: 4102
+        0x00, 0x00, 0x00, 0x01,              // ack: 1 (stale, hasn't ACKed our "Hello")
+        0x50, 0x10,                          // Data offset: 5, Flags: ACK
+        0xff, 0xff, 0x00, 0x00, 0x00, 0x00,  // Window, checksum, urgent
+        0x48, 0x69,                          // "Hi"
+    ];
+
+    let mut reply2 = [0u8; ETHERNET_MTU];
+    TcpHandler::parse(&second_packet)?
+        .create_reply(&mut connections, IP_PAIR)?
+        .ok_or("Unexpected None reply to second packet")?
+        .write_into(&mut reply2[20..], IP_PAIR)?;
+
+    assert_matches!(
+        reply2[24..28].try_into().map(u32::from_be_bytes),
+        Ok(6),
+        "Server's seq_num should be snd_nxt=6, not client's stale ack_num=1"
+    );
+
+    assert_matches!(
+        reply2[28..32].try_into().map(u32::from_be_bytes),
+        Ok(4104),
+        "Server's ack_num should be client's seq_num 4102 + 2 bytes = 4104"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn rst_packet_cleans_up_connection_and_returns_none() -> Result<(), Box<dyn Error>> {
     #[rustfmt::skip]
     const RST_PACKET: [u8; 20] = [

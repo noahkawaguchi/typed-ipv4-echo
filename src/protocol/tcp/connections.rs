@@ -20,6 +20,7 @@ enum TcpState {
 struct ConnState {
     tcp_state: TcpState,
     isn: u32,
+    snd_nxt: u32,
 }
 
 /// Tracks per-connection state keyed by the 4-tuple.
@@ -29,8 +30,14 @@ impl TcpConnections {
     pub fn new() -> Self { Self(HashMap::new()) }
 
     pub(super) fn store_isn(&mut self, key: ConnKey, isn: u32) {
-        self.0
-            .insert(key, ConnState { tcp_state: TcpState::SynReceived, isn });
+        self.0.insert(
+            key,
+            ConnState {
+                tcp_state: TcpState::SynReceived,
+                isn,
+                snd_nxt: isn.wrapping_add(1), // SYN-ACK consumes one sequence number
+            },
+        );
     }
 
     /// Returns the ISN only while the connection is still in `SynReceived` state.
@@ -51,6 +58,16 @@ impl TcpConnections {
         self.0
             .get(key)
             .is_some_and(|s| s.tcp_state == TcpState::Established)
+    }
+
+    pub(super) fn get_snd_nxt(&self, key: &ConnKey) -> Option<u32> {
+        self.0.get(key).map(|s| s.snd_nxt)
+    }
+
+    pub(super) fn advance_snd_nxt(&mut self, key: &ConnKey, n: u32) {
+        if let Some(conn) = self.0.get_mut(key) {
+            conn.snd_nxt = conn.snd_nxt.wrapping_add(n);
+        }
     }
 
     pub(super) fn start_closing(&mut self, key: &ConnKey) {
