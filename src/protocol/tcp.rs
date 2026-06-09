@@ -103,7 +103,8 @@ impl<'a> TcpHandler<'a> {
                     .pending_isn(&key)
                     .is_some_and(|isn| isn.wrapping_add(1) == self.ack_num) =>
             {
-                connections.establish(&key);
+                // Set local rcv_nxt to remote seq_num
+                connections.establish(&key, self.seq_num);
                 Ok(None)
             }
 
@@ -111,12 +112,14 @@ impl<'a> TcpHandler<'a> {
             // the server) -> no reply
             (TcpFlags::Ack, 0) if connections.is_established(&key) => Ok(None),
 
-            // Data packet (ACK with payload) on an established connection -> send ACK, echo
-            // payload. Use the server's previously stored snd_nxt for this connection as the
-            // seq_num, then advance snd_nxt by the number of bytes received.
+            // In-order data packet on an established connection -> send ACK, echo payload. Use
+            // snd_nxt as seq_num and rcv_nxt + bytes received as ack_num, then advance both locally
+            // by bytes received.
             (TcpFlags::Ack, 1..)
                 if connections.is_established(&key)
-                    && let Some(snd_nxt) = connections.get_snd_nxt(&key) =>
+                    && let Some(snd_nxt) = connections.get_snd_nxt(&key)
+                    && let Some(rcv_nxt) = connections.get_rcv_nxt(&key)
+                    && self.seq_num == rcv_nxt =>
             {
                 #[expect(
                     clippy::cast_possible_truncation,
@@ -125,22 +128,46 @@ impl<'a> TcpHandler<'a> {
                 let payload_len = self.payload.len() as u32;
 
                 connections.advance_snd_nxt(&key, payload_len);
+                connections.advance_rcv_nxt(&key, payload_len);
 
                 Ok(Some(Self {
                     src_port: self.dst_port,
                     dst_port: self.src_port,
                     seq_num: snd_nxt,
-                    // ack_num also advances by the number of bytes received
-                    ack_num: self.seq_num.wrapping_add(payload_len),
+                    ack_num: rcv_nxt.wrapping_add(payload_len),
                     offset_bytes: TCP_HEADER_MIN_LEN,
                     flags: TcpFlags::Ack,
                     payload: self.payload,
                 }))
             }
 
-            // FIN-ACK (connection teardown) on a known connection -> start closing to wait for
-            // client's final ACK, reply with FIN-ACK.
-            (TcpFlags::FinAck, _) if let Some(snd_nxt) = connections.get_snd_nxt(&key) => {
+            // Out-of-order or duplicate data on an established connection -> duplicate ACK. ACK
+            // rcv_nxt so the client knows what the server expects next, but don't echo data or
+            // advance snd_nxt/rcv_nxt.
+            (TcpFlags::Ack, 1..)
+                if connections.is_established(&key)
+                    && let Some(snd_nxt) = connections.get_snd_nxt(&key)
+                    && let Some(rcv_nxt) = connections.get_rcv_nxt(&key)
+                    && self.seq_num != rcv_nxt =>
+            {
+                Ok(Some(Self {
+                    src_port: self.dst_port,
+                    dst_port: self.src_port,
+                    seq_num: snd_nxt,
+                    ack_num: rcv_nxt,
+                    offset_bytes: TCP_HEADER_MIN_LEN,
+                    flags: TcpFlags::Ack,
+                    payload: &[],
+                }))
+            }
+
+            // FIN-ACK (connection teardown) on an established connection -> start closing to wait
+            // for client's final ACK, reply with FIN-ACK.
+            (TcpFlags::FinAck, _)
+                if connections.is_established(&key)
+                    && let Some(snd_nxt) = connections.get_snd_nxt(&key)
+                    && let Some(rcv_nxt) = connections.get_rcv_nxt(&key) =>
+            {
                 connections.start_closing(&key);
                 connections.advance_snd_nxt(&key, 1); // FIN consumes one sequence number
 
@@ -148,7 +175,7 @@ impl<'a> TcpHandler<'a> {
                     src_port: self.dst_port,
                     dst_port: self.src_port,
                     seq_num: snd_nxt,
-                    ack_num: self.seq_num.wrapping_add(1),
+                    ack_num: rcv_nxt.wrapping_add(1),
                     offset_bytes: TCP_HEADER_MIN_LEN,
                     flags: TcpFlags::FinAck,
                     payload: &[],

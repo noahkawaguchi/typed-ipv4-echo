@@ -21,6 +21,7 @@ struct ConnState {
     tcp_state: TcpState,
     isn: u32,
     snd_nxt: u32,
+    rcv_nxt: u32,
 }
 
 /// Tracks per-connection state keyed by the 4-tuple.
@@ -36,6 +37,7 @@ impl TcpConnections {
                 tcp_state: TcpState::SynReceived,
                 isn,
                 snd_nxt: isn.wrapping_add(1), // SYN-ACK consumes one sequence number
+                rcv_nxt: 0,                   // Set at connection establishment
             },
         );
     }
@@ -48,9 +50,10 @@ impl TcpConnections {
             .map(|s| s.isn)
     }
 
-    pub(super) fn establish(&mut self, key: &ConnKey) {
+    pub(super) fn establish(&mut self, key: &ConnKey, rcv_nxt: u32) {
         if let Some(conn) = self.0.get_mut(key) {
             conn.tcp_state = TcpState::Established;
+            conn.rcv_nxt = rcv_nxt;
         }
     }
 
@@ -67,6 +70,16 @@ impl TcpConnections {
     pub(super) fn advance_snd_nxt(&mut self, key: &ConnKey, n: u32) {
         if let Some(conn) = self.0.get_mut(key) {
             conn.snd_nxt = conn.snd_nxt.wrapping_add(n);
+        }
+    }
+
+    pub(super) fn get_rcv_nxt(&self, key: &ConnKey) -> Option<u32> {
+        self.0.get(key).map(|s| s.rcv_nxt)
+    }
+
+    pub(super) fn advance_rcv_nxt(&mut self, key: &ConnKey, n: u32) {
+        if let Some(conn) = self.0.get_mut(key) {
+            conn.rcv_nxt = conn.rcv_nxt.wrapping_add(n);
         }
     }
 

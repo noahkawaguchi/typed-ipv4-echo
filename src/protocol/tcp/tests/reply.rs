@@ -140,7 +140,7 @@ fn reply_creates_valid_data_echo() -> Result<(), Box<dyn Error>> {
     // Simulate a completed handshake (ISN=0, so client's ack_num of 1 is consistent)
     let key = ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
     connections.store_isn(key, 0);
-    connections.establish(&key);
+    connections.establish(&key, 4097); // rcv_nxt = client's seq at handshake ACK time
 
     let mut reply = [0u8; ETHERNET_MTU];
 
@@ -192,6 +192,7 @@ fn reply_creates_valid_fin_ack() -> Result<(), Box<dyn Error>> {
     let conn_key =
         ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
     connections.store_isn(conn_key, 0);
+    connections.establish(&conn_key, 4097); // FIN-ACK arrives at seq=4097
 
     let mut reply = [0u8; ETHERNET_MTU];
     let tcp_len = handler
@@ -244,7 +245,7 @@ fn final_ack_after_fin_ack_removes_connection_and_returns_none() -> Result<(), B
     let mut connections = TcpConnections::new();
     let key = ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
     connections.store_isn(key, 0);
-    connections.establish(&key);
+    connections.establish(&key, 4097);
     connections.start_closing(&key);
 
     assert_eq!(
@@ -279,7 +280,7 @@ fn pure_ack_on_established_connection_returns_none() -> Result<(), Box<dyn Error
     let mut connections = TcpConnections::new();
     let key = ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
     connections.store_isn(key, 0);
-    connections.establish(&key);
+    connections.establish(&key, 4102); // rcv_nxt after having received "Hello" (4097 + 5)
 
     assert_eq!(
         TcpHandler::parse(&ACK_PACKET)?.create_reply(&mut connections, IP_PAIR)?,
@@ -305,7 +306,7 @@ fn consecutive_replies_use_snd_nxt_for_seq_num() -> Result<(), Box<dyn Error>> {
 
     let mut connections = TcpConnections::new();
     connections.store_isn(KEY, 0);
-    connections.establish(&KEY);
+    connections.establish(&KEY, 4097);
 
     // First data packet: "Hello" (5 bytes), ack=1 (acknowledges our ISN+1)
     #[rustfmt::skip]
@@ -379,7 +380,7 @@ fn rst_packet_cleans_up_connection_and_returns_none() -> Result<(), Box<dyn Erro
     let mut connections = TcpConnections::new();
     let key = ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
     connections.store_isn(key, 0);
-    connections.establish(&key);
+    connections.establish(&key, 4097);
 
     assert_eq!(
         TcpHandler::parse(&RST_PACKET)?.create_reply(&mut connections, IP_PAIR)?,
@@ -389,6 +390,72 @@ fn rst_packet_cleans_up_connection_and_returns_none() -> Result<(), Box<dyn Erro
     assert!(
         !connections.is_established(&key),
         "connection should be removed after RST"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn duplicate_data_packet_gets_duplicate_ack_without_echo() -> Result<(), Box<dyn Error>> {
+    // A retransmitted segment should get a duplicate ACK pointing at the current rcv_nxt, not
+    // another echo. Processing a second distinct packet first makes the ack_num check meaningful
+    // because the retransmitted packet's seq+len points back to 4102, but rcv_nxt is 4104 after
+    // both deliveries.
+
+    #[rustfmt::skip]
+    const HELLO_PACKET: [u8; 25] = [
+        0x04, 0xd2,                          // Source port: 1234
+        0x00, 0x50,                          // Dest port: 80
+        0x00, 0x00, 0x10, 0x01,              // seq: 4097
+        0x00, 0x00, 0x00, 0x01,              // ack: 1
+        0x50, 0x10,                          // Data offset: 5, Flags: ACK
+        0xff, 0xff,                          // Window size
+        0x00, 0x00,                          // Checksum
+        0x00, 0x00,                          // Urgent pointer
+        0x48, 0x65, 0x6c, 0x6c, 0x6f,        // Payload: "Hello" (5 bytes)
+    ];
+
+    #[rustfmt::skip]
+    const HI_PACKET: [u8; 22] = [
+        0x04, 0xd2,                          // Source port: 1234
+        0x00, 0x50,                          // Dest port: 80
+        0x00, 0x00, 0x10, 0x06,              // seq: 4102
+        0x00, 0x00, 0x00, 0x06,              // ack: 6
+        0x50, 0x10,                          // Data offset: 5, Flags: ACK
+        0xff, 0xff,                          // Window size
+        0x00, 0x00,                          // Checksum
+        0x00, 0x00,                          // Urgent pointer
+        0x48, 0x69,                          // Payload: "Hi" (2 bytes)
+    ];
+
+    let mut connections = TcpConnections::new();
+    let key = ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
+    connections.store_isn(key, 0);
+    connections.establish(&key, 4097);
+
+    // First packet: "Hello" (seq=4097) -> rcv_nxt advances to 4102
+    TcpHandler::parse(&HELLO_PACKET)?
+        .create_reply(&mut connections, IP_PAIR)?
+        .ok_or("Unexpected None reply for first packet")?;
+
+    // Second packet: "Hi" (seq=4102) -> rcv_nxt advances to 4104
+    TcpHandler::parse(&HI_PACKET)?
+        .create_reply(&mut connections, IP_PAIR)?
+        .ok_or("Unexpected None reply for second packet")?;
+
+    // Retransmit of "Hello": seq=4097, but rcv_nxt is now 4104
+    let mut reply_buf = [0u8; ETHERNET_MTU];
+    let tcp_len = TcpHandler::parse(&HELLO_PACKET)?
+        .create_reply(&mut connections, IP_PAIR)?
+        .ok_or("Unexpected None for duplicate ACK reply")?
+        .write_into(&mut reply_buf[20..], IP_PAIR)?;
+
+    assert_eq!(tcp_len, 20, "Duplicate ACK should carry no payload");
+
+    assert_matches!(
+        reply_buf[28..32].try_into().map(u32::from_be_bytes),
+        Ok(4104),
+        "ack_num should be rcv_nxt=4104, not seq+len=4097+5=4102"
     );
 
     Ok(())
