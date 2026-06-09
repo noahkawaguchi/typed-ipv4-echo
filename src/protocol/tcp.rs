@@ -111,35 +111,43 @@ impl<'a> TcpHandler<'a> {
             // the server) -> no reply
             (TcpFlags::Ack, 0) if connections.is_established(&key) => Ok(None),
 
-            // Data packet (ACK with payload) -> send ACK, echo payload
-            (TcpFlags::Ack, 1..) if connections.is_established(&key) => {
-                // Local seq num = what the client expects next (remote ack num)
-                // Local ack num = remote seq num + payload length (intentionally wrapping)
+            // Data packet (ACK with payload) on an established connection -> send ACK, echo
+            // payload. Use the server's previously stored snd_nxt for this connection as the
+            // seq_num, then advance snd_nxt by the number of bytes received.
+            (TcpFlags::Ack, 1..)
+                if connections.is_established(&key)
+                    && let Some(snd_nxt) = connections.get_snd_nxt(&key) =>
+            {
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "`u32::MAX` (4_294_967_295) > `ETHERNET_MTU` (1500)"
+                )]
+                let payload_len = self.payload.len() as u32;
+
+                connections.advance_snd_nxt(&key, payload_len);
+
                 Ok(Some(Self {
-                    // Swap source and destination ports
                     src_port: self.dst_port,
                     dst_port: self.src_port,
-                    seq_num: self.ack_num,
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "`u32::MAX` (4_294_967_295) > `ETHERNET_MTU` (1500)"
-                    )]
-                    ack_num: self.seq_num.wrapping_add(self.payload.len() as u32),
+                    seq_num: snd_nxt,
+                    // ack_num also advances by the number of bytes received
+                    ack_num: self.seq_num.wrapping_add(payload_len),
                     offset_bytes: TCP_HEADER_MIN_LEN,
                     flags: TcpFlags::Ack,
                     payload: self.payload,
                 }))
             }
 
-            // FIN-ACK (connection teardown) -> start closing to wait for client's final ACK, reply
-            // with FIN-ACK
-            (TcpFlags::FinAck, _) => {
+            // FIN-ACK (connection teardown) on a known connection -> start closing to wait for
+            // client's final ACK, reply with FIN-ACK.
+            (TcpFlags::FinAck, _) if let Some(snd_nxt) = connections.get_snd_nxt(&key) => {
                 connections.start_closing(&key);
+                connections.advance_snd_nxt(&key, 1); // FIN consumes one sequence number
 
                 Ok(Some(Self {
                     src_port: self.dst_port,
                     dst_port: self.src_port,
-                    seq_num: self.ack_num,
+                    seq_num: snd_nxt,
                     ack_num: self.seq_num.wrapping_add(1),
                     offset_bytes: TCP_HEADER_MIN_LEN,
                     flags: TcpFlags::FinAck,
@@ -159,12 +167,14 @@ impl<'a> TcpHandler<'a> {
                 Ok(None)
             }
 
-            // Something else unrecognized -> RST so the peer fails fast instead of hanging
-            // (ack num is 0 because sending bare RST with no ACK flag leaves ack num undefined)
+            // Something else unrecognized other than RST -> RST so the peer fails fast instead of
+            // hanging. Per RFC 9293 §3.10.7.1, any non-RST segment to a CLOSED (unknown) connection
+            // gets a RST.
             _ => Ok(Some(Self {
                 src_port: self.dst_port,
                 dst_port: self.src_port,
                 seq_num: self.ack_num,
+                // ack_num is 0 because sending bare RST with no ACK flag leaves ack_num undefined
                 ack_num: 0,
                 offset_bytes: TCP_HEADER_MIN_LEN,
                 flags: TcpFlags::Rst,
