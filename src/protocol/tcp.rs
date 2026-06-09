@@ -79,6 +79,10 @@ impl<'a> TcpHandler<'a> {
     }
 
     /// Creates a TCP header and payload for replying to `self`, or returns `Ok(None)` for no reply.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Large match expression to express reply cases clearly"
+    )]
     pub fn create_reply(
         &self,
         connections: &mut TcpConnections,
