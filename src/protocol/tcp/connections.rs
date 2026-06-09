@@ -10,17 +10,35 @@ pub(super) struct ConnKey {
     pub(super) server_port: u16,
 }
 
+/// The set of states of a TCP connection (non-exhaustive). Variant meanings below from RFC 9293,
+/// Section 3.3.2.
 #[derive(PartialEq, Eq)]
 enum TcpState {
+    /// "SYN-RECEIVED - represents waiting for a confirming connection request acknowledgment after
+    /// having both received and sent a connection request."
     SynReceived,
+
+    /// "ESTABLISHED - represents an open connection, data received can be delivered to the user.
+    /// The normal state for the data transfer phase of the connection."
     Established,
+
+    /// "CLOSING - represents waiting for a connection termination request acknowledgment from the
+    /// remote TCP peer."
     Closing,
 }
 
+/// The state of a connection in the table, including its TCP state and other locally stored data.
 struct ConnState {
     tcp_state: TcpState,
+
+    /// "The Initial Sequence Number. The first sequence number used on a connection" (RFC 9293,
+    /// Section 4).
     isn: u32,
+
+    /// "SND.NXT = next sequence number to be sent" (RFC 9293, Section 3.4).
     snd_nxt: u32,
+
+    /// "RCV.NXT = next sequence number expected on an incoming segment" (RFC 9293, Section 3.4).
     rcv_nxt: u32,
 }
 

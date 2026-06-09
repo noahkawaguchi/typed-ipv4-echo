@@ -16,14 +16,29 @@ use std::{fmt, io};
 
 const TCP_HEADER_MIN_LEN: u8 = 20;
 
-/// Struct for managing and replying to TCP packets. Includes the TCP header and the payload.
+/// Struct for managing and replying to TCP packets. Includes the TCP header and the payload. Field
+/// definitions below from RFC 9293, Section 3.1.
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 pub struct TcpHandler<'a> {
     src_port: u16,
     dst_port: u16,
+
+    /// "The sequence number of the first data octet in this segment (except when the SYN flag is
+    /// set). If SYN is set, the sequence number is the initial sequence number (ISN) and the first
+    /// data octet is ISN+1."
     seq_num: u32,
+
+    /// "If the ACK control bit is set, this field contains the value of the next sequence number
+    /// the sender of the segment is expecting to receive. Once a connection is established, this
+    /// is always sent."
     ack_num: u32,
+
+    /// **This field is stored in units of bytes.**
+    ///
+    /// "The number of 32-bit words in the TCP header. This indicates where the data begins. The
+    /// TCP header (even one including options) is an integer multiple of 32 bits long."
     offset_bytes: u8,
+
     flags: TcpFlags,
     payload: &'a [u8],
 }
@@ -96,7 +111,7 @@ impl<'a> TcpHandler<'a> {
                 }))
             }
 
-            // Handshake ACK (step 3) -> transition to Established, no reply needed
+            // Handshake ACK (step 3) -> transition to ESTABLISHED, no reply needed
             // Remote ack num should be the previous local ISN + 1
             (TcpFlags::Ack, 0)
                 if connections
@@ -195,8 +210,8 @@ impl<'a> TcpHandler<'a> {
             }
 
             // Something else unrecognized other than RST -> RST so the peer fails fast instead of
-            // hanging. Per RFC 9293 §3.10.7.1, any non-RST segment to a CLOSED (unknown) connection
-            // gets a RST.
+            // hanging. Per RFC 9293, Section 3.10.7.1, any non-RST segment to a CLOSED (unknown)
+            // connection gets a RST.
             _ => Ok(Some(Self {
                 src_port: self.dst_port,
                 dst_port: self.src_port,
