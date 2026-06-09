@@ -18,6 +18,7 @@ words = [
     "netcat",
     "nxt",
     "oldact",
+    "rcv",
     "rustfmt",
     "sigaction",
     "sigemptyset",

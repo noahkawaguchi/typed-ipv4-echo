@@ -13,19 +13,28 @@ pub(super) enum TcpFlags {
 }
 
 impl TcpFlags {
-    const FIN_BIT: u8 = 0x01;
-    const SYN_BIT: u8 = 0x02;
-    const RST_BIT: u8 = 0x04;
+    // Meanings below from RFC 9293, Section 3.1
+
+    /// "Acknowledgment field is significant."
     const ACK_BIT: u8 = 0x10;
+
+    /// "Reset the connection."
+    const RST_BIT: u8 = 0x04;
+
+    /// "Synchronize sequence numbers."
+    const SYN_BIT: u8 = 0x02;
+
+    /// "No more data from sender."
+    const FIN_BIT: u8 = 0x01;
 }
 
 impl TryFrom<u8> for TcpFlags {
     type Error = String;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
-        /// Mask of only the bits considered by this enum.
+        /// Mask of only the bits currently considered by this enum.
         const MASK: u8 =
-            TcpFlags::FIN_BIT | TcpFlags::SYN_BIT | TcpFlags::RST_BIT | TcpFlags::ACK_BIT;
+            TcpFlags::ACK_BIT | TcpFlags::RST_BIT | TcpFlags::SYN_BIT | TcpFlags::FIN_BIT;
 
         const SYN_ACK: u8 = TcpFlags::SynAck as u8;
         const FIN_ACK: u8 = TcpFlags::FinAck as u8;
@@ -41,11 +50,11 @@ impl TryFrom<u8> for TcpFlags {
             RST_ACK => Ok(Self::RstAck),
 
             other => Err(format!(
-                "Invalid TCP flag combination: FIN={} SYN={} RST={} ACK={}",
-                other & Self::FIN_BIT != 0,
-                other & Self::SYN_BIT != 0,
-                other & Self::RST_BIT != 0,
+                "Invalid TCP flag combination: ACK={} RST={} SYN={} FIN={}",
                 other & Self::ACK_BIT != 0,
+                other & Self::RST_BIT != 0,
+                other & Self::SYN_BIT != 0,
+                other & Self::FIN_BIT != 0,
             )),
         }
     }
