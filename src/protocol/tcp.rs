@@ -120,7 +120,7 @@ impl<'a> TcpHandler<'a> {
             }
 
             // Handshake ACK (step 3) -> transition to ESTABLISHED, no reply needed
-            // Remote ack num should be the previous local ISN + 1
+            // Remote ack num should be the previous local ISN + 1, which also becomes snd_una
             (TcpFlags::Ack, 0)
                 if connections
                     .pending_isn(&key)
@@ -128,12 +128,33 @@ impl<'a> TcpHandler<'a> {
             {
                 // Set local rcv_nxt to remote seq_num
                 connections.establish(&key, self.seq_num);
+                connections.update_snd_una(&key, self.ack_num);
                 None
             }
 
+            // ACK acknowledging data the server has not yet sent (ack_num is past snd_nxt) -> per
+            // RFC 9293, Section 3.10.7.4, drop the segment and reply with an ACK reflecting current
+            // state.
+            (TcpFlags::Ack, _)
+                if connections.is_established(&key)
+                    && connections.ack_exceeds_snd_nxt(&key, self.ack_num)
+                    && let Some(snd_nxt) = connections.get_snd_nxt(&key)
+                    && let Some(rcv_nxt) = connections.get_rcv_nxt(&key) =>
+            {
+                Some(ReplyInfo {
+                    seq_num: snd_nxt,
+                    ack_num: rcv_nxt,
+                    flags: TcpFlags::Ack,
+                    echo_payload: false,
+                })
+            }
+
             // Pure ACK (no payload) on an established connection (acknowledgment of data sent by
-            // the server) -> no reply
-            (TcpFlags::Ack, 0) if connections.is_established(&key) => None,
+            // the server) -> advance snd_una, no reply
+            (TcpFlags::Ack, 0) if connections.is_established(&key) => {
+                connections.update_snd_una(&key, self.ack_num);
+                None
+            }
 
             // In-order data packet on an established connection -> send ACK, echo payload. Use
             // snd_nxt as seq_num and rcv_nxt + bytes received as ack_num, then advance both locally
@@ -150,6 +171,7 @@ impl<'a> TcpHandler<'a> {
                 )]
                 let payload_len = self.payload.len() as u32;
 
+                connections.update_snd_una(&key, self.ack_num);
                 connections.advance_snd_nxt(&key, payload_len);
                 connections.advance_rcv_nxt(&key, payload_len);
 
@@ -170,6 +192,8 @@ impl<'a> TcpHandler<'a> {
                     && let Some(rcv_nxt) = connections.get_rcv_nxt(&key)
                     && self.seq_num != rcv_nxt =>
             {
+                connections.update_snd_una(&key, self.ack_num);
+
                 Some(ReplyInfo {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt,

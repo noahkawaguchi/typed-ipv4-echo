@@ -281,6 +281,7 @@ fn pure_ack_on_established_connection_returns_none() -> Result<(), Box<dyn Error
     let key = ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
     connections.store_isn(key, 0);
     connections.establish(&key, 4102); // rcv_nxt after having received "Hello" (4097 + 5)
+    connections.advance_snd_nxt(&key, 5); // snd_nxt after having sent the 5-byte "Hello" echo
 
     assert_eq!(
         TcpHandler::parse(&ACK_PACKET)?.create_reply(&mut connections, IP_PAIR)?,
@@ -358,6 +359,88 @@ fn consecutive_replies_use_snd_nxt_for_seq_num() -> Result<(), Box<dyn Error>> {
         reply2[28..32].try_into().map(u32::from_be_bytes),
         Ok(4104),
         "Server's ack_num should be client's seq_num 4102 + 2 bytes = 4104"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn old_ack_num_does_not_regress_snd_una() -> Result<(), Box<dyn Error>> {
+    // SND.UNA should only ever advance on a "new" ack (RFC 9293, Section 3.10.7.4). After two
+    // exchanges bring SND.UNA up to 6, a third packet with a stale ack_num=1 (now older than
+    // SND.UNA) must not move SND.UNA backward, even though the segment is otherwise processed
+    // normally (seq_num still matches RCV.NXT).
+
+    const KEY: ConnKey =
+        ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
+
+    let mut connections = TcpConnections::new();
+    connections.store_isn(KEY, 0); // SND.UNA=0, SND.NXT=1
+    connections.establish(&KEY, 4097); // RCV.NXT=4097
+
+    // First packet: "Hello" (5 bytes), ack=1 -> SND.UNA advances to 1, SND.NXT becomes 6
+    #[rustfmt::skip]
+    let first_packet = [
+        0x04, 0xd2, 0x00, 0x50,              // Ports: 1234 -> 80
+        0x00, 0x00, 0x10, 0x01,              // seq: 4097
+        0x00, 0x00, 0x00, 0x01,              // ack: 1
+        0x50, 0x10,                          // Data offset: 5, Flags: ACK
+        0xff, 0xff, 0x00, 0x00, 0x00, 0x00,  // Window, checksum, urgent
+        0x48, 0x65, 0x6c, 0x6c, 0x6f,        // "Hello"
+    ];
+
+    TcpHandler::parse(&first_packet)?
+        .create_reply(&mut connections, IP_PAIR)?
+        .ok_or("Unexpected None reply to first packet")?;
+
+    assert_eq!(connections.get_snd_una(&KEY), Some(1));
+
+    // Second packet: "Hi" (2 bytes), ack=6 -> SND.UNA advances to 6, SND.NXT becomes 8
+    #[rustfmt::skip]
+    let second_packet = [
+        0x04, 0xd2, 0x00, 0x50,              // Ports: 1234 -> 80
+        0x00, 0x00, 0x10, 0x06,              // seq: 4102
+        0x00, 0x00, 0x00, 0x06,              // ack: 6
+        0x50, 0x10,                          // Data offset: 5, Flags: ACK
+        0xff, 0xff, 0x00, 0x00, 0x00, 0x00,  // Window, checksum, urgent
+        0x48, 0x69,                          // "Hi"
+    ];
+
+    TcpHandler::parse(&second_packet)?
+        .create_reply(&mut connections, IP_PAIR)?
+        .ok_or("Unexpected None reply to second packet")?;
+
+    assert_eq!(connections.get_snd_una(&KEY), Some(6));
+
+    // Third packet: "Yo" (2 bytes), ack=1 (now stale, older than SND.UNA=6)
+    #[rustfmt::skip]
+    let third_packet = [
+        0x04, 0xd2, 0x00, 0x50,              // Ports: 1234 -> 80
+        0x00, 0x00, 0x10, 0x08,              // seq: 4104
+        0x00, 0x00, 0x00, 0x01,              // ack: 1 (stale)
+        0x50, 0x10,                          // Data offset: 5, Flags: ACK
+        0xff, 0xff, 0x00, 0x00, 0x00, 0x00,  // Window, checksum, urgent
+        0x59, 0x6f,                          // "Yo"
+    ];
+
+    let mut reply3 = [0u8; ETHERNET_MTU];
+    let tcp_len = TcpHandler::parse(&third_packet)?
+        .create_reply(&mut connections, IP_PAIR)?
+        .ok_or("Unexpected None reply to third packet")?
+        .write_into(&mut reply3[20..], IP_PAIR)?;
+
+    // The stale ack_num doesn't make the segment unacceptable (1 <= SND.NXT=8), so it's still
+    // processed normally and "Yo" is echoed
+    assert_eq!(
+        tcp_len,
+        20 + 2,
+        "Stale ack_num shouldn't prevent normal processing"
+    );
+
+    assert_eq!(
+        connections.get_snd_una(&KEY),
+        Some(6),
+        "Stale ack_num=1 must not move SND.UNA backward from 6"
     );
 
     Ok(())
@@ -489,6 +572,94 @@ fn unrecognized_packet_for_unknown_connection_gets_rst() -> Result<(), Box<dyn E
     assert_eq!(&buf[0..2], &[0x00, 0x50]); // src port: 80 (swapped)
     assert_eq!(&buf[2..4], &[0x04, 0xd2]); // dst port: 1234 (swapped)
     assert_eq!(buf[13], 0x04); // flags: RST only
+
+    Ok(())
+}
+
+#[test]
+fn ack_for_unsent_data_is_dropped_and_gets_current_state_reply() -> Result<(), Box<dyn Error>> {
+    // Per RFC 9293 Section 3.10.7.4, an ACK acknowledging data the server hasn't sent yet (ack_num
+    // past SND.NXT) must be dropped, and the reply should be a bare ACK reflecting the current
+    // SND.NXT/RCV.NXT, with no payload echoed and no state change. seq_num matches RCV.NXT, so this
+    // would otherwise be treated as valid in-order data.
+
+    #[rustfmt::skip]
+    const BAD_ACK_PACKET: [u8; 25] = [
+        0x04, 0xd2,                          // Source port: 1234
+        0x00, 0x50,                          // Dest port: 80
+        0x00, 0x00, 0x10, 0x01,              // Sequence number: 4097 (== RCV.NXT)
+        0x00, 0x00, 0x03, 0xe8,              // Ack number: 1000 (SND.NXT is only 1)
+        0x50, 0x10,                          // Data offset: 5, Flags: ACK
+        0xff, 0xff,                          // Window size
+        0x00, 0x00,                          // Checksum
+        0x00, 0x00,                          // Urgent pointer
+        0x48, 0x65, 0x6c, 0x6c, 0x6f,        // Payload: "Hello"
+    ];
+
+    let mut connections = TcpConnections::new();
+    let key = ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
+    connections.store_isn(key, 0); // SND.NXT = 1
+    connections.establish(&key, 4097); // RCV.NXT = 4097
+
+    let mut reply = [0u8; ETHERNET_MTU];
+    let tcp_len = TcpHandler::parse(&BAD_ACK_PACKET)?
+        .create_reply(&mut connections, IP_PAIR)?
+        .ok_or("Unexpected None reply")?
+        .write_into(&mut reply[20..], IP_PAIR)?;
+
+    assert_eq!(tcp_len, 20, "No payload should be echoed");
+    assert_eq!(&reply[24..28], &[0x00, 0x00, 0x00, 0x01]); // seq = SND.NXT = 1
+    assert_eq!(&reply[28..32], &[0x00, 0x00, 0x10, 0x01]); // ack = RCV.NXT = 4097
+    assert_eq!(reply[33], 0x10); // ACK only
+
+    // State must be untouched
+    assert_eq!(connections.get_snd_nxt(&key), Some(1));
+    assert_eq!(connections.get_rcv_nxt(&key), Some(4097));
+    assert_eq!(connections.get_snd_una(&key), Some(0));
+
+    Ok(())
+}
+
+#[test]
+fn wraparound_ack_for_unsent_data_is_still_rejected() -> Result<(), Box<dyn Error>> {
+    // ISNs are random (RFC 9293, Section 3.4.1) and can land near `u32::MAX`, wrapping SND.NXT to a
+    // small value. An ack_num that wraps one past SND.NXT must still be recognized as acknowledging
+    // unsent data, even though a naive numeric comparison (ack_num > snd_nxt) would say 0 >
+    // `u32::MAX` is false and let it through.
+
+    #[rustfmt::skip]
+    const WRAPPED_ACK_PACKET: [u8; 20] = [
+        0x04, 0xd2,                          // Source port: 1234
+        0x00, 0x50,                          // Dest port: 80
+        0x00, 0x00, 0x10, 0x01,              // Sequence number: 4097
+        0x00, 0x00, 0x00, 0x00,              // Ack number: 0 (wraps 1 past SND.NXT = u32::MAX)
+        0x50, 0x10,                          // Data offset: 5, Flags: ACK
+        0xff, 0xff,                          // Window size
+        0x00, 0x00,                          // Checksum
+        0x00, 0x00,                          // Urgent pointer
+    ];
+
+    let mut connections = TcpConnections::new();
+    let key = ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
+    connections.store_isn(key, u32::MAX - 1); // SND.UNA=MAX-1, SND.NXT=MAX
+    connections.establish(&key, 4097); // RCV.NXT=4097
+    connections.update_snd_una(&key, u32::MAX); // simulate handshake ack completing
+
+    let mut reply = [0u8; ETHERNET_MTU];
+    let tcp_len = TcpHandler::parse(&WRAPPED_ACK_PACKET)?
+        .create_reply(&mut connections, IP_PAIR)?
+        .ok_or("Unexpected None reply")?
+        .write_into(&mut reply[20..], IP_PAIR)?;
+
+    assert_eq!(tcp_len, 20, "no payload should be echoed");
+    assert_eq!(&reply[24..28], &[0xff, 0xff, 0xff, 0xff]); // seq = SND.NXT = u32::MAX
+    assert_eq!(&reply[28..32], &[0x00, 0x00, 0x10, 0x01]); // ack = RCV.NXT = 4097
+    assert_eq!(reply[33], 0x10); // ACK only
+
+    // State must be untouched
+    assert_eq!(connections.get_snd_nxt(&key), Some(u32::MAX));
+    assert_eq!(connections.get_rcv_nxt(&key), Some(4097));
+    assert_eq!(connections.get_snd_una(&key), Some(u32::MAX));
 
     Ok(())
 }
