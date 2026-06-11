@@ -351,4 +351,5 @@ mod tests {
 
     mod parse;
     mod reply;
+    mod write;
 }
