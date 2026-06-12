@@ -183,10 +183,10 @@ impl<'a> TcpHandler<'a> {
                 })
             }
 
-            // Out-of-order or duplicate data on an established connection -> duplicate ACK. ACK
-            // rcv_nxt so the client knows what the server expects next, but don't echo data or
-            // advance snd_nxt/rcv_nxt.
-            (TcpFlags::Ack, 1..)
+            // Out-of-order/duplicate data or out-of-order FIN-ACK on an established connection
+            // -> duplicate ACK. ACK rcv_nxt so the client knows what the server expects next, but
+            // don't echo data, start closing, or advance snd_nxt/rcv_nxt.
+            (TcpFlags::Ack | TcpFlags::FinAck, _)
                 if connections.is_established(&key)
                     && let Some(snd_nxt) = connections.get_snd_nxt(&key)
                     && let Some(rcv_nxt) = connections.get_rcv_nxt(&key)
@@ -202,12 +202,13 @@ impl<'a> TcpHandler<'a> {
                 })
             }
 
-            // FIN-ACK (connection teardown) on an established connection -> start closing to wait
-            // for client's final ACK, reply with FIN-ACK.
+            // FIN-ACK (connection teardown) on an established connection, arriving in order ->
+            // start closing to wait for client's final ACK, reply with FIN-ACK.
             (TcpFlags::FinAck, _)
                 if connections.is_established(&key)
                     && let Some(snd_nxt) = connections.get_snd_nxt(&key)
-                    && let Some(rcv_nxt) = connections.get_rcv_nxt(&key) =>
+                    && let Some(rcv_nxt) = connections.get_rcv_nxt(&key)
+                    && self.seq_num == rcv_nxt =>
             {
                 connections.start_closing(&key);
                 connections.advance_snd_nxt(&key, 1); // FIN consumes one sequence number
