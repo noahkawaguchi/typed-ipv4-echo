@@ -329,6 +329,35 @@ fn duplicate_data_packet_gets_duplicate_ack_without_echo() -> Result<(), Box<dyn
 }
 
 #[test]
+fn out_of_order_fin_ack_gets_duplicate_ack_without_closing() -> Result<(), Box<dyn Error>> {
+    // A FIN-ACK arriving before data preceding it (seq_num != rcv_nxt, e.g. an earlier data segment
+    // was lost) must not be processed yet. Doing so would signal "no more data" before the missing
+    // data has been delivered. Until the gap is filled, treat it like out-of-order data by sending
+    // a duplicate ACK reflecting the current rcv_nxt with no change to local state.
+
+    let mut connections = TcpConnections::new();
+    connections.store_isn(KEY, 0);
+    connections.establish(&KEY, 4097); // rcv_nxt = 4097
+
+    // FIN-ACK arrives at seq=4102, but rcv_nxt is still 4097 (a 5-byte gap)
+    let reply =
+        client_packet(4102, 1, TcpFlags::FinAck, &[]).create_reply(&mut connections, IP_PAIR)?;
+
+    assert_eq!(
+        reply,
+        Some(server_reply(1, 4097, TcpFlags::Ack, &[])),
+        "Out-of-order FIN should get a duplicate ACK reflecting rcv_nxt=4097, not be treated as FIN"
+    );
+
+    assert!(
+        connections.is_established(&KEY),
+        "Connection must remain established, out-of-order FIN must not start closing"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn unrecognized_packet_for_unknown_connection_gets_rst() -> Result<(), Box<dyn Error>> {
     // ACK with payload for a connection the server has no record of (e.g. after restart)
 
