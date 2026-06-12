@@ -80,3 +80,40 @@ impl fmt::Display for TcpFlags {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::assert_matches;
+
+    #[test]
+    fn round_trips_all_variants() {
+        for (flags, byte) in [
+            (TcpFlags::Syn, 0x02),
+            (TcpFlags::SynAck, 0x12),
+            (TcpFlags::Ack, 0x10),
+            (TcpFlags::FinAck, 0x11),
+            (TcpFlags::Rst, 0x04),
+            (TcpFlags::RstAck, 0x14),
+        ] {
+            assert_eq!(u8::from(flags), byte);
+            assert_eq!(TcpFlags::try_from(byte), Ok(flags));
+        }
+    }
+
+    #[test]
+    fn masks_off_irrelevant_bits() {
+        // CWR (0x80), ECE (0x40), URG (0x20), and PSH (0x08) bits should be ignored
+        assert_eq!(
+            TcpFlags::try_from(0x02 | 0x80 | 0x40 | 0x20 | 0x08),
+            Ok(TcpFlags::Syn)
+        );
+    }
+
+    #[test]
+    fn errors_on_invalid_combinations() {
+        assert_matches!(TcpFlags::try_from(0x00), Err(_), "No flags");
+        assert_matches!(TcpFlags::try_from(0x01), Err(_), "FIN alone");
+        assert_matches!(TcpFlags::try_from(0x03), Err(_), "SYN + FIN");
+    }
+}
