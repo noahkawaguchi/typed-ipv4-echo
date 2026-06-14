@@ -10,7 +10,7 @@ use crate::{
         tcp::{connections::ConnKey, flags::TcpFlags},
     },
     sys,
-    try_ops::{TryAdd, TryGet, TryGetMut},
+    try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
 };
 use std::{fmt, io};
 

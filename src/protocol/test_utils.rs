@@ -3,7 +3,7 @@
 use crate::{
     ETHERNET_MTU, Ipv4AddrPair, checksum,
     protocol::Protocol,
-    try_ops::{TryGet, TryGetMut},
+    try_ops::{TryGet as _, TryGetMut as _},
 };
 use std::net::Ipv4Addr;
 

@@ -5,7 +5,7 @@ mod shutdown_signal;
 
 use std::{
     fs::File,
-    io::{self, Read},
+    io::{self, Read as _},
 };
 
 pub fn random_u32() -> Result<u32, io::Error> {
