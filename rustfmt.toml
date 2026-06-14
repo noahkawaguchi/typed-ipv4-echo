@@ -1,8 +1,11 @@
-comment_width                  = 100
-fn_single_line                 = true
-group_imports                  = "One"
-imports_granularity            = "Crate"
-single_line_if_else_max_width  = 100
-single_line_let_else_max_width = 100
-struct_lit_width               = 100
-wrap_comments                  = true
+edition = "2024" # Explicit edition in case rustfmt is run directly
+
+chain_width          = 60      # Set back to default to override `use_small_heuristics`
+comment_width        = 100
+fn_single_line       = true
+format_strings       = true
+group_imports        = "One"
+hex_literal_case     = "Upper"
+imports_granularity  = "One"
+use_small_heuristics = "Max"
+wrap_comments        = true
