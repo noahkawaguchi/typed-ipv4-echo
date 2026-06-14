@@ -1,4 +1,4 @@
-use crate::{ETHERNET_MTU, Ipv4AddrPair, checksum, protocol::Protocol, try_ops::TryAdd};
+use crate::{ETHERNET_MTU, Ipv4AddrPair, checksum, protocol::Protocol, try_ops::TryAdd as _};
 use std::{fmt, net::Ipv4Addr};
 
 /// The minimum number of bytes for an IPv4 header (no options) as a `u8`.

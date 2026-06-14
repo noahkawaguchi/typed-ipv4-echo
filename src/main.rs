@@ -10,12 +10,12 @@ mod try_ops;
 use crate::{
     ipv4_header::Ipv4Header,
     protocol::{ProtocolHandler, TcpConnections},
-    try_ops::TryGet,
+    try_ops::TryGet as _,
 };
 use std::{
     env,
     error::Error,
-    io::{self, Read, Write},
+    io::{self, Read as _, Write as _},
     net::Ipv4Addr,
 };
 

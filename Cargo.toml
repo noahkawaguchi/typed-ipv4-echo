@@ -41,9 +41,10 @@ shadow_reuse     = "forbid"
 shadow_same      = "forbid"
 shadow_unrelated = "forbid"
 
-# Redundant constructs
+# Superfluous naming
 redundant_test_prefix    = "deny"
 unnecessary_self_imports = "warn"
+unused_trait_names       = "warn"
 
 [lints.rust]
 unsafe_code = "deny"

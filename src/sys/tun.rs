@@ -2,7 +2,7 @@ use libc::{IFF_NO_PI, IFF_TUN, IFNAMSIZ, TUNSETIFF};
 use std::{
     fs::{File, OpenOptions},
     io,
-    os::unix::io::AsRawFd,
+    os::unix::io::AsRawFd as _,
     path::Path,
 };
 
