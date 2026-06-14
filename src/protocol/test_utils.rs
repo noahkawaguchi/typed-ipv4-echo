@@ -1,11 +1,13 @@
 //! Test utilities shared between multiple protocols.
 
-use crate::{
-    ETHERNET_MTU, Ipv4AddrPair, checksum,
-    protocol::Protocol,
-    try_ops::{TryGet as _, TryGetMut as _},
+use {
+    crate::{
+        ETHERNET_MTU, Ipv4AddrPair, checksum,
+        protocol::Protocol,
+        try_ops::{TryGet as _, TryGetMut as _},
+    },
+    std::net::Ipv4Addr,
 };
-use std::net::Ipv4Addr;
 
 /// Test source IP address: 10.0.0.2
 pub const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);

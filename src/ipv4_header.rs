@@ -1,5 +1,7 @@
-use crate::{ETHERNET_MTU, Ipv4AddrPair, checksum, protocol::Protocol, try_ops::TryAdd as _};
-use std::{fmt, net::Ipv4Addr};
+use {
+    crate::{ETHERNET_MTU, Ipv4AddrPair, checksum, protocol::Protocol, try_ops::TryAdd as _},
+    std::{fmt, net::Ipv4Addr},
+};
 
 /// The minimum number of bytes for an IPv4 header (no options) as a `u8`.
 const IPV4_HDR_MIN_LEN_U8: u8 = 20;
@@ -94,16 +96,15 @@ impl fmt::Display for Ipv4Header {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::assert_matches;
+    use {super::*, std::assert_matches};
 
     #[test]
     fn correctly_parses_valid_packet() -> Result<(), String> {
         #[rustfmt::skip]
         const DATA: [u8; 20] = [
-            0x45, 0x00, 0x00, 0x3c,  // Version 4, IHL 5, TOS 0, Total Length 60
-            0x1c, 0x46, 0x40, 0x00,  // ID, Flags, Fragment Offset
-            0x40, 0x06, 0xb1, 0xe6,  // TTL 64, Protocol 6 (TCP), Checksum
+            0x45, 0x00, 0x00, 0x3C,  // Version 4, IHL 5, TOS 0, Total Length 60
+            0x1C, 0x46, 0x40, 0x00,  // ID, Flags, Fragment Offset
+            0x40, 0x06, 0xB1, 0xE6,  // TTL 64, Protocol 6 (TCP), Checksum
             192, 168, 1, 100,        // Source IP: 192.168.1.100
             172, 16, 10, 12,         // Dest IP: 172.16.10.12
         ];
@@ -131,7 +132,7 @@ mod tests {
         const DATA: [u8; 24] = [
             0x60, 0x00, 0x00, 0x00,  // Version 6 (IPv6), not 4
             0x00, 0x14, 0x06, 0x40,
-            0x20, 0x01, 0x0d, 0xb8,
+            0x20, 0x01, 0x0D, 0xB8,
             0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x01,
@@ -144,9 +145,9 @@ mod tests {
     fn creates_valid_ipv4_header_for_reply() -> Result<(), String> {
         #[rustfmt::skip]
         const REQUEST: [u8; 20] = [
-            0x45, 0x00, 0x00, 0x3c,  // Version 4, IHL 5, TOS 0, Total Length 60
-            0x1c, 0x46, 0x40, 0x00,  // ID, Flags, Fragment Offset
-            0x40, 0x11, 0xb1, 0xe6,  // TTL 64, Protocol 17 (UDP), Checksum
+            0x45, 0x00, 0x00, 0x3C,  // Version 4, IHL 5, TOS 0, Total Length 60
+            0x1C, 0x46, 0x40, 0x00,  // ID, Flags, Fragment Offset
+            0x40, 0x11, 0xB1, 0xE6,  // TTL 64, Protocol 17 (UDP), Checksum
             192, 168, 1, 100,        // Source IP: 192.168.1.100
             172, 16, 10, 12,         // Dest IP: 172.16.10.12
         ];

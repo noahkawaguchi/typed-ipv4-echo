@@ -1,9 +1,11 @@
-use crate::{
-    ETHERNET_MTU, Ipv4AddrPair, checksum,
-    protocol::{Protocol, payload_to_string},
-    try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
+use {
+    crate::{
+        ETHERNET_MTU, Ipv4AddrPair, checksum,
+        protocol::{Protocol, payload_to_string},
+        try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
+    },
+    std::fmt,
 };
-use std::fmt;
 
 const UDP_HEADER_LEN: u16 = 8;
 
@@ -106,20 +108,22 @@ impl fmt::Display for UdpHandler<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::protocol::test_utils::{IP_PAIR, tcp_udp_test_checksum};
-    use std::assert_matches;
+    use {
+        super::*,
+        crate::protocol::test_utils::{IP_PAIR, tcp_udp_test_checksum},
+        std::assert_matches,
+    };
 
     #[test]
     fn correctly_parses_valid_packet() -> Result<(), String> {
         #[rustfmt::skip]
         const DATA: [u8; 16] = [
-            0x04, 0xd2,              // Source port: 1234
+            0x04, 0xD2,              // Source port: 1234
             0x00, 0x35,              // Dest port: 53 (DNS)
             0x00, 0x10,              // Length: 16 (8 byte header + 8 byte payload)
             0x00, 0x00,              // Checksum
-            0x48, 0x65, 0x6c, 0x6c,  // Payload: "Hell"
-            0x6f, 0x21, 0x21, 0x21,  // Payload: "o!!!"
+            0x48, 0x65, 0x6C, 0x6C,  // Payload: "Hell"
+            0x6F, 0x21, 0x21, 0x21,  // Payload: "o!!!"
         ];
 
         let handler = UdpHandler::parse(&DATA)?;
@@ -133,7 +137,7 @@ mod tests {
 
     #[test]
     fn parsing_fails_when_too_short() {
-        const DATA: [u8; 3] = [0x04, 0xd2, 0x00]; // Only 3 bytes
+        const DATA: [u8; 3] = [0x04, 0xD2, 0x00]; // Only 3 bytes
         assert_matches!(UdpHandler::parse(&DATA), Err(e) if e.contains("Too short"));
     }
 
@@ -141,7 +145,7 @@ mod tests {
     fn parsing_handles_empty_payload() -> Result<(), String> {
         #[rustfmt::skip]
         const DATA: [u8; 8] = [
-            0x1f, 0x90,              // Source port: 8080
+            0x1F, 0x90,              // Source port: 8080
             0x00, 0x50,              // Dest port: 80
             0x00, 0x08,              // Length: 8 (header only, no payload)
             0x00, 0x00,              // Checksum
@@ -160,9 +164,9 @@ mod tests {
     fn extracts_ports_correctly() -> Result<(), String> {
         #[rustfmt::skip]
         const DATA: [u8; 12] = [
-            0xff, 0xff,              // Source port: 65535 (max)
+            0xFF, 0xFF,              // Source port: 65535 (max)
             0x00, 0x01,              // Dest port: 1 (min non-zero)
-            0x00, 0x0c,              // Length: 12
+            0x00, 0x0C,              // Length: 12
             0x00, 0x00,              // Checksum
             0x74, 0x65, 0x73, 0x74,  // Payload: "test"
         ];
@@ -179,11 +183,11 @@ mod tests {
     fn creates_valid_echo_reply() -> Result<(), String> {
         #[rustfmt::skip]
         const REQUEST: [u8; 16] = [
-            0x04, 0xd2,              // Source port: 1234
+            0x04, 0xD2,              // Source port: 1234
             0x00, 0x35,              // Dest port: 53
             0x00, 0x10,              // Length: 16
             0x00, 0x00,              // Checksum
-            0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x21, 0x21, 0x21,  // Payload: "Hello!!!"
+            0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x21, 0x21, 0x21,  // Payload: "Hello!!!"
         ];
 
         let handler = UdpHandler::parse(&REQUEST)?;
@@ -195,7 +199,7 @@ mod tests {
 
         // Verify UDP header at offset 20
         assert_eq!(&reply[20..22], &[0x00, 0x35]); // Source port: 53 (swapped)
-        assert_eq!(&reply[22..24], &[0x04, 0xd2]); // Dest port: 1234 (swapped)
+        assert_eq!(&reply[22..24], &[0x04, 0xD2]); // Dest port: 1234 (swapped)
         assert_eq!(&reply[24..26], &[0x00, 0x10]); // Length: 16
 
         // Verify payload echoed
@@ -205,10 +209,7 @@ mod tests {
         assert_eq!(udp_len, 8 + 8);
 
         // Verify checksum
-        assert_eq!(
-            tcp_udp_test_checksum(&reply, Protocol::Udp, udp_len, IP_PAIR)?,
-            0x0000
-        );
+        assert_eq!(tcp_udp_test_checksum(&reply, Protocol::Udp, udp_len, IP_PAIR)?, 0x0000);
 
         Ok(())
     }

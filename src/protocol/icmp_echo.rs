@@ -1,9 +1,11 @@
-use crate::{
-    checksum,
-    protocol::payload_to_string,
-    try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
+use {
+    crate::{
+        checksum,
+        protocol::payload_to_string,
+        try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
+    },
+    std::fmt,
 };
-use std::fmt;
 
 const ICMP_HEADER_LEN: u16 = 8;
 
@@ -35,9 +37,7 @@ impl<'a> IcmpEchoHandler<'a> {
 
         // ICMP Echo Request (ping): type=8, code=0
         if icmp_type != Self::ICMP_TYPE_ECHO_REQUEST || icmp_code != Self::ICMP_CODE_ECHO {
-            return Err(format!(
-                "Not an Echo Request: got type={icmp_type}, code={icmp_code}"
-            ));
+            return Err(format!("Not an Echo Request: got type={icmp_type}, code={icmp_code}"));
         }
 
         Ok(Self {
@@ -121,16 +121,14 @@ impl fmt::Display for IcmpEchoHandler<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::ETHERNET_MTU;
-    use std::assert_matches;
+    use {super::*, crate::ETHERNET_MTU, std::assert_matches};
 
     #[test]
     fn correctly_parses_valid_request() -> Result<(), String> {
         #[rustfmt::skip]
         const DATA: [u8; 11] = [
             8, 0,              // Type 8 (Echo Request), Code 0
-            0x3a, 0x4b,        // Checksum
+            0x3A, 0x4B,        // Checksum
             0x12, 0x34,        // Identifier: 0x1234
             0x56, 0x78,        // Sequence: 0x5678
             0x41, 0x42, 0x43,  // Payload: "ABC"
@@ -147,7 +145,7 @@ mod tests {
 
     #[test]
     fn parsing_fails_when_too_short() {
-        const DATA: [u8; 5] = [8, 0, 0x3a, 0x4b, 0x12]; // Only 5 bytes
+        const DATA: [u8; 5] = [8, 0, 0x3A, 0x4B, 0x12]; // Only 5 bytes
         assert_matches!(IcmpEchoHandler::parse(&DATA), Err(e) if e.contains("Too short"));
     }
 
@@ -156,7 +154,7 @@ mod tests {
         #[rustfmt::skip]
         const DATA: [u8; 8] = [
             0, 0,              // Type 0 (Echo Reply), Code 0
-            0x3a, 0x4b,        // Checksum
+            0x3A, 0x4B,        // Checksum
             0x12, 0x34,        // Identifier
             0x56, 0x78,        // Sequence
         ];
@@ -169,7 +167,7 @@ mod tests {
         #[rustfmt::skip]
         const DATA: [u8; 8] = [
             8, 1,              // Type 8 (Echo Request), Code 1 (invalid)
-            0x3a, 0x4b,        // Checksum
+            0x3A, 0x4B,        // Checksum
             0x12, 0x34,        // Identifier
             0x56, 0x78,        // Sequence
         ];
@@ -182,7 +180,7 @@ mod tests {
         #[rustfmt::skip]
         const DATA: [u8; 8] = [
             8, 0,              // Type 8 (Echo Request), Code 0
-            0x3a, 0x4b,        // Checksum
+            0x3A, 0x4B,        // Checksum
             0x00, 0x00,        // Identifier: 0
             0x00, 0x01,        // Sequence: 1
         ];
@@ -201,10 +199,10 @@ mod tests {
         #[rustfmt::skip]
         const REQUEST: [u8; 13] = [
             8, 0,                          // Type 8 (Echo Request), Code 0
-            0x3a, 0x4b,                    // Checksum
+            0x3A, 0x4B,                    // Checksum
             0x12, 0x34,                    // Identifier: 0x1234
             0x56, 0x78,                    // Sequence: 0x5678
-            0x48, 0x65, 0x6c, 0x6c, 0x6f,  // Payload: "Hello"
+            0x48, 0x65, 0x6C, 0x6C, 0x6F,  // Payload: "Hello"
         ];
 
         let handler = IcmpEchoHandler::parse(&REQUEST)?;
