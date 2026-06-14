@@ -7,11 +7,13 @@ mod udp;
 #[cfg(test)]
 mod test_utils;
 
-use crate::{
-    Ipv4AddrPair,
-    protocol::{icmp_echo::IcmpEchoHandler, tcp::TcpHandler, udp::UdpHandler},
+use {
+    crate::{
+        Ipv4AddrPair,
+        protocol::{icmp_echo::IcmpEchoHandler, tcp::TcpHandler, udp::UdpHandler},
+    },
+    std::{fmt, io},
 };
-use std::{fmt, io};
 
 const PROTOCOL_ICMP: u8 = 1;
 const PROTOCOL_TCP: u8 = 6;
@@ -21,15 +23,9 @@ const PROTOCOL_UDP: u8 = 17;
 /// content. Escapes control and non-printable characters.
 fn payload_to_string(payload: &[u8]) -> String {
     match str::from_utf8(payload) {
-        Err(_) => format!(
-            "{}-byte non-UTF-8 payload: {}",
-            payload.len(),
-            payload.escape_ascii()
-        ),
-
         Ok("") => String::from("<no payload>"),
-
         Ok(s) => format!("{}-byte payload: {}", payload.len(), s.escape_debug()),
+        Err(_) => format!("{}-byte non-UTF-8 payload: {}", payload.len(), payload.escape_ascii()),
     }
 }
 
@@ -55,9 +51,9 @@ impl<'a> ProtocolHandler<'a> {
             Protocol::Icmp => IcmpEchoHandler::parse(data).map(Self::Icmp),
             Protocol::Tcp => TcpHandler::parse(data).map(|h| Self::Tcp(h, ip_pair)),
             Protocol::Udp => UdpHandler::parse(data).map(|h| Self::Udp(h, ip_pair)),
-            Protocol::Other(other) => Err(format!(
-                "Protocol {other} not implemented, only ICMP Echo, TCP, and UDP"
-            )),
+            Protocol::Other(other) => {
+                Err(format!("Protocol {other} not implemented, only ICMP Echo, TCP, and UDP"))
+            }
         }
     }
 

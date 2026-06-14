@@ -1,6 +1,8 @@
-use super::*;
-use crate::protocol::test_utils::{DST_IP, IP_PAIR, SRC_IP};
-use std::error::Error;
+use {
+    super::*,
+    crate::protocol::test_utils::{DST_IP, IP_PAIR, SRC_IP},
+    std::error::Error,
+};
 
 /// Connection key shared by tests in this module.
 const KEY: ConnKey =
@@ -54,10 +56,7 @@ fn reply_creates_valid_syn_ack() -> Result<(), Box<dyn Error>> {
         .pending_isn(&KEY)
         .ok_or("ISN not stored in connection table")?;
 
-    assert_eq!(
-        reply,
-        Some(server_reply(stored_isn, 4097, TcpFlags::SynAck, &[]))
-    );
+    assert_eq!(reply, Some(server_reply(stored_isn, 4097, TcpFlags::SynAck, &[])));
 
     Ok(())
 }
@@ -140,10 +139,7 @@ fn final_ack_after_fin_ack_removes_connection_and_returns_none() -> Result<(), B
         None
     );
 
-    assert!(
-        !connections.is_closing(&KEY),
-        "Connection should be removed after final ACK"
-    );
+    assert!(!connections.is_closing(&KEY), "Connection should be removed after final ACK");
 
     Ok(())
 }
@@ -164,10 +160,7 @@ fn pure_ack_on_established_connection_returns_none() -> Result<(), Box<dyn Error
         None
     );
 
-    assert!(
-        connections.is_established(&KEY),
-        "Connection should remain open after pure ACK"
-    );
+    assert!(connections.is_established(&KEY), "Connection should remain open after pure ACK");
 
     Ok(())
 }
@@ -278,10 +271,7 @@ fn rst_packet_cleans_up_connection_and_returns_none() -> Result<(), Box<dyn Erro
         None
     );
 
-    assert!(
-        !connections.is_established(&KEY),
-        "Connection should be removed after RST"
-    );
+    assert!(!connections.is_established(&KEY), "Connection should be removed after RST");
 
     Ok(())
 }
@@ -346,12 +336,13 @@ fn out_of_order_fin_ack_gets_duplicate_ack_without_closing() -> Result<(), Box<d
     assert_eq!(
         reply,
         Some(server_reply(1, 4097, TcpFlags::Ack, &[])),
-        "Out-of-order FIN should get a duplicate ACK reflecting rcv_nxt=4097, not be treated as FIN"
+        "Out-of-order FIN-ACK should get a duplicate ACK reflecting rcv_nxt=4097, not a FIN-ACK \
+         in response"
     );
 
     assert!(
         connections.is_established(&KEY),
-        "Connection must remain established, out-of-order FIN must not start closing"
+        "Connection must remain established, out-of-order FIN-ACK must not start closing"
     );
 
     Ok(())
@@ -412,10 +403,7 @@ fn wraparound_ack_for_unsent_data_is_still_rejected() -> Result<(), Box<dyn Erro
     let reply =
         client_packet(4097, 0, TcpFlags::Ack, &[]).create_reply(&mut connections, IP_PAIR)?;
 
-    assert_eq!(
-        reply,
-        Some(server_reply(u32::MAX, 4097, TcpFlags::Ack, &[]))
-    );
+    assert_eq!(reply, Some(server_reply(u32::MAX, 4097, TcpFlags::Ack, &[])));
 
     // State must be untouched
     assert_eq!(connections.get_snd_nxt(&KEY), Some(u32::MAX));

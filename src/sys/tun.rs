@@ -1,9 +1,11 @@
-use libc::{IFF_NO_PI, IFF_TUN, IFNAMSIZ, TUNSETIFF};
-use std::{
-    fs::{File, OpenOptions},
-    io,
-    os::unix::io::AsRawFd as _,
-    path::Path,
+use {
+    libc::{IFF_NO_PI, IFF_TUN, IFNAMSIZ, TUNSETIFF},
+    std::{
+        fs::{File, OpenOptions},
+        io,
+        os::unix::io::AsRawFd as _,
+        path::Path,
+    },
 };
 
 /// The character device (clone device) that serves as the entrypoint for TUN virtual network
@@ -18,10 +20,7 @@ const SYSFS_NET_DEVICES: &str = "/sys/class/net";
 ///
 /// `IFF_TUN`   - TUN device (no Ethernet headers) rather than TAP
 /// `IFF_NO_PI` - Do not prepend packet metadata (get IP packet only)
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "0x1 | 0x1000 fits in a short"
-)]
+#[expect(clippy::cast_possible_truncation, reason = "0x1 | 0x1000 fits in a short")]
 const IFRU_FLAGS: libc::c_short = (IFF_TUN | IFF_NO_PI) as libc::c_short;
 
 /// Attaches to the TUN device with name `device_name` as an opened `File`.
@@ -85,8 +84,10 @@ pub fn attach(device_name: &str) -> io::Result<File> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::{assert_matches, env};
+    use {
+        super::*,
+        std::{assert_matches, env},
+    };
 
     #[test]
     fn errors_for_nonexistent_tun() {
@@ -105,10 +106,7 @@ mod tests {
 
     #[test]
     #[cfg_attr(
-        not(all(
-            target_os = "linux",
-            any(target_arch = "aarch64", target_arch = "x86_64")
-        )),
+        not(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "x86_64"))),
         ignore = "only checking specific known architectures on Linux"
     )]
     fn c_char_signedness_sanity_check() {

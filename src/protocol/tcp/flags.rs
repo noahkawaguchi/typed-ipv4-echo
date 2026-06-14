@@ -83,8 +83,7 @@ impl fmt::Display for TcpFlags {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::assert_matches;
+    use {super::*, std::assert_matches};
 
     #[test]
     fn round_trips_all_variants() {
@@ -104,10 +103,7 @@ mod tests {
     #[test]
     fn masks_off_irrelevant_bits() {
         // CWR (0x80), ECE (0x40), URG (0x20), and PSH (0x08) bits should be ignored
-        assert_eq!(
-            TcpFlags::try_from(0x02 | 0x80 | 0x40 | 0x20 | 0x08),
-            Ok(TcpFlags::Syn)
-        );
+        assert_eq!(TcpFlags::try_from(0x02 | 0x80 | 0x40 | 0x20 | 0x08), Ok(TcpFlags::Syn));
     }
 
     #[test]

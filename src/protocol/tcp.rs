@@ -3,16 +3,18 @@ pub use connections::TcpConnections;
 mod connections;
 mod flags;
 
-use crate::{
-    ETHERNET_MTU, Ipv4AddrPair, checksum,
-    protocol::{
-        Protocol, payload_to_string,
-        tcp::{connections::ConnKey, flags::TcpFlags},
+use {
+    crate::{
+        ETHERNET_MTU, Ipv4AddrPair, checksum,
+        protocol::{
+            Protocol, payload_to_string,
+            tcp::{connections::ConnKey, flags::TcpFlags},
+        },
+        sys,
+        try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
-    sys,
-    try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
+    std::{fmt, io},
 };
-use std::{fmt, io};
 
 const TCP_HEADER_MIN_LEN: u8 = 20;
 
@@ -347,8 +349,7 @@ impl fmt::Display for TcpHandler<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::assert_matches;
+    use {super::*, std::assert_matches};
 
     mod parse;
     mod reply;

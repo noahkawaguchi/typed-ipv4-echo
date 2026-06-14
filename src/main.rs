@@ -7,16 +7,18 @@ mod protocol;
 mod sys;
 mod try_ops;
 
-use crate::{
-    ipv4_header::Ipv4Header,
-    protocol::{ProtocolHandler, TcpConnections},
-    try_ops::TryGet as _,
-};
-use std::{
-    env,
-    error::Error,
-    io::{self, Read as _, Write as _},
-    net::Ipv4Addr,
+use {
+    crate::{
+        ipv4_header::Ipv4Header,
+        protocol::{ProtocolHandler, TcpConnections},
+        try_ops::TryGet as _,
+    },
+    std::{
+        env,
+        error::Error,
+        io::{self, Read as _, Write as _},
+        net::Ipv4Addr,
+    },
 };
 
 /// The Maximum Transmission Unit of standard Ethernet (frames up to 1500 bytes of IP packet data).

@@ -38,10 +38,7 @@ impl<T> TryGet for [T] {
         let n = self.len();
 
         self.get(index.clone()).ok_or_else(|| {
-            format!(
-                "Index {index:?} out of range on `[{}]` of length {n}",
-                type_name::<T>()
-            )
+            format!("Index {index:?} out of range on `[{}]` of length {n}", type_name::<T>())
         })
     }
 }
@@ -62,18 +59,14 @@ impl<T> TryGetMut for [T] {
         let n = self.len();
 
         self.get_mut(index.clone()).ok_or_else(|| {
-            format!(
-                "Index {index:?} out of range on `[{}]` of length {n}",
-                type_name::<T>()
-            )
+            format!("Index {index:?} out of range on `[{}]` of length {n}", type_name::<T>())
         })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::assert_matches;
+    use {super::*, std::assert_matches};
 
     #[test]
     fn try_add_errors_for_overflow() { assert_matches!(u16::MAX.try_add(1), Err(_)) }

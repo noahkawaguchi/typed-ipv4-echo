@@ -35,10 +35,7 @@ pub fn calculate(data: &[u8]) -> u16 {
     // folding once results in 0x1_FFFE and folding twice results in 0xFFFF, fitting exactly into a
     // `u16`. `u32::MAX` exactly will never occur due to the overflow check during the iteration
     // above, but the property still holds because other `u32` values are strictly less.
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "Truncation desired after folding"
-    )]
+    #[expect(clippy::cast_possible_truncation, reason = "Truncation desired after folding")]
     !(one_carry_fold(one_carry_fold(sum)) as u16)
 }
 
