@@ -21,6 +21,22 @@ impl Ipv4Header {
     /// The length in bytes of an IPv4 header for a reply packet (no options).
     pub const REPLY_HEADER_LEN: usize = IPV4_HDR_MIN_LEN_USIZE;
 
+    /// Creates an IPv4 header with the given `protocol` and `ip_pair`. Total length is the length
+    /// of the IPv4 header + `proto_len`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if adding `proto_len` to the IPv4 header length overflows `u16`.
+    pub fn try_new(
+        protocol: Protocol,
+        ip_pair: Ipv4AddrPair,
+        proto_len: u16,
+    ) -> Result<Self, String> {
+        u16::from(IPV4_HDR_MIN_LEN_U8)
+            .try_add(proto_len)
+            .map(|total_len| Self { total_len, protocol, ip_pair })
+    }
+
     /// Parses `data` as an IPv4 packet, returning the header fields and a slice starting at the
     /// beginning of the payload.
     pub fn parse(data: &[u8]) -> Result<(Self, &[u8]), String> {
@@ -49,16 +65,6 @@ impl Ipv4Header {
             data.get(ihl_bytes..)
                 .ok_or("IPv4 data shorter than its IHL")?,
         ))
-    }
-
-    /// Creates an IPv4 header for replying to `self`. Total length is the length of the IP header +
-    /// `proto_len`. Source and destination addresses are swapped from the original packet.
-    pub fn create_reply(&self, proto_len: u16) -> Result<Self, String> {
-        Ok(Self {
-            total_len: u16::from(IPV4_HDR_MIN_LEN_U8).try_add(proto_len)?,
-            protocol: self.protocol,
-            ip_pair: self.ip_pair.swapped(),
-        })
     }
 
     /// Writes an IPv4 header into `buf`, copying the header data from `self`.
@@ -155,7 +161,8 @@ mod tests {
         let (header, _) = Ipv4Header::parse(&REQUEST)?;
         let mut reply = [0u8; ETHERNET_MTU];
         let proto_len = 48 - 20; // Total length - IPv4 reply header length
-        let reply_header = header.create_reply(proto_len)?;
+        let reply_header =
+            Ipv4Header::try_new(header.protocol, header.ip_pair.swapped(), proto_len)?;
         reply_header.write_into(&mut reply);
         assert_eq!(reply_header.total_len, 48);
 
