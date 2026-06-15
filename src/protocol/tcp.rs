@@ -212,7 +212,7 @@ impl<'a> TcpHandler<'a> {
                     && let Some(rcv_nxt) = connections.get_rcv_nxt(&key)
                     && self.seq_num == rcv_nxt =>
             {
-                connections.start_closing(&key);
+                connections.start_last_ack(&key);
                 connections.advance_snd_nxt(&key, 1); // FIN consumes one sequence number
 
                 Some(ReplyInfo {
@@ -223,8 +223,73 @@ impl<'a> TcpHandler<'a> {
                 })
             }
 
-            // Final ACK completing teardown -> remove connection, no reply
-            (TcpFlags::Ack, 0) if connections.is_closing(&key) => {
+            // Final ACK completing passive close (LAST-ACK) -> remove connection, no reply
+            (TcpFlags::Ack, 0) if connections.is_last_ack(&key) => {
+                connections.remove(&key);
+                None
+            }
+
+            // FIN-WAIT-1, our FIN has been acknowledged (and nothing else) -> FIN-WAIT-2, no reply
+            (TcpFlags::Ack, 0)
+                if connections.is_fin_wait_1(&key)
+                    && let Some(snd_nxt) = connections.get_snd_nxt(&key)
+                    && self.ack_num == snd_nxt =>
+            {
+                connections.update_snd_una(&key, self.ack_num);
+                connections.start_fin_wait_2(&key);
+                None
+            }
+
+            // FIN-WAIT-1, the remote peer's FIN arrives before ours is acknowledged (simultaneous
+            // close) -> ACK it. If it also acknowledges our FIN, the connection is fully closed
+            // (skipping FIN-WAIT-2/TIME-WAIT), otherwise move to CLOSING to await that ACK.
+            (TcpFlags::FinAck, 0)
+                if connections.is_fin_wait_1(&key)
+                    && let Some(snd_nxt) = connections.get_snd_nxt(&key)
+                    && let Some(rcv_nxt) = connections.get_rcv_nxt(&key)
+                    && self.seq_num == rcv_nxt =>
+            {
+                connections.update_snd_una(&key, self.ack_num);
+
+                if self.ack_num == snd_nxt {
+                    connections.remove(&key);
+                } else {
+                    connections.start_simultaneous_closing(&key);
+                }
+
+                Some(ReplyInfo {
+                    seq_num: snd_nxt,
+                    ack_num: rcv_nxt.wrapping_add(1),
+                    flags: TcpFlags::Ack,
+                    echo_payload: false,
+                })
+            }
+
+            // FIN-WAIT-2, the remote peer's FIN arrives, in order -> ACK it and finish closing (no
+            // TIME-WAIT)
+            (TcpFlags::FinAck, 0)
+                if connections.is_fin_wait_2(&key)
+                    && let Some(snd_nxt) = connections.get_snd_nxt(&key)
+                    && let Some(rcv_nxt) = connections.get_rcv_nxt(&key)
+                    && self.seq_num == rcv_nxt =>
+            {
+                connections.remove(&key);
+
+                Some(ReplyInfo {
+                    seq_num: snd_nxt,
+                    ack_num: rcv_nxt.wrapping_add(1),
+                    flags: TcpFlags::Ack,
+                    echo_payload: false,
+                })
+            }
+
+            // CLOSING (simultaneous close), the remote peer's ACK of our FIN arrives -> fully
+            // closed, no reply
+            (TcpFlags::Ack, 0)
+                if connections.is_simultaneous_closing(&key)
+                    && let Some(snd_nxt) = connections.get_snd_nxt(&key)
+                    && self.ack_num == snd_nxt =>
+            {
                 connections.remove(&key);
                 None
             }

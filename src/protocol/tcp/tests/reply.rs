@@ -117,8 +117,8 @@ fn reply_creates_valid_fin_ack() -> Result<(), Box<dyn Error>> {
 
     assert_eq!(reply, Some(server_reply(1, 4098, TcpFlags::FinAck, &[])));
 
-    // Connection is now in Closing state (waiting for client's final ACK), not yet removed
-    assert!(connections.is_closing(&KEY));
+    // Connection is now in LAST-ACK state (waiting for client's final ACK), not yet removed
+    assert!(connections.is_last_ack(&KEY));
 
     Ok(())
 }
@@ -131,7 +131,7 @@ fn final_ack_after_fin_ack_removes_connection_and_returns_none() -> Result<(), B
     let mut connections = TcpConnections::new();
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097);
-    connections.start_closing(&KEY);
+    connections.start_last_ack(&KEY);
 
     // ack=2 (our FIN-ACK seq + 1)
     assert_eq!(
@@ -139,7 +139,7 @@ fn final_ack_after_fin_ack_removes_connection_and_returns_none() -> Result<(), B
         None
     );
 
-    assert!(!connections.is_closing(&KEY), "Connection should be removed after final ACK");
+    assert!(!connections.is_last_ack(&KEY), "Connection should be removed after final ACK");
 
     Ok(())
 }
@@ -409,6 +409,115 @@ fn wraparound_ack_for_unsent_data_is_still_rejected() -> Result<(), Box<dyn Erro
     assert_eq!(connections.get_snd_nxt(&KEY), Some(u32::MAX));
     assert_eq!(connections.get_rcv_nxt(&KEY), Some(4097));
     assert_eq!(connections.get_snd_una(&KEY), Some(u32::MAX));
+
+    Ok(())
+}
+
+#[test]
+fn close_established_sends_fin_ack_and_transitions_to_fin_wait_1() -> Result<(), Box<dyn Error>> {
+    let mut connections = TcpConnections::new();
+    connections.store_isn(KEY, 0);
+    connections.establish(&KEY, 4097); // snd_nxt=1, rcv_nxt=4097
+
+    let mut replies = TcpHandler::close_established(&mut connections);
+    let (reply, ip_pair) = replies.pop().ok_or("Expected one reply")?;
+
+    assert!(replies.is_empty(), "Expected exactly one reply");
+    assert_eq!(reply, server_reply(1, 4097, TcpFlags::FinAck, &[]));
+
+    // IP addresses are swapped: server -> client
+    assert_eq!(ip_pair.src, DST_IP);
+    assert_eq!(ip_pair.dst, SRC_IP);
+
+    assert!(connections.is_fin_wait_1(&KEY));
+    assert_eq!(connections.get_snd_nxt(&KEY), Some(2), "FIN consumes one sequence number");
+
+    Ok(())
+}
+
+#[test]
+fn fin_wait_1_to_fin_wait_2_on_ack_of_our_fin() -> Result<(), Box<dyn Error>> {
+    let mut connections = TcpConnections::new();
+    connections.store_isn(KEY, 0);
+    connections.establish(&KEY, 4097);
+    TcpHandler::close_established(&mut connections); // -> FIN-WAIT-1, snd_nxt=2
+
+    // Client acknowledges our FIN (ack=2), no FIN of its own yet
+    let reply =
+        client_packet(4097, 2, TcpFlags::Ack, &[]).create_reply(&mut connections, IP_PAIR)?;
+
+    assert_eq!(reply, None);
+    assert!(connections.is_fin_wait_2(&KEY));
+    assert_eq!(connections.get_snd_una(&KEY), Some(2));
+
+    Ok(())
+}
+
+#[test]
+fn fin_wait_2_closes_on_fin_ack_from_peer() -> Result<(), Box<dyn Error>> {
+    let mut connections = TcpConnections::new();
+    connections.store_isn(KEY, 0);
+    connections.establish(&KEY, 4097);
+    TcpHandler::close_established(&mut connections); // -> FIN-WAIT-1, snd_nxt=2
+
+    // Our FIN is acknowledged -> FIN-WAIT-2
+    let ack_reply =
+        client_packet(4097, 2, TcpFlags::Ack, &[]).create_reply(&mut connections, IP_PAIR)?;
+
+    assert_eq!(ack_reply, None);
+    assert!(connections.is_fin_wait_2(&KEY));
+
+    // Client's FIN arrives in order
+    let fin_reply =
+        client_packet(4097, 2, TcpFlags::FinAck, &[]).create_reply(&mut connections, IP_PAIR)?;
+
+    assert_eq!(fin_reply, Some(server_reply(2, 4098, TcpFlags::Ack, &[])));
+    assert_eq!(connections.get_snd_nxt(&KEY), None, "Connection should be removed");
+
+    Ok(())
+}
+
+#[test]
+fn fin_wait_1_closes_immediately_if_peers_fin_also_acks_ours() -> Result<(), Box<dyn Error>> {
+    // Simultaneous close where the peer's FIN, arriving while we're still in FIN-WAIT-1, also
+    // acknowledges our FIN -> fully closed immediately, skipping FIN-WAIT-2/CLOSING.
+
+    let mut connections = TcpConnections::new();
+    connections.store_isn(KEY, 0);
+    connections.establish(&KEY, 4097);
+    TcpHandler::close_established(&mut connections); // -> FIN-WAIT-1, snd_nxt=2
+
+    // Client's FIN arrives in order and also acknowledges our FIN (ack=2)
+    let reply =
+        client_packet(4097, 2, TcpFlags::FinAck, &[]).create_reply(&mut connections, IP_PAIR)?;
+
+    assert_eq!(reply, Some(server_reply(2, 4098, TcpFlags::Ack, &[])));
+    assert_eq!(connections.get_snd_nxt(&KEY), None, "Connection should be removed immediately");
+
+    Ok(())
+}
+
+#[test]
+fn simultaneous_close_transitions_through_closing_to_closed() -> Result<(), Box<dyn Error>> {
+    let mut connections = TcpConnections::new();
+    connections.store_isn(KEY, 0);
+    connections.establish(&KEY, 4097);
+    TcpHandler::close_established(&mut connections); // -> FIN-WAIT-1, snd_nxt=2
+
+    // Client's FIN arrives in order, but doesn't yet acknowledge our FIN (ack=1, simultaneous
+    // close) -> CLOSING
+    let fin_reply =
+        client_packet(4097, 1, TcpFlags::FinAck, &[]).create_reply(&mut connections, IP_PAIR)?;
+
+    assert_eq!(fin_reply, Some(server_reply(2, 4098, TcpFlags::Ack, &[])));
+    assert!(connections.is_simultaneous_closing(&KEY));
+
+    // Client's ACK of our FIN finally arrives -> fully closed
+    let ack_reply =
+        client_packet(4098, 2, TcpFlags::Ack, &[]).create_reply(&mut connections, IP_PAIR)?;
+
+    assert_eq!(ack_reply, None);
+    assert_eq!(connections.get_snd_nxt(&KEY), None, "Connection should be removed");
 
     Ok(())
 }
