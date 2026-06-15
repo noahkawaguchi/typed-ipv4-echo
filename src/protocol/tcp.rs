@@ -258,6 +258,34 @@ impl<'a> TcpHandler<'a> {
         }))
     }
 
+    /// Initiates active close (RFC 9293 "CLOSE" call) for every connection currently ESTABLISHED,
+    /// transitioning each to FIN-WAIT-1 and returning a FIN-ACK reply for it along with the
+    /// `Ipv4AddrPair` for its IPv4 header.
+    pub fn close_established(connections: &mut TcpConnections) -> Vec<(Self, Ipv4AddrPair)> {
+        connections
+            .established_keys()
+            .into_iter()
+            .filter_map(|key| {
+                let seq_num = connections.get_snd_nxt(&key)?;
+                let ack_num = connections.get_rcv_nxt(&key)?;
+                connections.start_active_close(&key);
+
+                Some((
+                    Self {
+                        src_port: key.server_port,
+                        dst_port: key.client_port,
+                        seq_num,
+                        ack_num,
+                        offset_bytes: TCP_HEADER_MIN_LEN,
+                        flags: TcpFlags::FinAck,
+                        payload: &[],
+                    },
+                    Ipv4AddrPair { src: key.server_ip, dst: key.client_ip },
+                ))
+            })
+            .collect()
+    }
+
     /// Copies data from `self` to write a TCP header and payload into `buf`, returning the number
     /// of bytes written.
     pub fn write_into(&self, buf: &mut [u8], ip_pair: Ipv4AddrPair) -> Result<u16, String> {
