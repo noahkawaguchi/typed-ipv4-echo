@@ -8,7 +8,10 @@ use {
         ETHERNET_MTU, Ipv4AddrPair, checksum,
         protocol::{
             Protocol, payload_to_string,
-            tcp::{connections::ConnKey, flags::TcpFlags},
+            tcp::{
+                connections::{ConnKey, TcpState},
+                flags::TcpFlags,
+            },
         },
         sys,
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
@@ -89,7 +92,7 @@ impl<'a> TcpHandler<'a> {
         &self,
         connections: &mut TcpConnections,
         ip_pair: Ipv4AddrPair,
-    ) -> Result<Option<Self>, io::Error> {
+    ) -> io::Result<Option<Self>> {
         /// Fields to configure when determining a reply.
         struct ReplyInfo {
             seq_num: u32,
@@ -105,10 +108,10 @@ impl<'a> TcpHandler<'a> {
             server_port: self.dst_port,
         };
 
-        Ok(match (self.flags, self.payload.len()) {
+        Ok(match (connections.tcp_state_of(&key), self.flags, self.payload.len()) {
             // SYN packet (step 1 of handshake)
             // Reply with SYN-ACK (step 2), no payload echo
-            (TcpFlags::Syn, _) => {
+            (TcpState::Closed, TcpFlags::Syn, _) => {
                 // seq num = random ISN, local ack num = remote seq num + 1
                 let isn = sys::random_u32()?;
                 connections.store_isn(key, isn);
@@ -123,7 +126,7 @@ impl<'a> TcpHandler<'a> {
 
             // Handshake ACK (step 3) -> transition to ESTABLISHED, no reply needed
             // Remote ack num should be the previous local ISN + 1, which also becomes snd_una
-            (TcpFlags::Ack, 0)
+            (TcpState::SynReceived, TcpFlags::Ack, 0)
                 if connections
                     .pending_isn(&key)
                     .is_some_and(|isn| isn.wrapping_add(1) == self.ack_num) =>
@@ -137,9 +140,8 @@ impl<'a> TcpHandler<'a> {
             // ACK acknowledging data the server has not yet sent (ack_num is past snd_nxt) -> per
             // RFC 9293, Section 3.10.7.4, drop the segment and reply with an ACK reflecting current
             // state.
-            (TcpFlags::Ack, _)
-                if connections.is_established(&key)
-                    && connections.ack_exceeds_snd_nxt(&key, self.ack_num)
+            (TcpState::Established, TcpFlags::Ack, _)
+                if connections.ack_exceeds_snd_nxt(&key, self.ack_num)
                     && let Some(snd_nxt) = connections.get_snd_nxt(&key)
                     && let Some(rcv_nxt) = connections.get_rcv_nxt(&key) =>
             {
@@ -153,7 +155,7 @@ impl<'a> TcpHandler<'a> {
 
             // Pure ACK (no payload) on an established connection (acknowledgment of data sent by
             // the server) -> advance snd_una, no reply
-            (TcpFlags::Ack, 0) if connections.is_established(&key) => {
+            (TcpState::Established, TcpFlags::Ack, 0) => {
                 connections.update_snd_una(&key, self.ack_num);
                 None
             }
@@ -161,9 +163,8 @@ impl<'a> TcpHandler<'a> {
             // In-order data packet on an established connection -> send ACK, echo payload. Use
             // snd_nxt as seq_num and rcv_nxt + bytes received as ack_num, then advance both locally
             // by bytes received.
-            (TcpFlags::Ack, 1..)
-                if connections.is_established(&key)
-                    && let Some(snd_nxt) = connections.get_snd_nxt(&key)
+            (TcpState::Established, TcpFlags::Ack, 1..)
+                if let Some(snd_nxt) = connections.get_snd_nxt(&key)
                     && let Some(rcv_nxt) = connections.get_rcv_nxt(&key)
                     && self.seq_num == rcv_nxt =>
             {
@@ -188,9 +189,8 @@ impl<'a> TcpHandler<'a> {
             // Out-of-order/duplicate data or out-of-order FIN-ACK on an established connection
             // -> duplicate ACK. ACK rcv_nxt so the client knows what the server expects next, but
             // don't echo data, start closing, or advance snd_nxt/rcv_nxt.
-            (TcpFlags::Ack | TcpFlags::FinAck, _)
-                if connections.is_established(&key)
-                    && let Some(snd_nxt) = connections.get_snd_nxt(&key)
+            (TcpState::Established, TcpFlags::Ack | TcpFlags::FinAck, _)
+                if let Some(snd_nxt) = connections.get_snd_nxt(&key)
                     && let Some(rcv_nxt) = connections.get_rcv_nxt(&key)
                     && self.seq_num != rcv_nxt =>
             {
@@ -206,9 +206,8 @@ impl<'a> TcpHandler<'a> {
 
             // FIN-ACK (connection teardown) on an established connection, arriving in order ->
             // start closing to wait for client's final ACK, reply with FIN-ACK.
-            (TcpFlags::FinAck, _)
-                if connections.is_established(&key)
-                    && let Some(snd_nxt) = connections.get_snd_nxt(&key)
+            (TcpState::Established, TcpFlags::FinAck, _)
+                if let Some(snd_nxt) = connections.get_snd_nxt(&key)
                     && let Some(rcv_nxt) = connections.get_rcv_nxt(&key)
                     && self.seq_num == rcv_nxt =>
             {
@@ -223,16 +222,16 @@ impl<'a> TcpHandler<'a> {
                 })
             }
 
-            // Final ACK completing passive close (LAST-ACK) -> remove connection, no reply
-            (TcpFlags::Ack, 0) if connections.is_last_ack(&key) => {
+            // Final ACK completing passive close (LAST-ACK) or any RST (never RST a RST)
+            // -> remove connection, no reply
+            (TcpState::LastAck, TcpFlags::Ack, 0) | (_, TcpFlags::Rst | TcpFlags::RstAck, _) => {
                 connections.remove(&key);
                 None
             }
 
             // FIN-WAIT-1, our FIN has been acknowledged (and nothing else) -> FIN-WAIT-2, no reply
-            (TcpFlags::Ack, 0)
-                if connections.is_fin_wait_1(&key)
-                    && let Some(snd_nxt) = connections.get_snd_nxt(&key)
+            (TcpState::FinWait1, TcpFlags::Ack, 0)
+                if let Some(snd_nxt) = connections.get_snd_nxt(&key)
                     && self.ack_num == snd_nxt =>
             {
                 connections.update_snd_una(&key, self.ack_num);
@@ -243,9 +242,8 @@ impl<'a> TcpHandler<'a> {
             // FIN-WAIT-1, the remote peer's FIN arrives before ours is acknowledged (simultaneous
             // close) -> ACK it. If it also acknowledges our FIN, the connection is fully closed
             // (skipping FIN-WAIT-2/TIME-WAIT), otherwise move to CLOSING to await that ACK.
-            (TcpFlags::FinAck, 0)
-                if connections.is_fin_wait_1(&key)
-                    && let Some(snd_nxt) = connections.get_snd_nxt(&key)
+            (TcpState::FinWait1, TcpFlags::FinAck, 0)
+                if let Some(snd_nxt) = connections.get_snd_nxt(&key)
                     && let Some(rcv_nxt) = connections.get_rcv_nxt(&key)
                     && self.seq_num == rcv_nxt =>
             {
@@ -267,9 +265,8 @@ impl<'a> TcpHandler<'a> {
 
             // FIN-WAIT-2, the remote peer's FIN arrives, in order -> ACK it and finish closing (no
             // TIME-WAIT)
-            (TcpFlags::FinAck, 0)
-                if connections.is_fin_wait_2(&key)
-                    && let Some(snd_nxt) = connections.get_snd_nxt(&key)
+            (TcpState::FinWait2, TcpFlags::FinAck, 0)
+                if let Some(snd_nxt) = connections.get_snd_nxt(&key)
                     && let Some(rcv_nxt) = connections.get_rcv_nxt(&key)
                     && self.seq_num == rcv_nxt =>
             {
@@ -285,24 +282,17 @@ impl<'a> TcpHandler<'a> {
 
             // CLOSING (simultaneous close), the remote peer's ACK of our FIN arrives -> fully
             // closed, no reply
-            (TcpFlags::Ack, 0)
-                if connections.is_simultaneous_closing(&key)
-                    && let Some(snd_nxt) = connections.get_snd_nxt(&key)
+            (TcpState::Closing, TcpFlags::Ack, 0)
+                if let Some(snd_nxt) = connections.get_snd_nxt(&key)
                     && self.ack_num == snd_nxt =>
             {
                 connections.remove(&key);
                 None
             }
 
-            // RST -> clean up without replying (never RST a RST)
-            (TcpFlags::Rst | TcpFlags::RstAck, _) => {
-                connections.remove(&key);
-                None
-            }
-
-            // Something else unrecognized other than RST -> RST so the peer fails fast instead of
-            // hanging. Per RFC 9293, Section 3.10.7.1, any non-RST segment to a CLOSED (unknown)
-            // connection gets a RST.
+            // Something else unrecognized (other than RST caught above) -> RST so the peer fails
+            // fast instead of hanging. Per RFC 9293, Section 3.10.7.1, any non-RST segment to a
+            // CLOSED (unknown) connection gets a RST.
             _ => Some(ReplyInfo {
                 seq_num: self.ack_num,
                 // ack_num is 0 because sending bare RST with no ACK flag leaves ack_num undefined
