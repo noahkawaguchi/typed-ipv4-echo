@@ -13,16 +13,17 @@ A type-safe, userspace IPv4 echo server implementing TCP, UDP, and ICMP protocol
 
 ## Overview
 
-This project demonstrates low-level networking in Rust by implementing a userspace echo server that handles TCP handshakes, UDP datagrams, and ICMP ping requests. Rather than binding to sockets, it creates a virtual TUN network interface and manually processes raw IPv4 packets, providing insight into protocol implementation details while upholding type safety, performance, and maintainability.
+This project demonstrates low-level networking in Rust by implementing a userspace echo server that operates over TCP, UDP, and ICMP. Using a virtual TUN network interface and manually processing raw IPv4 packets, it provides insight into protocol implementation details while upholding type safety, performance, and maintainability.
 
 ## Features
 
-- **Multi-Protocol Support**: Handles ICMP Echo Request/Reply, TCP three-way handshake with data echo, and UDP echo
-- **TUN Device Integration**: Performs low-level packet I/O using `libc` and Linux TUN virtual network interfaces
+- **Minimal Dependencies**: Implements all necessary logic from scratch, depending only on `libc` to access platform C APIs
+- **Multi-Protocol Support**: Manages TCP connections, ICMP Echo Request/Reply, and UDP datagrams
+- **TUN Device Integration**: Performs low-level packet I/O using Linux TUN virtual network interfaces
 - **Type-Safe Packet Parsing**: Leverages Rust's strong type system and zero-cost abstractions to safely interpret raw bytes as protocol structures
-- **Graceful Shutdown**: Handles SIGINT and exits cleanly
+- **Graceful Shutdown**: Catches SIGINT, drains TCP connections with a timeout, and exits cleanly
 - **Comprehensive Testing**: Includes unit tests for all packet handling logic with edge case coverage
-- **Strict Linting**: Forbids `unwrap` and `expect` completely and isolates limited use of `unsafe`
+- **Strict Linting**: Forbids panicking constructs like `unwrap` and `expect` completely and isolates limited use of `unsafe`
 - **Continuous Integration**: Runs tests, linting, formatting checks, and spell checks in CI and requires all to pass before merging into main
 
 ## Architecture
@@ -56,10 +57,10 @@ The server separates protocol-agnostic IPv4 handling from protocol-specific ICMP
 
 Each variant wraps a concrete protocol handler responsible for:
 
-- Parsing the protocol-specific header and payload from raw bytes
-- Writing an appropriate reply packet
+- Parsing protocol-specific headers and payloads from raw bytes
+- Writing appropriate reply packets
 
-The design also prioritizes controlled use of the heap only when it truly improves clarity and maintainability. Error messages use `String` heap allocations for readable and safe inclusion of runtime data, but all of the core packet data is managed in two fixed-size arrays on the stack.
+The design also prioritizes controlled use of the heap only when it truly improves clarity and maintainability. Error messages use `String` and `Box` heap allocations for readable and safe inclusion of runtime data, but all of the core packet data is managed in two fixed-size arrays on the stack.
 
 ## Running the Server
 
@@ -120,6 +121,6 @@ The project includes comprehensive unit tests for:
 - Internet checksum calculation
 - IPv4 header parsing and creation
 - ICMP Echo Request/Reply handling
-- TCP handshake and data echo logic
+- TCP handshake, connection state, and data echo logic
 - UDP datagram parsing and echo responses
 - Edge cases like malformed packets, empty payloads, and boundary values
