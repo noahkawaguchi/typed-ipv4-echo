@@ -4,22 +4,11 @@ compile_error!("This crate only supports Linux because it uses Linux APIs direct
 mod checksum;
 mod ipv4_header;
 mod protocol;
+mod server;
 mod sys;
 mod try_ops;
 
-use {
-    crate::{
-        ipv4_header::Ipv4Header,
-        protocol::{ProtocolHandler, TcpConnections},
-        try_ops::TryGet as _,
-    },
-    std::{
-        env,
-        error::Error,
-        io::{self, Read as _, Write as _},
-        net::Ipv4Addr,
-    },
-};
+use std::{env, error::Error, net::Ipv4Addr, time::Duration};
 
 /// The Maximum Transmission Unit of standard Ethernet (frames up to 1500 bytes of IP packet data).
 const ETHERNET_MTU: usize = 1500;
@@ -36,9 +25,10 @@ impl Ipv4AddrPair {
 }
 
 /// Runs an echo server that uses a TUN device to read and write IPv4 packets: TCP, UDP, and ICMP.
-/// Exits gracefully upon receiving a shutdown signal.
 fn main() -> Result<(), Box<dyn Error>> {
-    fn divider() { println!("\n{}\n", "=".repeat(60)) }
+    /// The amount of time to wait for established TCP connections to finish closing after a
+    /// shutdown signal before exiting unconditionally.
+    const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(5);
 
     let shutdown = sys::ShutdownSignal::install()?;
 
@@ -47,67 +37,5 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Attached to TUN device {tun_name}");
 
     println!("Waiting for packets... (Ctrl+C to stop)");
-    divider();
-
-    let mut tcp_connections = TcpConnections::new();
-    let mut read_buf = [0u8; ETHERNET_MTU];
-    let mut write_buf = [0u8; ETHERNET_MTU];
-
-    while !shutdown.load() {
-        let n = match tun.read(&mut read_buf) {
-            // If `read()` was interrupted and returned `EINTR`, immediately continue to check the
-            // shutdown flag
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-            Err(e) => return Err(e.into()),
-            Ok(n) => n,
-        };
-
-        match Ipv4Header::parse(read_buf.try_get(..n)?) {
-            Err(e) => eprintln!("Skipping packet: {e}"),
-
-            Ok((ipv4_header, ipv4_payload)) => {
-                println!(" ==== Packet received ====");
-                println!("{ipv4_header}");
-
-                match ProtocolHandler::parse(
-                    ipv4_payload,
-                    ipv4_header.protocol,
-                    ipv4_header.ip_pair,
-                ) {
-                    Err(e) => eprintln!("Skipping packet: {e}"),
-
-                    Ok(handler) => {
-                        println!("{handler}");
-                        println!("\n ==== Packet sent ====");
-
-                        match handler.create_reply(&mut tcp_connections)? {
-                            None => println!("<no reply>"),
-
-                            Some(reply_handler) => {
-                                // Write the protocol-specific portion of the reply packet first to
-                                // have the total length for the IPv4 header
-                                let proto_len = reply_handler
-                                    .write_into(&mut write_buf[Ipv4Header::REPLY_HEADER_LEN..])?;
-
-                                let reply_ipv4_header = ipv4_header.create_reply(proto_len)?;
-                                reply_ipv4_header.write_into(&mut write_buf);
-
-                                tun.write_all(
-                                    write_buf.try_get(..reply_ipv4_header.total_len.into())?,
-                                )?;
-
-                                println!("{reply_ipv4_header}");
-                                println!("{reply_handler}");
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        divider();
-    }
-
-    println!("\nShutdown signal received, exiting");
-    Ok(())
+    server::run(&mut tun, || shutdown.load(), SHUTDOWN_GRACE_PERIOD)
 }

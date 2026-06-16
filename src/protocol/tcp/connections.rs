@@ -1,8 +1,7 @@
 use std::{collections::HashMap, net::Ipv4Addr};
 
 /// Key identifying a TCP connection.
-#[derive(PartialEq, Eq, Hash)]
-#[cfg_attr(test, derive(Clone, Copy))]
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
 pub(super) struct ConnKey {
     pub(super) client_ip: Ipv4Addr,
     pub(super) client_port: u16,
@@ -12,8 +11,9 @@ pub(super) struct ConnKey {
 
 /// The set of states of a TCP connection (non-exhaustive). Variant meanings below from RFC 9293,
 /// Section 3.3.2.
-#[derive(PartialEq, Eq)]
-enum TcpState {
+#[derive(PartialEq, Eq, Clone, Copy, Default)]
+#[cfg_attr(test, derive(Debug))]
+pub(super) enum TcpState {
     /// "SYN-RECEIVED - represents waiting for a confirming connection request acknowledgment after
     /// having both received and sent a connection request."
     SynReceived,
@@ -22,9 +22,36 @@ enum TcpState {
     /// The normal state for the data transfer phase of the connection."
     Established,
 
+    /// "FIN-WAIT-1 - represents waiting for a connection termination request from the remote TCP
+    /// peer, or an acknowledgment of the connection termination request previously sent."
+    ///
+    /// Entered when this server actively closes the connection.
+    FinWait1,
+
+    /// "FIN-WAIT-2 - represents waiting for a connection termination request from the remote TCP
+    /// peer."
+    ///
+    /// Reached from `FinWait1` once our FIN has been acknowledged.
+    FinWait2,
+
     /// "CLOSING - represents waiting for a connection termination request acknowledgment from the
     /// remote TCP peer."
+    ///
+    /// Reached via simultaneous close, when the remote peer's FIN arrives before our own FIN has
+    /// been acknowledged.
     Closing,
+
+    /// "LAST-ACK - represents waiting for an acknowledgment of the connection termination request
+    /// previously sent to the remote TCP peer (this termination request sent to the remote TCP peer
+    /// already included an acknowledgment of the termination request sent from the remote TCP
+    /// peer)."
+    ///
+    /// Reached via passive close, after acknowledging the remote peer's FIN with our own.
+    LastAck,
+
+    /// "CLOSED - represents no connection state at all."
+    #[default]
+    Closed,
 }
 
 /// The state of a connection in the table, including its TCP state and other locally stored data.
@@ -51,6 +78,12 @@ pub struct TcpConnections(HashMap<ConnKey, ConnState>);
 impl TcpConnections {
     pub fn new() -> Self { Self(HashMap::new()) }
 
+    pub fn len(&self) -> usize { self.0.len() }
+
+    pub(super) fn tcp_state_of(&self, key: &ConnKey) -> TcpState {
+        self.0.get(key).map(|s| s.tcp_state).unwrap_or_default()
+    }
+
     pub(super) fn store_isn(&mut self, key: ConnKey, isn: u32) {
         self.0.insert(
             key,
@@ -64,7 +97,7 @@ impl TcpConnections {
         );
     }
 
-    /// Returns the ISN only while the connection is still in `SynReceived` state.
+    /// Returns the ISN only while the connection is still in SYN-RECEIVED state.
     pub(super) fn pending_isn(&self, key: &ConnKey) -> Option<u32> {
         self.0
             .get(key)
@@ -79,20 +112,13 @@ impl TcpConnections {
         }
     }
 
-    pub(super) fn is_established(&self, key: &ConnKey) -> bool {
+    /// Returns the keys of all connections currently in the ESTABLISHED state.
+    pub(super) fn established_keys(&self) -> Vec<ConnKey> {
         self.0
-            .get(key)
-            .is_some_and(|s| s.tcp_state == TcpState::Established)
-    }
-
-    pub(super) fn get_snd_nxt(&self, key: &ConnKey) -> Option<u32> {
-        self.0.get(key).map(|s| s.snd_nxt)
-    }
-
-    pub(super) fn advance_snd_nxt(&mut self, key: &ConnKey, n: u32) {
-        if let Some(conn) = self.0.get_mut(key) {
-            conn.snd_nxt = conn.snd_nxt.wrapping_add(n);
-        }
+            .iter()
+            .filter(|(_, s)| s.tcp_state == TcpState::Established)
+            .map(|(&key, _)| key)
+            .collect()
     }
 
     #[cfg(test)]
@@ -120,8 +146,14 @@ impl TcpConnections {
             .is_some_and(|s| Self::seq_lt(s.snd_nxt, ack_num))
     }
 
-    pub(super) fn get_rcv_nxt(&self, key: &ConnKey) -> Option<u32> {
-        self.0.get(key).map(|s| s.rcv_nxt)
+    pub(super) fn get_snd_rcv_nxt(&self, key: &ConnKey) -> Option<(u32, u32)> {
+        self.0.get(key).map(|s| (s.snd_nxt, s.rcv_nxt))
+    }
+
+    pub(super) fn advance_snd_nxt(&mut self, key: &ConnKey, n: u32) {
+        if let Some(conn) = self.0.get_mut(key) {
+            conn.snd_nxt = conn.snd_nxt.wrapping_add(n);
+        }
     }
 
     pub(super) fn advance_rcv_nxt(&mut self, key: &ConnKey, n: u32) {
@@ -130,19 +162,52 @@ impl TcpConnections {
         }
     }
 
-    pub(super) fn start_closing(&mut self, key: &ConnKey) {
+    /// Transitions an ESTABLISHED connection to FIN-WAIT-1, initiating active close. Consumes one
+    /// sequence number in SND.NXT for the FIN about to be sent.
+    pub(super) fn start_active_close(&mut self, key: &ConnKey) {
         if let Some(conn) = self.0.get_mut(key) {
-            conn.tcp_state = TcpState::Closing;
+            conn.tcp_state = TcpState::FinWait1;
+            conn.snd_nxt = conn.snd_nxt.wrapping_add(1); // FIN consumes one sequence number
         }
     }
 
-    pub(super) fn is_closing(&self, key: &ConnKey) -> bool {
-        self.0
-            .get(key)
-            .is_some_and(|s| s.tcp_state == TcpState::Closing)
+    /// Transitions from FIN-WAIT-1 to FIN-WAIT-2 once our FIN has been acknowledged.
+    pub(super) fn start_fin_wait_2(&mut self, key: &ConnKey) {
+        if let Some(conn) = self.0.get_mut(key) {
+            conn.tcp_state = TcpState::FinWait2;
+        }
+    }
+
+    /// Transitions from FIN-WAIT-1 to CLOSING (simultaneous close). The remote peer's FIN arrived
+    /// before our own FIN was acknowledged. Consumes one sequence number in RCV.NXT for the peer's
+    /// FIN.
+    pub(super) fn start_simultaneous_closing(&mut self, key: &ConnKey) {
+        if let Some(conn) = self.0.get_mut(key) {
+            conn.tcp_state = TcpState::Closing;
+            conn.rcv_nxt = conn.rcv_nxt.wrapping_add(1);
+        }
+    }
+
+    /// Transitions an ESTABLISHED connection to LAST-ACK (passive close). The remote peer's FIN has
+    /// been acknowledged with our own FIN, awaiting their final ACK.
+    pub(super) fn start_last_ack(&mut self, key: &ConnKey) {
+        if let Some(conn) = self.0.get_mut(key) {
+            conn.tcp_state = TcpState::LastAck;
+        }
     }
 
     pub(super) fn remove(&mut self, key: &ConnKey) { self.0.remove(key); }
+
+    /// Returns whether any connection is currently mid-close (FIN-WAIT-1, FIN-WAIT-2, CLOSING, or
+    /// LAST-ACK), i.e. has sent or received a FIN but not yet completed teardown.
+    pub fn closing_in_progress(&self) -> bool {
+        self.0.values().any(|s| {
+            matches!(
+                s.tcp_state,
+                TcpState::FinWait1 | TcpState::FinWait2 | TcpState::Closing | TcpState::LastAck
+            )
+        })
+    }
 
     /// Returns whether `a` precedes `b` in TCP sequence-number space, accounting for 32-bit
     /// wraparound (RFC 9293, Section 3.4).

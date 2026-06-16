@@ -78,6 +78,15 @@ impl<'a> ProtocolHandler<'a> {
         }
     }
 
+    /// Initiates active close for every established TCP connection, returning a `Self` ready to
+    /// write as a FIN-ACK reply for each, along with the `Ipv4AddrPair` for its IPv4 header.
+    pub fn close_established(tcp_connections: &mut TcpConnections) -> Vec<(Self, Ipv4AddrPair)> {
+        TcpHandler::close_established(tcp_connections)
+            .into_iter()
+            .map(|(handler, ip_pair)| (Self::Tcp(handler, ip_pair), ip_pair))
+            .collect()
+    }
+
     /// Copies data from `self` to write the protocol-specific header and payload into `buf`,
     /// returning the number of bytes written.
     pub fn write_into(&self, buf: &mut [u8]) -> Result<u16, String> {
