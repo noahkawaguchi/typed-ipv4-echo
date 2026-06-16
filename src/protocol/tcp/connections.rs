@@ -11,8 +11,9 @@ pub(super) struct ConnKey {
 
 /// The set of states of a TCP connection (non-exhaustive). Variant meanings below from RFC 9293,
 /// Section 3.3.2.
-#[derive(PartialEq, Eq)]
-enum TcpState {
+#[derive(PartialEq, Eq, Clone, Copy, Default)]
+#[cfg_attr(test, derive(Debug))]
+pub(super) enum TcpState {
     /// "SYN-RECEIVED - represents waiting for a confirming connection request acknowledgment after
     /// having both received and sent a connection request."
     SynReceived,
@@ -47,6 +48,10 @@ enum TcpState {
     ///
     /// Reached via passive close, after acknowledging the remote peer's FIN with our own.
     LastAck,
+
+    /// "CLOSED - represents no connection state at all."
+    #[default]
+    Closed,
 }
 
 /// The state of a connection in the table, including its TCP state and other locally stored data.
