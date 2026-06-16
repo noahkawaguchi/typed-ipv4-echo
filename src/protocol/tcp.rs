@@ -142,8 +142,7 @@ impl<'a> TcpHandler<'a> {
             // state.
             (TcpState::Established, TcpFlags::Ack, _)
                 if connections.ack_exceeds_snd_nxt(&key, self.ack_num)
-                    && let Some(snd_nxt) = connections.get_snd_nxt(&key)
-                    && let Some(rcv_nxt) = connections.get_rcv_nxt(&key) =>
+                    && let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key) =>
             {
                 Some(ReplyInfo {
                     seq_num: snd_nxt,
@@ -164,8 +163,7 @@ impl<'a> TcpHandler<'a> {
             // snd_nxt as seq_num and rcv_nxt + bytes received as ack_num, then advance both locally
             // by bytes received.
             (TcpState::Established, TcpFlags::Ack, 1..)
-                if let Some(snd_nxt) = connections.get_snd_nxt(&key)
-                    && let Some(rcv_nxt) = connections.get_rcv_nxt(&key)
+                if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key)
                     && self.seq_num == rcv_nxt =>
             {
                 #[expect(
@@ -190,8 +188,7 @@ impl<'a> TcpHandler<'a> {
             // -> duplicate ACK. ACK rcv_nxt so the client knows what the server expects next, but
             // don't echo data, start closing, or advance snd_nxt/rcv_nxt.
             (TcpState::Established, TcpFlags::Ack | TcpFlags::FinAck, _)
-                if let Some(snd_nxt) = connections.get_snd_nxt(&key)
-                    && let Some(rcv_nxt) = connections.get_rcv_nxt(&key)
+                if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key)
                     && self.seq_num != rcv_nxt =>
             {
                 connections.update_snd_una(&key, self.ack_num);
@@ -207,8 +204,7 @@ impl<'a> TcpHandler<'a> {
             // FIN-ACK (connection teardown) on an established connection, arriving in order ->
             // start closing to wait for client's final ACK, reply with FIN-ACK.
             (TcpState::Established, TcpFlags::FinAck, _)
-                if let Some(snd_nxt) = connections.get_snd_nxt(&key)
-                    && let Some(rcv_nxt) = connections.get_rcv_nxt(&key)
+                if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key)
                     && self.seq_num == rcv_nxt =>
             {
                 connections.start_last_ack(&key);
@@ -231,7 +227,7 @@ impl<'a> TcpHandler<'a> {
 
             // FIN-WAIT-1, our FIN has been acknowledged (and nothing else) -> FIN-WAIT-2, no reply
             (TcpState::FinWait1, TcpFlags::Ack, 0)
-                if let Some(snd_nxt) = connections.get_snd_nxt(&key)
+                if let Some((snd_nxt, _)) = connections.get_snd_rcv_nxt(&key)
                     && self.ack_num == snd_nxt =>
             {
                 connections.update_snd_una(&key, self.ack_num);
@@ -243,8 +239,7 @@ impl<'a> TcpHandler<'a> {
             // close) -> ACK it. If it also acknowledges our FIN, the connection is fully closed
             // (skipping FIN-WAIT-2/TIME-WAIT), otherwise move to CLOSING to await that ACK.
             (TcpState::FinWait1, TcpFlags::FinAck, 0)
-                if let Some(snd_nxt) = connections.get_snd_nxt(&key)
-                    && let Some(rcv_nxt) = connections.get_rcv_nxt(&key)
+                if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key)
                     && self.seq_num == rcv_nxt =>
             {
                 connections.update_snd_una(&key, self.ack_num);
@@ -266,8 +261,7 @@ impl<'a> TcpHandler<'a> {
             // FIN-WAIT-2, the remote peer's FIN arrives, in order -> ACK it and finish closing (no
             // TIME-WAIT)
             (TcpState::FinWait2, TcpFlags::FinAck, 0)
-                if let Some(snd_nxt) = connections.get_snd_nxt(&key)
-                    && let Some(rcv_nxt) = connections.get_rcv_nxt(&key)
+                if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key)
                     && self.seq_num == rcv_nxt =>
             {
                 connections.remove(&key);
@@ -283,7 +277,7 @@ impl<'a> TcpHandler<'a> {
             // CLOSING (simultaneous close), the remote peer's ACK of our FIN arrives -> fully
             // closed, no reply
             (TcpState::Closing, TcpFlags::Ack, 0)
-                if let Some(snd_nxt) = connections.get_snd_nxt(&key)
+                if let Some((snd_nxt, _)) = connections.get_snd_rcv_nxt(&key)
                     && self.ack_num == snd_nxt =>
             {
                 connections.remove(&key);
@@ -321,16 +315,15 @@ impl<'a> TcpHandler<'a> {
             .established_keys()
             .into_iter()
             .filter_map(|key| {
-                let seq_num = connections.get_snd_nxt(&key)?;
-                let ack_num = connections.get_rcv_nxt(&key)?;
+                let (snd_nxt, rcv_nxt) = connections.get_snd_rcv_nxt(&key)?;
                 connections.start_active_close(&key);
 
                 Some((
                     Self {
                         src_port: key.server_port,
                         dst_port: key.client_port,
-                        seq_num,
-                        ack_num,
+                        seq_num: snd_nxt,
+                        ack_num: rcv_nxt,
                         offset_bytes: TCP_HEADER_MIN_LEN,
                         flags: TcpFlags::FinAck,
                         payload: &[],

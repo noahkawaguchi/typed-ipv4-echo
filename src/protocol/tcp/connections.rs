@@ -121,16 +121,6 @@ impl TcpConnections {
             .collect()
     }
 
-    pub(super) fn get_snd_nxt(&self, key: &ConnKey) -> Option<u32> {
-        self.0.get(key).map(|s| s.snd_nxt)
-    }
-
-    pub(super) fn advance_snd_nxt(&mut self, key: &ConnKey, n: u32) {
-        if let Some(conn) = self.0.get_mut(key) {
-            conn.snd_nxt = conn.snd_nxt.wrapping_add(n);
-        }
-    }
-
     #[cfg(test)]
     pub(super) fn get_snd_una(&self, key: &ConnKey) -> Option<u32> {
         self.0.get(key).map(|s| s.snd_una)
@@ -156,8 +146,14 @@ impl TcpConnections {
             .is_some_and(|s| Self::seq_lt(s.snd_nxt, ack_num))
     }
 
-    pub(super) fn get_rcv_nxt(&self, key: &ConnKey) -> Option<u32> {
-        self.0.get(key).map(|s| s.rcv_nxt)
+    pub(super) fn get_snd_rcv_nxt(&self, key: &ConnKey) -> Option<(u32, u32)> {
+        self.0.get(key).map(|s| (s.snd_nxt, s.rcv_nxt))
+    }
+
+    pub(super) fn advance_snd_nxt(&mut self, key: &ConnKey, n: u32) {
+        if let Some(conn) = self.0.get_mut(key) {
+            conn.snd_nxt = conn.snd_nxt.wrapping_add(n);
+        }
     }
 
     pub(super) fn advance_rcv_nxt(&mut self, key: &ConnKey, n: u32) {

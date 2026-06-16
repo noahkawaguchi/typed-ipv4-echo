@@ -194,8 +194,8 @@ fn consecutive_replies_use_snd_nxt_for_seq_num() -> Result<(), Box<dyn Error>> {
     );
 
     assert_eq!(
-        connections.get_snd_nxt(&KEY),
-        Some(6),
+        connections.get_snd_rcv_nxt(&KEY),
+        Some((6, 4102)),
         "Stored snd_nxt should be 6 (1 + 5 bytes echoed) between replies"
     );
 
@@ -393,8 +393,7 @@ fn ack_for_unsent_data_is_dropped_and_gets_current_state_reply() -> Result<(), B
     assert_eq!(reply, Some(server_reply(1, 4097, TcpFlags::Ack, &[])));
 
     // State must be untouched
-    assert_eq!(connections.get_snd_nxt(&KEY), Some(1));
-    assert_eq!(connections.get_rcv_nxt(&KEY), Some(4097));
+    assert_eq!(connections.get_snd_rcv_nxt(&KEY), Some((1, 4097)));
     assert_eq!(connections.get_snd_una(&KEY), Some(0));
 
     Ok(())
@@ -419,8 +418,7 @@ fn wraparound_ack_for_unsent_data_is_still_rejected() -> Result<(), Box<dyn Erro
     assert_eq!(reply, Some(server_reply(u32::MAX, 4097, TcpFlags::Ack, &[])));
 
     // State must be untouched
-    assert_eq!(connections.get_snd_nxt(&KEY), Some(u32::MAX));
-    assert_eq!(connections.get_rcv_nxt(&KEY), Some(4097));
+    assert_eq!(connections.get_snd_rcv_nxt(&KEY), Some((u32::MAX, 4097)));
     assert_eq!(connections.get_snd_una(&KEY), Some(u32::MAX));
 
     Ok(())
@@ -443,7 +441,11 @@ fn close_established_sends_fin_ack_and_transitions_to_fin_wait_1() -> Result<(),
     assert_eq!(ip_pair.dst, SRC_IP);
 
     assert_eq!(connections.tcp_state_of(&KEY), TcpState::FinWait1);
-    assert_eq!(connections.get_snd_nxt(&KEY), Some(2), "FIN consumes one sequence number");
+    assert_eq!(
+        connections.get_snd_rcv_nxt(&KEY),
+        Some((2, 4097)),
+        "FIN consumes one sequence number"
+    );
 
     Ok(())
 }
@@ -485,7 +487,7 @@ fn fin_wait_2_closes_on_fin_ack_from_peer() -> Result<(), Box<dyn Error>> {
         client_packet(4097, 2, TcpFlags::FinAck, &[]).create_reply(&mut connections, IP_PAIR)?;
 
     assert_eq!(fin_reply, Some(server_reply(2, 4098, TcpFlags::Ack, &[])));
-    assert_eq!(connections.get_snd_nxt(&KEY), None, "Connection should be removed");
+    assert_eq!(connections.tcp_state_of(&KEY), TcpState::Closed, "Connection should be removed");
 
     Ok(())
 }
@@ -505,7 +507,7 @@ fn fin_wait_1_closes_immediately_if_peers_fin_also_acks_ours() -> Result<(), Box
         client_packet(4097, 2, TcpFlags::FinAck, &[]).create_reply(&mut connections, IP_PAIR)?;
 
     assert_eq!(reply, Some(server_reply(2, 4098, TcpFlags::Ack, &[])));
-    assert_eq!(connections.get_snd_nxt(&KEY), None, "Connection should be removed immediately");
+    assert_eq!(connections.tcp_state_of(&KEY), TcpState::Closed, "Connection should be removed");
 
     Ok(())
 }
@@ -530,7 +532,7 @@ fn simultaneous_close_transitions_through_closing_to_closed() -> Result<(), Box<
         client_packet(4098, 2, TcpFlags::Ack, &[]).create_reply(&mut connections, IP_PAIR)?;
 
     assert_eq!(ack_reply, None);
-    assert_eq!(connections.get_snd_nxt(&KEY), None, "Connection should be removed");
+    assert_eq!(connections.tcp_state_of(&KEY), TcpState::Closed, "Connection should be removed");
 
     Ok(())
 }
