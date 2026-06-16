@@ -86,7 +86,7 @@ fn handshake_ack_establishes_connection_and_returns_none() -> Result<(), Box<dyn
         None
     );
 
-    assert!(connections.is_established(&KEY));
+    assert_eq!(connections.tcp_state_of(&KEY), TcpState::Established);
 
     Ok(())
 }
@@ -118,7 +118,7 @@ fn reply_creates_valid_fin_ack() -> Result<(), Box<dyn Error>> {
     assert_eq!(reply, Some(server_reply(1, 4098, TcpFlags::FinAck, &[])));
 
     // Connection is now in LAST-ACK state (waiting for client's final ACK), not yet removed
-    assert!(connections.is_last_ack(&KEY));
+    assert_eq!(connections.tcp_state_of(&KEY), TcpState::LastAck);
 
     Ok(())
 }
@@ -139,7 +139,11 @@ fn final_ack_after_fin_ack_removes_connection_and_returns_none() -> Result<(), B
         None
     );
 
-    assert!(!connections.is_last_ack(&KEY), "Connection should be removed after final ACK");
+    assert_eq!(
+        connections.tcp_state_of(&KEY),
+        TcpState::Closed,
+        "Connection should be removed after final ACK"
+    );
 
     Ok(())
 }
@@ -160,7 +164,11 @@ fn pure_ack_on_established_connection_returns_none() -> Result<(), Box<dyn Error
         None
     );
 
-    assert!(connections.is_established(&KEY), "Connection should remain open after pure ACK");
+    assert_eq!(
+        connections.tcp_state_of(&KEY),
+        TcpState::Established,
+        "Connection should remain open after pure ACK"
+    );
 
     Ok(())
 }
@@ -271,7 +279,11 @@ fn rst_packet_cleans_up_connection_and_returns_none() -> Result<(), Box<dyn Erro
         None
     );
 
-    assert!(!connections.is_established(&KEY), "Connection should be removed after RST");
+    assert_eq!(
+        connections.tcp_state_of(&KEY),
+        TcpState::Closed,
+        "Connection should be removed after RST"
+    );
 
     Ok(())
 }
@@ -340,8 +352,9 @@ fn out_of_order_fin_ack_gets_duplicate_ack_without_closing() -> Result<(), Box<d
          in response"
     );
 
-    assert!(
-        connections.is_established(&KEY),
+    assert_eq!(
+        connections.tcp_state_of(&KEY),
+        TcpState::Established,
         "Connection must remain established, out-of-order FIN-ACK must not start closing"
     );
 
@@ -429,7 +442,7 @@ fn close_established_sends_fin_ack_and_transitions_to_fin_wait_1() -> Result<(),
     assert_eq!(ip_pair.src, DST_IP);
     assert_eq!(ip_pair.dst, SRC_IP);
 
-    assert!(connections.is_fin_wait_1(&KEY));
+    assert_eq!(connections.tcp_state_of(&KEY), TcpState::FinWait1);
     assert_eq!(connections.get_snd_nxt(&KEY), Some(2), "FIN consumes one sequence number");
 
     Ok(())
@@ -447,7 +460,7 @@ fn fin_wait_1_to_fin_wait_2_on_ack_of_our_fin() -> Result<(), Box<dyn Error>> {
         client_packet(4097, 2, TcpFlags::Ack, &[]).create_reply(&mut connections, IP_PAIR)?;
 
     assert_eq!(reply, None);
-    assert!(connections.is_fin_wait_2(&KEY));
+    assert_eq!(connections.tcp_state_of(&KEY), TcpState::FinWait2);
     assert_eq!(connections.get_snd_una(&KEY), Some(2));
 
     Ok(())
@@ -465,7 +478,7 @@ fn fin_wait_2_closes_on_fin_ack_from_peer() -> Result<(), Box<dyn Error>> {
         client_packet(4097, 2, TcpFlags::Ack, &[]).create_reply(&mut connections, IP_PAIR)?;
 
     assert_eq!(ack_reply, None);
-    assert!(connections.is_fin_wait_2(&KEY));
+    assert_eq!(connections.tcp_state_of(&KEY), TcpState::FinWait2);
 
     // Client's FIN arrives in order
     let fin_reply =
@@ -510,7 +523,7 @@ fn simultaneous_close_transitions_through_closing_to_closed() -> Result<(), Box<
         client_packet(4097, 1, TcpFlags::FinAck, &[]).create_reply(&mut connections, IP_PAIR)?;
 
     assert_eq!(fin_reply, Some(server_reply(2, 4098, TcpFlags::Ack, &[])));
-    assert!(connections.is_simultaneous_closing(&KEY));
+    assert_eq!(connections.tcp_state_of(&KEY), TcpState::Closing);
 
     // Client's ACK of our FIN finally arrives -> fully closed
     let ack_reply =

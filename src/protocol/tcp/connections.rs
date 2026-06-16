@@ -80,6 +80,10 @@ impl TcpConnections {
 
     pub fn len(&self) -> usize { self.0.len() }
 
+    pub(super) fn tcp_state_of(&self, key: &ConnKey) -> TcpState {
+        self.0.get(key).map(|s| s.tcp_state).unwrap_or_default()
+    }
+
     pub(super) fn store_isn(&mut self, key: ConnKey, isn: u32) {
         self.0.insert(
             key,
@@ -106,12 +110,6 @@ impl TcpConnections {
             conn.tcp_state = TcpState::Established;
             conn.rcv_nxt = rcv_nxt;
         }
-    }
-
-    pub(super) fn is_established(&self, key: &ConnKey) -> bool {
-        self.0
-            .get(key)
-            .is_some_and(|s| s.tcp_state == TcpState::Established)
     }
 
     /// Returns the keys of all connections currently in the ESTABLISHED state.
@@ -177,23 +175,11 @@ impl TcpConnections {
         }
     }
 
-    pub(super) fn is_fin_wait_1(&self, key: &ConnKey) -> bool {
-        self.0
-            .get(key)
-            .is_some_and(|s| s.tcp_state == TcpState::FinWait1)
-    }
-
     /// Transitions from FIN-WAIT-1 to FIN-WAIT-2 once our FIN has been acknowledged.
     pub(super) fn start_fin_wait_2(&mut self, key: &ConnKey) {
         if let Some(conn) = self.0.get_mut(key) {
             conn.tcp_state = TcpState::FinWait2;
         }
-    }
-
-    pub(super) fn is_fin_wait_2(&self, key: &ConnKey) -> bool {
-        self.0
-            .get(key)
-            .is_some_and(|s| s.tcp_state == TcpState::FinWait2)
     }
 
     /// Transitions from FIN-WAIT-1 to CLOSING (simultaneous close). The remote peer's FIN arrived
@@ -206,24 +192,12 @@ impl TcpConnections {
         }
     }
 
-    pub(super) fn is_simultaneous_closing(&self, key: &ConnKey) -> bool {
-        self.0
-            .get(key)
-            .is_some_and(|s| s.tcp_state == TcpState::Closing)
-    }
-
     /// Transitions an ESTABLISHED connection to LAST-ACK (passive close). The remote peer's FIN has
     /// been acknowledged with our own FIN, awaiting their final ACK.
     pub(super) fn start_last_ack(&mut self, key: &ConnKey) {
         if let Some(conn) = self.0.get_mut(key) {
             conn.tcp_state = TcpState::LastAck;
         }
-    }
-
-    pub(super) fn is_last_ack(&self, key: &ConnKey) -> bool {
-        self.0
-            .get(key)
-            .is_some_and(|s| s.tcp_state == TcpState::LastAck)
     }
 
     pub(super) fn remove(&mut self, key: &ConnKey) { self.0.remove(key); }
