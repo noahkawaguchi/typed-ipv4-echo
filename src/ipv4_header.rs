@@ -56,7 +56,7 @@ impl Ipv4Header {
         Ok((
             Self {
                 total_len: u16::from_be_bytes([ip_header[2], ip_header[3]]),
-                protocol: Protocol::from(ip_header[9]),
+                protocol: ip_header[9].try_into()?,
                 ip_pair: Ipv4AddrPair {
                     src: Ipv4Addr::new(ip_header[12], ip_header[13], ip_header[14], ip_header[15]),
                     dst: Ipv4Addr::new(ip_header[16], ip_header[17], ip_header[18], ip_header[19]),

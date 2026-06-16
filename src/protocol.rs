@@ -10,10 +10,6 @@ mod test_utils;
 
 use std::fmt;
 
-const PROTOCOL_ICMP: u8 = 1;
-const PROTOCOL_TCP: u8 = 6;
-const PROTOCOL_UDP: u8 = 17;
-
 /// Converts raw payload bytes to a printable string representation of the payload's length and
 /// content. Escapes control and non-printable characters.
 fn payload_to_string(payload: &[u8]) -> String {
@@ -26,33 +22,32 @@ fn payload_to_string(payload: &[u8]) -> String {
 
 #[derive(Clone, Copy)]
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
+#[repr(u8)]
 pub enum Protocol {
-    Icmp,
-    Tcp,
-    Udp,
-    Other(u8),
+    Icmp = 1,
+    Tcp = 6,
+    Udp = 17,
 }
 
-impl From<u8> for Protocol {
-    fn from(value: u8) -> Self {
+impl TryFrom<u8> for Protocol {
+    type Error = String;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        const ICMP: u8 = Protocol::Icmp as u8;
+        const TCP: u8 = Protocol::Tcp as u8;
+        const UDP: u8 = Protocol::Udp as u8;
+
         match value {
-            PROTOCOL_ICMP => Self::Icmp,
-            PROTOCOL_TCP => Self::Tcp,
-            PROTOCOL_UDP => Self::Udp,
-            other => Self::Other(other),
+            ICMP => Ok(Self::Icmp),
+            TCP => Ok(Self::Tcp),
+            UDP => Ok(Self::Udp),
+            other => Err(format!("Unsupported protocol {other}")),
         }
     }
 }
 
 impl From<Protocol> for u8 {
-    fn from(value: Protocol) -> Self {
-        match value {
-            Protocol::Icmp => PROTOCOL_ICMP,
-            Protocol::Tcp => PROTOCOL_TCP,
-            Protocol::Udp => PROTOCOL_UDP,
-            Protocol::Other(other) => other,
-        }
-    }
+    fn from(value: Protocol) -> Self { value as Self }
 }
 
 impl fmt::Display for Protocol {
@@ -61,7 +56,6 @@ impl fmt::Display for Protocol {
             Self::Icmp => write!(f, "ICMP"),
             Self::Tcp => write!(f, "TCP"),
             Self::Udp => write!(f, "UDP"),
-            Self::Other(val) => write!(f, "Other ({val})"),
         }
     }
 }

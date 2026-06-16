@@ -30,9 +30,6 @@ impl<'a> ProtocolHandler<'a> {
             Protocol::Icmp => IcmpEchoHandler::parse(data).map(Self::Icmp),
             Protocol::Tcp => TcpHandler::parse(data).map(|h| Self::Tcp(h, ip_pair)),
             Protocol::Udp => UdpHandler::parse(data).map(|h| Self::Udp(h, ip_pair)),
-            Protocol::Other(other) => {
-                Err(format!("Protocol {other} not implemented, only ICMP Echo, TCP, and UDP"))
-            }
         }
     }
 
