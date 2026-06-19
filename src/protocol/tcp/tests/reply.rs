@@ -62,6 +62,32 @@ fn reply_creates_valid_syn_ack() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn duplicate_syn_during_syn_received_resends_same_syn_ack() -> Result<(), Box<dyn Error>> {
+    // If our SYN-ACK is lost, the client's retransmission timer will resend its SYN. We must
+    // resend the same SYN-ACK (same ISN), not RST the retry, and not generate a new ISN.
+
+    let mut connections = TcpConnections::new();
+    connections.store_isn(KEY, 12345); // Simulates having already sent a SYN-ACK with ISN=12345
+
+    let reply =
+        client_packet(4096, 0, TcpFlags::Syn, &[]).create_reply(&mut connections, IP_PAIR)?;
+
+    assert_eq!(
+        reply,
+        Some(server_reply(12345, 4097, TcpFlags::SynAck, &[])),
+        "Retransmitted SYN should get the same SYN-ACK resent, not a RST"
+    );
+
+    assert_eq!(
+        connections.tcp_state_of(&KEY),
+        TcpState::SynReceived,
+        "State should remain SYN-RECEIVED, not reset or advance"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn data_packet_before_complete_handshake_gets_rst() -> Result<(), Box<dyn Error>> {
     let mut connections = TcpConnections::new();
     connections.store_isn(KEY, 0); // SYN-ACK sent, but handshake not yet completed

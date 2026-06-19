@@ -124,6 +124,20 @@ impl<'a> TcpHandler<'a> {
                 })
             }
 
+            // Duplicate SYN while awaiting the handshake ACK (client's retransmission timer resent
+            // the SYN) -> resend the same SYN-ACK (which was likely lost) using the already-stored
+            // ISN
+            (TcpState::SynReceived, TcpFlags::Syn, _)
+                if let Some(isn) = connections.pending_isn(&key) =>
+            {
+                Some(ReplyInfo {
+                    seq_num: isn,
+                    ack_num: self.seq_num.wrapping_add(1),
+                    flags: TcpFlags::SynAck,
+                    echo_payload: false,
+                })
+            }
+
             // Handshake ACK (step 3) -> transition to ESTABLISHED, no reply needed
             // Remote ack num should be the previous local ISN + 1, which also becomes snd_una
             (TcpState::SynReceived, TcpFlags::Ack, 0)
