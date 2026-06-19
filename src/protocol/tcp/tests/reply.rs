@@ -1,38 +1,4 @@
-use {
-    super::*,
-    crate::protocol::test_utils::{DST_IP, IP_PAIR, SRC_IP},
-    std::error::Error,
-};
-
-/// Connection key shared by tests in this module.
-const KEY: ConnKey =
-    ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
-
-/// Builds an incoming packet from the client (port 1234) to the server (port 80).
-fn client_packet(seq_num: u32, ack_num: u32, flags: TcpFlags, payload: &[u8]) -> TcpHandler {
-    TcpHandler {
-        src_port: KEY.client_port,
-        dst_port: KEY.server_port,
-        seq_num,
-        ack_num,
-        offset_bytes: 20,
-        flags,
-        payload: payload.to_vec(),
-    }
-}
-
-/// Builds an expected reply from the server (port 80) to the client (port 1234).
-fn server_reply(seq_num: u32, ack_num: u32, flags: TcpFlags, payload: &[u8]) -> TcpHandler {
-    TcpHandler {
-        src_port: KEY.server_port,
-        dst_port: KEY.client_port,
-        seq_num,
-        ack_num,
-        offset_bytes: 20,
-        flags,
-        payload: payload.to_vec(),
-    }
-}
+use {super::*, crate::protocol::test_utils::IP_PAIR, std::error::Error};
 
 #[test]
 fn reply_creates_valid_syn_ack() -> Result<(), Box<dyn Error>> {

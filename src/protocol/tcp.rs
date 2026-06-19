@@ -510,10 +510,44 @@ impl fmt::Display for TcpHandler {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, std::assert_matches};
-
     mod parse;
     mod reply;
     mod retransmit;
     mod write;
+
+    use {
+        super::*,
+        crate::protocol::test_utils::{DST_IP, SRC_IP},
+        std::assert_matches,
+    };
+
+    /// Connection key shared by test modules.
+    const KEY: ConnKey =
+        ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
+
+    /// Builds an incoming packet from the client (port 1234) to the server (port 80).
+    fn client_packet(seq_num: u32, ack_num: u32, flags: TcpFlags, payload: &[u8]) -> TcpHandler {
+        TcpHandler {
+            src_port: KEY.client_port,
+            dst_port: KEY.server_port,
+            seq_num,
+            ack_num,
+            offset_bytes: 20,
+            flags,
+            payload: payload.to_vec(),
+        }
+    }
+
+    /// Builds an expected reply from the server (port 80) to the client (port 1234).
+    fn server_reply(seq_num: u32, ack_num: u32, flags: TcpFlags, payload: &[u8]) -> TcpHandler {
+        TcpHandler {
+            src_port: KEY.server_port,
+            dst_port: KEY.client_port,
+            seq_num,
+            ack_num,
+            offset_bytes: 20,
+            flags,
+            payload: payload.to_vec(),
+        }
+    }
 }
