@@ -27,6 +27,7 @@ words = [
     "pfd",
     "pollfd",
     "rcv",
+    "resends",
     "revents",
     "rustfmt",
     "sigaction",
