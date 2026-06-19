@@ -16,7 +16,10 @@ use {
         sys,
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
-    std::{fmt, io},
+    std::{
+        fmt, io,
+        time::{Duration, Instant},
+    },
 };
 
 const TCP_HEADER_MIN_LEN: u8 = 20;
@@ -383,6 +386,39 @@ impl TcpHandler {
             .collect()
     }
 
+    /// Reproduces every connection's pending unacked segment that is due for retransmission (RTO
+    /// elapsed since it was last sent), or gives up and removes the connection once it has been
+    /// retried `max_retries` times.
+    pub fn retransmit_expired(
+        connections: &mut TcpConnections,
+        now: Instant,
+        rto: Duration,
+        max_retries: u8,
+    ) -> Vec<(Self, Ipv4AddrPair)> {
+        connections
+            .expired_retransmit_keys(now, rto)
+            .into_iter()
+            .filter_map(|key| {
+                let (seq_num, ack_num, flags, payload) =
+                    connections.pending_for_retransmit(&key)?;
+                let gave_up = connections.retransmit_or_give_up(&key, now, max_retries);
+
+                (!gave_up).then_some((
+                    Self {
+                        src_port: key.server_port,
+                        dst_port: key.client_port,
+                        seq_num,
+                        ack_num,
+                        offset_bytes: TCP_HEADER_MIN_LEN,
+                        flags,
+                        payload,
+                    },
+                    Ipv4AddrPair { src: key.server_ip, dst: key.client_ip },
+                ))
+            })
+            .collect()
+    }
+
     /// Copies data from `self` to write a TCP header and payload into `buf`, returning the number
     /// of bytes written.
     pub fn write_into(&self, buf: &mut [u8], ip_pair: Ipv4AddrPair) -> Result<u16, String> {
@@ -478,5 +514,6 @@ mod tests {
 
     mod parse;
     mod reply;
+    mod retransmit;
     mod write;
 }
