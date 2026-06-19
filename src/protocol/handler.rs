@@ -63,8 +63,9 @@ impl<'a> ProtocolHandler<'a> {
             .collect()
     }
 
-    /// Reproduces every TCP connection's pending unacked segment that is due for retransmission,
-    /// or gives up and removes the connection once it has been retried `max_retries` times.
+    /// Reproduces every TCP connection's pending unacked segment that is due for retransmission
+    /// (`rto` elapsed since it was last sent), or gives up and removes the connection once it has
+    /// been retried `max_retries` times.
     pub fn retransmit_expired(
         tcp_connections: &mut TcpConnections,
         now: Instant,

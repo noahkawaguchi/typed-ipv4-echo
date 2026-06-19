@@ -227,7 +227,8 @@ impl TcpConnections {
     }
 
     /// Returns the earliest `Instant` at which any connection's pending segment becomes due for
-    /// retransmission, or `None` if no connection has a pending segment.
+    /// retransmission (`rto` elapsed since it was last sent), or `None` if no connection has a
+    /// pending segment.
     pub fn next_retransmit_deadline(&self, rto: Duration) -> Option<Instant> {
         self.0
             .values()
@@ -235,7 +236,8 @@ impl TcpConnections {
             .min()
     }
 
-    /// Returns the keys of all connections whose pending segment is due for retransmission.
+    /// Returns the keys of all connections whose pending segment is due for retransmission (`rto`
+    /// elapsed since it was last sent).
     pub(super) fn expired_retransmit_keys(&self, now: Instant, rto: Duration) -> Vec<ConnKey> {
         self.0
             .iter()
