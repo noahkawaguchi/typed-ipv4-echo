@@ -10,7 +10,7 @@ use {
 
 pub enum ProtocolHandler<'a> {
     Icmp(IcmpEchoHandler<'a>),
-    Tcp(TcpHandler<'a>, Ipv4AddrPair),
+    Tcp(TcpHandler, Ipv4AddrPair),
     Udp(UdpHandler<'a>, Ipv4AddrPair),
 }
 
@@ -35,7 +35,7 @@ impl<'a> ProtocolHandler<'a> {
 
     /// Creates a protocol-specific header and payload for replying to `self`, or returns `Ok(None)`
     /// for no reply.
-    pub fn create_reply(&self, tcp_connections: &mut TcpConnections) -> io::Result<Option<Self>> {
+    pub fn into_reply(self, tcp_connections: &mut TcpConnections) -> io::Result<Option<Self>> {
         match self {
             Self::Icmp(handler) => Ok(Some(Self::Icmp(handler.create_reply()))),
 
@@ -46,7 +46,7 @@ impl<'a> ProtocolHandler<'a> {
 
             // TCP is the only one that's actually optional
             Self::Tcp(handler, ip_pair) => Ok(handler
-                .create_reply(tcp_connections, *ip_pair)?
+                .into_reply(tcp_connections, ip_pair)?
                 .map(|h| Self::Tcp(h, ip_pair.swapped()))),
         }
     }

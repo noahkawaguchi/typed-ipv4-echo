@@ -84,7 +84,7 @@ pub fn run(
                     // If `read()` was interrupted and returned `EINTR`, immediately continue to
                     // re-poll and check the shutdown deadline
                     Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                    Err(e) => return Err(e.into()),
+                    Err(e) => break Err(e.into()),
                     Ok(n) => n,
                 };
 
@@ -106,7 +106,7 @@ pub fn run(
                                 println!("{handler}");
                                 println!("\n ==== Packet sent ====");
 
-                                match handler.create_reply(&mut tcp_connections)? {
+                                match handler.into_reply(&mut tcp_connections)? {
                                     None => println!("<no reply>"),
 
                                     Some(reply_handler) => send_packet(

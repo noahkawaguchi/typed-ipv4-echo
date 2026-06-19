@@ -23,8 +23,8 @@ const TCP_HEADER_MIN_LEN: u8 = 20;
 
 /// Struct for managing and replying to TCP packets. Includes the TCP header and the payload. Field
 /// definitions below from RFC 9293, Section 3.1.
-#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
-pub struct TcpHandler<'a> {
+#[cfg_attr(test, derive(Debug, PartialEq, Eq, Clone))]
+pub struct TcpHandler {
     src_port: u16,
     dst_port: u16,
 
@@ -45,14 +45,14 @@ pub struct TcpHandler<'a> {
     offset_bytes: u8,
 
     flags: TcpFlags,
-    payload: &'a [u8],
+    payload: Vec<u8>,
 }
 
-impl<'a> TcpHandler<'a> {
+impl TcpHandler {
     const PSEUDO_HEADER_LEN: usize = 12;
 
     /// Parses `data` as a TCP header and payload.
-    pub fn parse(data: &'a [u8]) -> Result<Self, String> {
+    pub fn parse(data: &[u8]) -> Result<Self, String> {
         let Some(tcp_header) = data.first_chunk::<{ TCP_HEADER_MIN_LEN as usize }>() else {
             return Err(format!("Too short for TCP header ({} bytes)", data.len()));
         };
@@ -79,7 +79,8 @@ impl<'a> TcpHandler<'a> {
             flags: tcp_header[13].try_into()?,
             payload: data
                 .get(offset_bytes.into()..)
-                .ok_or("TCP data shorter than its Data Offset")?,
+                .ok_or("TCP data shorter than its Data Offset")?
+                .to_vec(),
         })
     }
 
@@ -88,8 +89,8 @@ impl<'a> TcpHandler<'a> {
         clippy::too_many_lines,
         reason = "Large match expression to express reply cases clearly"
     )]
-    pub fn create_reply(
-        &self,
+    pub fn into_reply(
+        self,
         connections: &mut TcpConnections,
         ip_pair: Ipv4AddrPair,
     ) -> io::Result<Option<Self>> {
@@ -317,7 +318,7 @@ impl<'a> TcpHandler<'a> {
             ack_num: info.ack_num,
             offset_bytes: TCP_HEADER_MIN_LEN,
             flags: info.flags,
-            payload: if info.echo_payload { self.payload } else { &[] },
+            payload: if info.echo_payload { self.payload } else { Vec::new() },
         }))
     }
 
@@ -340,7 +341,7 @@ impl<'a> TcpHandler<'a> {
                         ack_num: rcv_nxt,
                         offset_bytes: TCP_HEADER_MIN_LEN,
                         flags: TcpFlags::FinAck,
-                        payload: &[],
+                        payload: Vec::new(),
                     },
                     Ipv4AddrPair { src: key.server_ip, dst: key.client_ip },
                 ))
@@ -385,7 +386,7 @@ impl<'a> TcpHandler<'a> {
             usize::from(TCP_HEADER_MIN_LEN)
                 ..usize::from(TCP_HEADER_MIN_LEN).try_add(self.payload.len())?,
         )?
-        .copy_from_slice(self.payload);
+        .copy_from_slice(&self.payload);
 
         // TCP segment length: minimum TCP header length (20 bytes) + payload length (0+ bytes)
         #[expect(
@@ -422,7 +423,7 @@ impl<'a> TcpHandler<'a> {
     }
 }
 
-impl fmt::Display for TcpHandler<'_> {
+impl fmt::Display for TcpHandler {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -432,7 +433,7 @@ impl fmt::Display for TcpHandler<'_> {
             self.seq_num,
             self.ack_num,
             self.flags,
-            payload_to_string(self.payload),
+            payload_to_string(&self.payload),
         )
     }
 }
