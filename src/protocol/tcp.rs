@@ -116,6 +116,14 @@ impl TcpHandler {
                 // seq num = random ISN, local ack num = remote seq num + 1
                 let isn = sys::random_u32()?;
                 connections.store_isn(key, isn);
+                connections.record_pending(
+                    &key,
+                    isn,
+                    1,
+                    self.seq_num.wrapping_add(1),
+                    TcpFlags::SynAck,
+                    Vec::new(),
+                );
 
                 Some(ReplyInfo {
                     seq_num: isn,
@@ -131,6 +139,15 @@ impl TcpHandler {
             (TcpState::SynReceived, TcpFlags::Syn, _)
                 if let Some(isn) = connections.pending_isn(&key) =>
             {
+                connections.record_pending(
+                    &key,
+                    isn,
+                    1,
+                    self.seq_num.wrapping_add(1),
+                    TcpFlags::SynAck,
+                    Vec::new(),
+                );
+
                 Some(ReplyInfo {
                     seq_num: isn,
                     ack_num: self.seq_num.wrapping_add(1),
@@ -190,6 +207,14 @@ impl TcpHandler {
                 connections.update_snd_una(&key, self.ack_num);
                 connections.advance_snd_nxt(&key, payload_len);
                 connections.advance_rcv_nxt(&key, payload_len);
+                connections.record_pending(
+                    &key,
+                    snd_nxt,
+                    payload_len,
+                    rcv_nxt.wrapping_add(payload_len),
+                    TcpFlags::Ack,
+                    self.payload.clone(),
+                );
 
                 Some(ReplyInfo {
                     seq_num: snd_nxt,
@@ -224,6 +249,14 @@ impl TcpHandler {
             {
                 connections.start_last_ack(&key);
                 connections.advance_snd_nxt(&key, 1); // FIN consumes one sequence number
+                connections.record_pending(
+                    &key,
+                    snd_nxt,
+                    1,
+                    rcv_nxt.wrapping_add(1),
+                    TcpFlags::FinAck,
+                    Vec::new(),
+                );
 
                 Some(ReplyInfo {
                     seq_num: snd_nxt,
@@ -332,6 +365,7 @@ impl TcpHandler {
             .filter_map(|key| {
                 let (snd_nxt, rcv_nxt) = connections.get_snd_rcv_nxt(&key)?;
                 connections.start_active_close(&key);
+                connections.record_pending(&key, snd_nxt, 1, rcv_nxt, TcpFlags::FinAck, Vec::new());
 
                 Some((
                     Self {
