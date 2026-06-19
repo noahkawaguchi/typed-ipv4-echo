@@ -1,4 +1,11 @@
-use std::{collections::HashMap, net::Ipv4Addr};
+use {
+    super::flags::TcpFlags,
+    std::{
+        collections::HashMap,
+        net::Ipv4Addr,
+        time::{Duration, Instant},
+    },
+};
 
 /// Key identifying a TCP connection.
 #[derive(PartialEq, Eq, Hash, Clone, Copy)]
@@ -54,6 +61,26 @@ pub(super) enum TcpState {
     Closed,
 }
 
+/// The most recently sent segment that consumed sequence numbers (SYN-ACK, data echo, or FIN-ACK)
+/// and hasn't yet been acknowledged.
+struct PendingSegment {
+    /// The `seq_num` the segment was sent with, frozen at send time.
+    seq_num: u32,
+
+    /// The sequence number one past the last byte/flag consumed by the segment (`seq_num +
+    /// consumed`, e.g. `seq_num + 1` for a SYN/FIN, `seq_num + payload.len()` for data). Compared
+    /// against an incoming `ack_num` to tell whether the segment has been fully acknowledged.
+    end_seq: u32,
+
+    /// The `ack_num` the segment was sent with, frozen at send time.
+    ack_num: u32,
+
+    flags: TcpFlags,
+    payload: Vec<u8>,
+    sent_at: Instant,
+    retries: u8,
+}
+
 /// The state of a connection in the table, including its TCP state and other locally stored data.
 struct ConnState {
     tcp_state: TcpState,
@@ -70,6 +97,9 @@ struct ConnState {
 
     /// "RCV.NXT = next sequence number expected on an incoming segment" (RFC 9293, Section 3.4).
     rcv_nxt: u32,
+
+    /// The single latest unacked segment sent by the server, if any, for retransmission purposes.
+    pending: Option<PendingSegment>,
 }
 
 /// Tracks per-connection state keyed by the 4-tuple.
@@ -93,6 +123,7 @@ impl TcpConnections {
                 snd_una: isn, // The SYN-ACK we're about to send is unacknowledged
                 snd_nxt: isn.wrapping_add(1), // SYN-ACK consumes one sequence number
                 rcv_nxt: 0,   // Set at connection establishment
+                pending: None,
             },
         );
     }
@@ -135,6 +166,15 @@ impl TcpConnections {
             && Self::seq_le(ack_num, conn.snd_nxt)
         {
             conn.snd_una = ack_num;
+
+            // Remove `pending` if fully acknowledged
+            if conn
+                .pending
+                .as_ref()
+                .is_some_and(|p| Self::seq_le(p.end_seq, ack_num))
+            {
+                conn.pending = None;
+            }
         }
     }
 
@@ -159,6 +199,88 @@ impl TcpConnections {
     pub(super) fn advance_rcv_nxt(&mut self, key: &ConnKey, n: u32) {
         if let Some(conn) = self.0.get_mut(key) {
             conn.rcv_nxt = conn.rcv_nxt.wrapping_add(n);
+        }
+    }
+
+    /// Records `seq_num..seq_num + consumed` as the latest unacked segment sent for retransmission,
+    /// overwriting any previously pending segment.
+    pub(super) fn record_pending(
+        &mut self,
+        key: &ConnKey,
+        seq_num: u32,
+        consumed: u32,
+        ack_num: u32,
+        flags: TcpFlags,
+        payload: Vec<u8>,
+    ) {
+        if let Some(conn) = self.0.get_mut(key) {
+            conn.pending = Some(PendingSegment {
+                seq_num,
+                end_seq: seq_num.wrapping_add(consumed),
+                ack_num,
+                flags,
+                payload,
+                sent_at: Instant::now(),
+                retries: 0,
+            });
+        }
+    }
+
+    /// Returns the earliest `Instant` at which any connection's pending segment becomes due for
+    /// retransmission, or `None` if no connection has a pending segment.
+    pub fn next_retransmit_deadline(&self, rto: Duration) -> Option<Instant> {
+        self.0
+            .values()
+            .filter_map(|s| s.pending.as_ref().and_then(|p| p.sent_at.checked_add(rto)))
+            .min()
+    }
+
+    /// Returns the keys of all connections whose pending segment is due for retransmission.
+    pub(super) fn expired_retransmit_keys(&self, now: Instant, rto: Duration) -> Vec<ConnKey> {
+        self.0
+            .iter()
+            .filter(|(_, s)| {
+                s.pending
+                    .as_ref()
+                    .and_then(|p| p.sent_at.checked_add(rto))
+                    .is_some_and(|deadline| now >= deadline)
+            })
+            .map(|(&key, _)| key)
+            .collect()
+    }
+
+    /// Returns the `seq_num`, `ack_num`, flags, and payload that `key`'s pending segment was
+    /// originally sent with in order to reproduce it unchanged.
+    pub(super) fn pending_for_retransmit(
+        &self,
+        key: &ConnKey,
+    ) -> Option<(u32, u32, TcpFlags, Vec<u8>)> {
+        self.0.get(key).and_then(|conn| {
+            conn.pending
+                .as_ref()
+                .map(|p| (p.seq_num, p.ack_num, p.flags, p.payload.clone()))
+        })
+    }
+
+    /// Either bumps `key`'s pending segment for another retransmission attempt and returns `false`,
+    /// or, if it has already been retried `max_retries` times (or doesn't exist), gives up, removes
+    /// the connection, and returns `true`.
+    pub(super) fn retransmit_or_give_up(
+        &mut self,
+        key: &ConnKey,
+        now: Instant,
+        max_retries: u8,
+    ) -> bool {
+        let Some(conn) = self.0.get_mut(key) else { return true };
+        let Some(pending) = conn.pending.as_mut() else { return true };
+
+        if pending.retries >= max_retries {
+            self.0.remove(key);
+            true
+        } else {
+            pending.retries = pending.retries.saturating_add(1);
+            pending.sent_at = now;
+            false
         }
     }
 
