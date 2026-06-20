@@ -5,7 +5,9 @@ mod flags;
 
 use {
     crate::{
-        ETHERNET_MTU, Ipv4AddrPair, checksum,
+        ETHERNET_MTU,
+        addr_pairs::{Ipv4AddrPair, PortPair},
+        checksum,
         protocol::{
             Protocol, payload_to_string,
             tcp::{
@@ -28,8 +30,7 @@ const TCP_HEADER_MIN_LEN: u8 = 20;
 /// definitions below from RFC 9293, Section 3.1.
 #[cfg_attr(test, derive(Debug, PartialEq, Eq, Clone))]
 pub struct TcpHandler {
-    src_port: u16,
-    dst_port: u16,
+    ports: PortPair,
 
     /// "The sequence number of the first data octet in this segment (except when the SYN flag is
     /// set). If SYN is set, the sequence number is the initial sequence number (ISN) and the first
@@ -73,8 +74,10 @@ impl TcpHandler {
         let offset_bytes = tcp_header[12] >> 4 << 2;
 
         Ok(Self {
-            src_port: u16::from_be_bytes([tcp_header[0], tcp_header[1]]),
-            dst_port: u16::from_be_bytes([tcp_header[2], tcp_header[3]]),
+            ports: PortPair {
+                src: u16::from_be_bytes([tcp_header[0], tcp_header[1]]),
+                dst: u16::from_be_bytes([tcp_header[2], tcp_header[3]]),
+            },
             seq_num: u32::from_be_bytes([
                 tcp_header[4],
                 tcp_header[5],
@@ -96,6 +99,13 @@ impl TcpHandler {
         })
     }
 
+    fn from_ports_and_info(
+        ports: PortPair,
+        SendInfo { seq_num, ack_num, flags, payload }: SendInfo,
+    ) -> Self {
+        Self { ports, seq_num, ack_num, offset_bytes: TCP_HEADER_MIN_LEN, flags, payload }
+    }
+
     /// Creates a TCP header and payload for replying to `self`, or returns `Ok(None)` for no reply.
     #[expect(
         clippy::too_many_lines,
@@ -108,9 +118,9 @@ impl TcpHandler {
     ) -> io::Result<Option<Self>> {
         let key = ConnKey {
             client_ip: ip_pair.src,
-            client_port: self.src_port,
+            client_port: self.ports.src,
             server_ip: ip_pair.dst,
-            server_port: self.dst_port,
+            server_port: self.ports.dst,
         };
 
         Ok(match (connections.tcp_state_of(&key), self.flags, self.payload.len()) {
@@ -330,16 +340,7 @@ impl TcpHandler {
                 payload: Vec::new(),
             }),
         }
-        .map(|SendInfo { seq_num, ack_num, flags, payload }| Self {
-            // Swap source and destination ports
-            src_port: self.dst_port,
-            dst_port: self.src_port,
-            seq_num,
-            ack_num,
-            offset_bytes: TCP_HEADER_MIN_LEN,
-            flags,
-            payload,
-        }))
+        .map(|send_info| Self::from_ports_and_info(self.ports.swapped(), send_info)))
     }
 
     /// Initiates active close (RFC 9293 "CLOSE" call) for every connection currently ESTABLISHED,
@@ -363,15 +364,10 @@ impl TcpHandler {
                 connections.record_pending(&key, send_info.clone(), 1);
 
                 Some((
-                    Self {
-                        src_port: key.server_port,
-                        dst_port: key.client_port,
-                        seq_num: send_info.seq_num,
-                        ack_num: send_info.ack_num,
-                        offset_bytes: TCP_HEADER_MIN_LEN,
-                        flags: send_info.flags,
-                        payload: send_info.payload,
-                    },
+                    Self::from_ports_and_info(
+                        PortPair { src: key.server_port, dst: key.client_port },
+                        send_info,
+                    ),
                     Ipv4AddrPair { src: key.server_ip, dst: key.client_ip },
                 ))
             })
@@ -395,15 +391,10 @@ impl TcpHandler {
                 let gave_up = connections.retransmit_or_give_up(&key, now, max_retries);
 
                 (!gave_up).then_some((
-                    Self {
-                        src_port: key.server_port,
-                        dst_port: key.client_port,
-                        seq_num: send_info.seq_num,
-                        ack_num: send_info.ack_num,
-                        offset_bytes: TCP_HEADER_MIN_LEN,
-                        flags: send_info.flags,
-                        payload: send_info.payload,
-                    },
+                    Self::from_ports_and_info(
+                        PortPair { src: key.server_port, dst: key.client_port },
+                        send_info,
+                    ),
                     Ipv4AddrPair { src: key.server_ip, dst: key.client_ip },
                 ))
             })
@@ -415,9 +406,9 @@ impl TcpHandler {
     pub fn write_into(&self, buf: &mut [u8], ip_pair: Ipv4AddrPair) -> Result<u16, String> {
         // Source and destination ports
         buf.try_get_mut(..2)?
-            .copy_from_slice(&self.src_port.to_be_bytes());
+            .copy_from_slice(&self.ports.src.to_be_bytes());
         buf.try_get_mut(2..4)?
-            .copy_from_slice(&self.dst_port.to_be_bytes());
+            .copy_from_slice(&self.ports.dst.to_be_bytes());
 
         // Sequence number
         buf.try_get_mut(4..8)?
@@ -488,9 +479,8 @@ impl fmt::Display for TcpHandler {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "TCP | {} -> {} | seq={} ack={} | {}\n{}",
-            self.src_port,
-            self.dst_port,
+            "TCP | {} | seq={} ack={} | {}\n{}",
+            self.ports,
             self.seq_num,
             self.ack_num,
             self.flags,
@@ -519,8 +509,7 @@ mod tests {
     /// Builds an incoming packet from the client (port 1234) to the server (port 80).
     fn client_packet(seq_num: u32, ack_num: u32, flags: TcpFlags, payload: &[u8]) -> TcpHandler {
         TcpHandler {
-            src_port: KEY.client_port,
-            dst_port: KEY.server_port,
+            ports: PortPair { src: KEY.client_port, dst: KEY.server_port },
             seq_num,
             ack_num,
             offset_bytes: 20,
@@ -532,8 +521,7 @@ mod tests {
     /// Builds an expected reply from the server (port 80) to the client (port 1234).
     fn server_reply(seq_num: u32, ack_num: u32, flags: TcpFlags, payload: &[u8]) -> TcpHandler {
         TcpHandler {
-            src_port: KEY.server_port,
-            dst_port: KEY.client_port,
+            ports: PortPair { src: KEY.server_port, dst: KEY.client_port },
             seq_num,
             ack_num,
             offset_bytes: 20,

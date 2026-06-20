@@ -17,8 +17,7 @@ fn correctly_parses_valid_packet() -> Result<(), String> {
 
     let handler = TcpHandler::parse(&DATA)?;
 
-    assert_eq!(handler.src_port, 1234);
-    assert_eq!(handler.dst_port, 80);
+    assert_eq!(handler.ports, PortPair { src: 1234, dst: 80 });
     assert_eq!(handler.seq_num, 1);
     assert_eq!(handler.ack_num, 2);
     assert_eq!(handler.offset_bytes, 20);

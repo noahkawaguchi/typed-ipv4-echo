@@ -1,6 +1,8 @@
 use {
     crate::{
-        ETHERNET_MTU, Ipv4AddrPair, checksum,
+        ETHERNET_MTU,
+        addr_pairs::{Ipv4AddrPair, PortPair},
+        checksum,
         protocol::{Protocol, payload_to_string},
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
@@ -12,8 +14,7 @@ const UDP_HEADER_LEN: u16 = 8;
 /// Struct for managing and replying to UDP packets. Includes the UDP header and the payload.
 #[cfg_attr(test, derive(Debug))]
 pub struct UdpHandler<'a> {
-    src_port: u16,
-    dst_port: u16,
+    ports: PortPair,
     payload: &'a [u8],
 }
 
@@ -28,16 +29,17 @@ impl<'a> UdpHandler<'a> {
         };
 
         Ok(Self {
-            src_port: u16::from_be_bytes([udp_header[0], udp_header[1]]),
-            dst_port: u16::from_be_bytes([udp_header[2], udp_header[3]]),
+            ports: PortPair {
+                src: u16::from_be_bytes([udp_header[0], udp_header[1]]),
+                dst: u16::from_be_bytes([udp_header[2], udp_header[3]]),
+            },
             payload,
         })
     }
 
     /// Creates a UDP header and payload for replying to `self`.
     pub const fn create_reply(&self) -> Self {
-        // Swap source and destination ports, echo payload
-        Self { src_port: self.dst_port, dst_port: self.src_port, payload: self.payload }
+        Self { ports: self.ports.swapped(), payload: self.payload }
     }
 
     /// Copies data from `self` to write a UDP header and payload into `buf`, returning the number
@@ -45,9 +47,9 @@ impl<'a> UdpHandler<'a> {
     pub fn write_into(&self, buf: &mut [u8], ip_pair: Ipv4AddrPair) -> Result<u16, String> {
         // Source and destination ports
         buf.try_get_mut(..2)?
-            .copy_from_slice(&self.src_port.to_be_bytes());
+            .copy_from_slice(&self.ports.src.to_be_bytes());
         buf.try_get_mut(2..4)?
-            .copy_from_slice(&self.dst_port.to_be_bytes());
+            .copy_from_slice(&self.ports.dst.to_be_bytes());
 
         // UDP length: fixed UDP header length (8 bytes) + length of echo payload
         #[expect(
@@ -96,13 +98,7 @@ impl<'a> UdpHandler<'a> {
 
 impl fmt::Display for UdpHandler<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "UDP | {} -> {}\n{}",
-            self.src_port,
-            self.dst_port,
-            payload_to_string(self.payload)
-        )
+        write!(f, "UDP | {}\n{}", self.ports, payload_to_string(self.payload))
     }
 }
 
@@ -128,8 +124,7 @@ mod tests {
 
         let handler = UdpHandler::parse(&DATA)?;
 
-        assert_eq!(handler.src_port, 1234);
-        assert_eq!(handler.dst_port, 53);
+        assert_eq!(handler.ports, PortPair { src: 1234, dst: 53 });
         assert_eq!(handler.payload, b"Hello!!!");
 
         Ok(())
@@ -153,8 +148,7 @@ mod tests {
 
         let handler = UdpHandler::parse(&DATA)?;
 
-        assert_eq!(handler.src_port, 8080);
-        assert_eq!(handler.dst_port, 80);
+        assert_eq!(handler.ports, PortPair { src: 8080, dst: 80 });
         assert_eq!(handler.payload.len(), 0);
 
         Ok(())
@@ -173,8 +167,7 @@ mod tests {
 
         let handler = UdpHandler::parse(&DATA)?;
 
-        assert_eq!(handler.src_port, 65535);
-        assert_eq!(handler.dst_port, 1);
+        assert_eq!(handler.ports, PortPair { src: 65535, dst: 1 });
 
         Ok(())
     }

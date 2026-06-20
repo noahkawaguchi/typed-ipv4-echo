@@ -7,8 +7,7 @@ use {
 #[test]
 fn write_into_produces_correct_bytes_with_no_payload() -> Result<(), Box<dyn Error>> {
     let handler = TcpHandler {
-        src_port: 80,
-        dst_port: 1234,
+        ports: PortPair { src: 80, dst: 1234 },
         seq_num: 0x1000_0000,
         ack_num: 0x0000_1001,
         offset_bytes: 20,
@@ -38,8 +37,7 @@ fn write_into_produces_correct_bytes_with_no_payload() -> Result<(), Box<dyn Err
 #[test]
 fn write_into_produces_correct_bytes_with_payload() -> Result<(), Box<dyn Error>> {
     let handler = TcpHandler {
-        src_port: 80,
-        dst_port: 1234,
+        ports: PortPair { src: 80, dst: 1234 },
         seq_num: 1,
         ack_num: 4102,
         offset_bytes: 20,

@@ -1,5 +1,7 @@
 use {
-    crate::{ETHERNET_MTU, Ipv4AddrPair, checksum, protocol::Protocol, try_ops::TryAdd as _},
+    crate::{
+        ETHERNET_MTU, addr_pairs::Ipv4AddrPair, checksum, protocol::Protocol, try_ops::TryAdd as _,
+    },
     std::{fmt, net::Ipv4Addr},
 };
 
@@ -92,11 +94,7 @@ impl Ipv4Header {
 
 impl fmt::Display for Ipv4Header {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "IPv4 | {} bytes total | {} | {} -> {}",
-            self.total_len, self.protocol, self.ip_pair.src, self.ip_pair.dst,
-        )
+        write!(f, "IPv4 | {} bytes total | {} | {}", self.total_len, self.protocol, self.ip_pair)
     }
 }
 
