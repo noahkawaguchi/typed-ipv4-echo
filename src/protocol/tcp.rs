@@ -99,6 +99,13 @@ impl TcpHandler {
         })
     }
 
+    fn from_ports_and_info(
+        ports: PortPair,
+        SendInfo { seq_num, ack_num, flags, payload }: SendInfo,
+    ) -> Self {
+        Self { ports, seq_num, ack_num, offset_bytes: TCP_HEADER_MIN_LEN, flags, payload }
+    }
+
     /// Creates a TCP header and payload for replying to `self`, or returns `Ok(None)` for no reply.
     #[expect(
         clippy::too_many_lines,
@@ -333,14 +340,7 @@ impl TcpHandler {
                 payload: Vec::new(),
             }),
         }
-        .map(|SendInfo { seq_num, ack_num, flags, payload }| Self {
-            ports: self.ports.swapped(),
-            seq_num,
-            ack_num,
-            offset_bytes: TCP_HEADER_MIN_LEN,
-            flags,
-            payload,
-        }))
+        .map(|send_info| Self::from_ports_and_info(self.ports.swapped(), send_info)))
     }
 
     /// Initiates active close (RFC 9293 "CLOSE" call) for every connection currently ESTABLISHED,
@@ -364,14 +364,10 @@ impl TcpHandler {
                 connections.record_pending(&key, send_info.clone(), 1);
 
                 Some((
-                    Self {
-                        ports: PortPair { src: key.server_port, dst: key.client_port },
-                        seq_num: send_info.seq_num,
-                        ack_num: send_info.ack_num,
-                        offset_bytes: TCP_HEADER_MIN_LEN,
-                        flags: send_info.flags,
-                        payload: send_info.payload,
-                    },
+                    Self::from_ports_and_info(
+                        PortPair { src: key.server_port, dst: key.client_port },
+                        send_info,
+                    ),
                     Ipv4AddrPair { src: key.server_ip, dst: key.client_ip },
                 ))
             })
@@ -395,14 +391,10 @@ impl TcpHandler {
                 let gave_up = connections.retransmit_or_give_up(&key, now, max_retries);
 
                 (!gave_up).then_some((
-                    Self {
-                        ports: PortPair { src: key.server_port, dst: key.client_port },
-                        seq_num: send_info.seq_num,
-                        ack_num: send_info.ack_num,
-                        offset_bytes: TCP_HEADER_MIN_LEN,
-                        flags: send_info.flags,
-                        payload: send_info.payload,
-                    },
+                    Self::from_ports_and_info(
+                        PortPair { src: key.server_port, dst: key.client_port },
+                        send_info,
+                    ),
                     Ipv4AddrPair { src: key.server_ip, dst: key.client_ip },
                 ))
             })
