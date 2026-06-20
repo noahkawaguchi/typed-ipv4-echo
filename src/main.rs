@@ -14,7 +14,7 @@ use std::{env, error::Error, net::Ipv4Addr, time::Duration};
 const ETHERNET_MTU: usize = 1500;
 
 #[derive(Clone, Copy)]
-#[cfg_attr(test, derive(Debug))]
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 struct Ipv4AddrPair {
     src: Ipv4Addr,
     dst: Ipv4Addr,

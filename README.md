@@ -58,9 +58,8 @@ The server separates protocol-agnostic IPv4 handling from protocol-specific ICMP
 Each variant wraps a concrete protocol handler responsible for:
 
 - Parsing protocol-specific headers and payloads from raw bytes
-- Writing appropriate reply packets
-
-The design also prioritizes controlled use of the heap only when it truly improves clarity and maintainability. Error messages use `String` and `Box` heap allocations for readable and safe inclusion of runtime data, but all of the core packet data is managed in two fixed-size arrays on the stack.
+- Determining the packets to send to clients
+- Encoding appropriate reply packets into raw bytes
 
 ## Running the Server
 

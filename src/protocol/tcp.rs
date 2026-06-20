@@ -16,15 +16,18 @@ use {
         sys,
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
-    std::{fmt, io},
+    std::{
+        fmt, io,
+        time::{Duration, Instant},
+    },
 };
 
 const TCP_HEADER_MIN_LEN: u8 = 20;
 
 /// Struct for managing and replying to TCP packets. Includes the TCP header and the payload. Field
 /// definitions below from RFC 9293, Section 3.1.
-#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
-pub struct TcpHandler<'a> {
+#[cfg_attr(test, derive(Debug, PartialEq, Eq, Clone))]
+pub struct TcpHandler {
     src_port: u16,
     dst_port: u16,
 
@@ -45,14 +48,23 @@ pub struct TcpHandler<'a> {
     offset_bytes: u8,
 
     flags: TcpFlags,
-    payload: &'a [u8],
+    payload: Vec<u8>,
 }
 
-impl<'a> TcpHandler<'a> {
+/// Fields that differ when determining a segment to send.
+#[derive(Clone)]
+struct SendInfo {
+    seq_num: u32,
+    ack_num: u32,
+    flags: TcpFlags,
+    payload: Vec<u8>,
+}
+
+impl TcpHandler {
     const PSEUDO_HEADER_LEN: usize = 12;
 
     /// Parses `data` as a TCP header and payload.
-    pub fn parse(data: &'a [u8]) -> Result<Self, String> {
+    pub fn parse(data: &[u8]) -> Result<Self, String> {
         let Some(tcp_header) = data.first_chunk::<{ TCP_HEADER_MIN_LEN as usize }>() else {
             return Err(format!("Too short for TCP header ({} bytes)", data.len()));
         };
@@ -79,7 +91,8 @@ impl<'a> TcpHandler<'a> {
             flags: tcp_header[13].try_into()?,
             payload: data
                 .get(offset_bytes.into()..)
-                .ok_or("TCP data shorter than its Data Offset")?,
+                .ok_or("TCP data shorter than its Data Offset")?
+                .to_vec(),
         })
     }
 
@@ -88,19 +101,11 @@ impl<'a> TcpHandler<'a> {
         clippy::too_many_lines,
         reason = "Large match expression to express reply cases clearly"
     )]
-    pub fn create_reply(
-        &self,
+    pub fn into_reply(
+        self,
         connections: &mut TcpConnections,
         ip_pair: Ipv4AddrPair,
     ) -> io::Result<Option<Self>> {
-        /// Fields to configure when determining a reply.
-        struct ReplyInfo {
-            seq_num: u32,
-            ack_num: u32,
-            flags: TcpFlags,
-            echo_payload: bool,
-        }
-
         let key = ConnKey {
             client_ip: ip_pair.src,
             client_port: self.src_port,
@@ -116,12 +121,16 @@ impl<'a> TcpHandler<'a> {
                 let isn = sys::random_u32()?;
                 connections.store_isn(key, isn);
 
-                Some(ReplyInfo {
+                let send_info = SendInfo {
                     seq_num: isn,
                     ack_num: self.seq_num.wrapping_add(1),
                     flags: TcpFlags::SynAck,
-                    echo_payload: false,
-                })
+                    payload: Vec::new(),
+                };
+
+                connections.record_pending(&key, send_info.clone(), 1);
+
+                Some(send_info)
             }
 
             // Duplicate SYN while awaiting the handshake ACK (client's retransmission timer resent
@@ -130,12 +139,16 @@ impl<'a> TcpHandler<'a> {
             (TcpState::SynReceived, TcpFlags::Syn, _)
                 if let Some(isn) = connections.pending_isn(&key) =>
             {
-                Some(ReplyInfo {
+                let send_info = SendInfo {
                     seq_num: isn,
                     ack_num: self.seq_num.wrapping_add(1),
                     flags: TcpFlags::SynAck,
-                    echo_payload: false,
-                })
+                    payload: Vec::new(),
+                };
+
+                connections.record_pending(&key, send_info.clone(), 1);
+
+                Some(send_info)
             }
 
             // Handshake ACK (step 3) -> transition to ESTABLISHED, no reply needed
@@ -158,11 +171,11 @@ impl<'a> TcpHandler<'a> {
                 if connections.ack_exceeds_snd_nxt(&key, self.ack_num)
                     && let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key) =>
             {
-                Some(ReplyInfo {
+                Some(SendInfo {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt,
                     flags: TcpFlags::Ack,
-                    echo_payload: false,
+                    payload: Vec::new(),
                 })
             }
 
@@ -190,12 +203,16 @@ impl<'a> TcpHandler<'a> {
                 connections.advance_snd_nxt(&key, payload_len);
                 connections.advance_rcv_nxt(&key, payload_len);
 
-                Some(ReplyInfo {
+                let send_info = SendInfo {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt.wrapping_add(payload_len),
                     flags: TcpFlags::Ack,
-                    echo_payload: true,
-                })
+                    payload: self.payload,
+                };
+
+                connections.record_pending(&key, send_info.clone(), payload_len);
+
+                Some(send_info)
             }
 
             // Out-of-order/duplicate data or out-of-order FIN-ACK on an established connection
@@ -207,11 +224,11 @@ impl<'a> TcpHandler<'a> {
             {
                 connections.update_snd_una(&key, self.ack_num);
 
-                Some(ReplyInfo {
+                Some(SendInfo {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt,
                     flags: TcpFlags::Ack,
-                    echo_payload: false,
+                    payload: Vec::new(),
                 })
             }
 
@@ -224,12 +241,16 @@ impl<'a> TcpHandler<'a> {
                 connections.start_last_ack(&key);
                 connections.advance_snd_nxt(&key, 1); // FIN consumes one sequence number
 
-                Some(ReplyInfo {
+                let send_info = SendInfo {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt.wrapping_add(1),
                     flags: TcpFlags::FinAck,
-                    echo_payload: false,
-                })
+                    payload: Vec::new(),
+                };
+
+                connections.record_pending(&key, send_info.clone(), 1);
+
+                Some(send_info)
             }
 
             // Final ACK completing passive close (LAST-ACK) or any RST (never RST a RST)
@@ -264,11 +285,11 @@ impl<'a> TcpHandler<'a> {
                     connections.start_simultaneous_closing(&key);
                 }
 
-                Some(ReplyInfo {
+                Some(SendInfo {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt.wrapping_add(1),
                     flags: TcpFlags::Ack,
-                    echo_payload: false,
+                    payload: Vec::new(),
                 })
             }
 
@@ -280,11 +301,11 @@ impl<'a> TcpHandler<'a> {
             {
                 connections.remove(&key);
 
-                Some(ReplyInfo {
+                Some(SendInfo {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt.wrapping_add(1),
                     flags: TcpFlags::Ack,
-                    echo_payload: false,
+                    payload: Vec::new(),
                 })
             }
 
@@ -301,23 +322,23 @@ impl<'a> TcpHandler<'a> {
             // Something else unrecognized (other than RST caught above) -> RST so the peer fails
             // fast instead of hanging. Per RFC 9293, Section 3.10.7.1, any non-RST segment to a
             // CLOSED (unknown) connection gets a RST.
-            _ => Some(ReplyInfo {
+            _ => Some(SendInfo {
                 seq_num: self.ack_num,
                 // ack_num is 0 because sending bare RST with no ACK flag leaves ack_num undefined
                 ack_num: 0,
                 flags: TcpFlags::Rst,
-                echo_payload: false,
+                payload: Vec::new(),
             }),
         }
-        .map(|info| Self {
+        .map(|SendInfo { seq_num, ack_num, flags, payload }| Self {
             // Swap source and destination ports
             src_port: self.dst_port,
             dst_port: self.src_port,
-            seq_num: info.seq_num,
-            ack_num: info.ack_num,
+            seq_num,
+            ack_num,
             offset_bytes: TCP_HEADER_MIN_LEN,
-            flags: info.flags,
-            payload: if info.echo_payload { self.payload } else { &[] },
+            flags,
+            payload,
         }))
     }
 
@@ -332,15 +353,56 @@ impl<'a> TcpHandler<'a> {
                 let (snd_nxt, rcv_nxt) = connections.get_snd_rcv_nxt(&key)?;
                 connections.start_active_close(&key);
 
+                let send_info = SendInfo {
+                    seq_num: snd_nxt,
+                    ack_num: rcv_nxt,
+                    flags: TcpFlags::FinAck,
+                    payload: Vec::new(),
+                };
+
+                connections.record_pending(&key, send_info.clone(), 1);
+
                 Some((
                     Self {
                         src_port: key.server_port,
                         dst_port: key.client_port,
-                        seq_num: snd_nxt,
-                        ack_num: rcv_nxt,
+                        seq_num: send_info.seq_num,
+                        ack_num: send_info.ack_num,
                         offset_bytes: TCP_HEADER_MIN_LEN,
-                        flags: TcpFlags::FinAck,
-                        payload: &[],
+                        flags: send_info.flags,
+                        payload: send_info.payload,
+                    },
+                    Ipv4AddrPair { src: key.server_ip, dst: key.client_ip },
+                ))
+            })
+            .collect()
+    }
+
+    /// Reproduces every connection's pending unacked segment that is due for retransmission (`rto`
+    /// elapsed since it was last sent), or gives up and removes the connection once it has been
+    /// retried `max_retries` times.
+    pub fn retransmit_expired(
+        connections: &mut TcpConnections,
+        now: Instant,
+        rto: Duration,
+        max_retries: u8,
+    ) -> Vec<(Self, Ipv4AddrPair)> {
+        connections
+            .expired_retransmit_keys(now, rto)
+            .into_iter()
+            .filter_map(|key| {
+                let send_info = connections.pending_for_retransmit(&key)?;
+                let gave_up = connections.retransmit_or_give_up(&key, now, max_retries);
+
+                (!gave_up).then_some((
+                    Self {
+                        src_port: key.server_port,
+                        dst_port: key.client_port,
+                        seq_num: send_info.seq_num,
+                        ack_num: send_info.ack_num,
+                        offset_bytes: TCP_HEADER_MIN_LEN,
+                        flags: send_info.flags,
+                        payload: send_info.payload,
                     },
                     Ipv4AddrPair { src: key.server_ip, dst: key.client_ip },
                 ))
@@ -385,7 +447,7 @@ impl<'a> TcpHandler<'a> {
             usize::from(TCP_HEADER_MIN_LEN)
                 ..usize::from(TCP_HEADER_MIN_LEN).try_add(self.payload.len())?,
         )?
-        .copy_from_slice(self.payload);
+        .copy_from_slice(&self.payload);
 
         // TCP segment length: minimum TCP header length (20 bytes) + payload length (0+ bytes)
         #[expect(
@@ -422,7 +484,7 @@ impl<'a> TcpHandler<'a> {
     }
 }
 
-impl fmt::Display for TcpHandler<'_> {
+impl fmt::Display for TcpHandler {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -432,16 +494,51 @@ impl fmt::Display for TcpHandler<'_> {
             self.seq_num,
             self.ack_num,
             self.flags,
-            payload_to_string(self.payload),
+            payload_to_string(&self.payload),
         )
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use {super::*, std::assert_matches};
-
     mod parse;
     mod reply;
+    mod retransmit;
     mod write;
+
+    use {
+        super::*,
+        crate::protocol::test_utils::{DST_IP, SRC_IP},
+        std::assert_matches,
+    };
+
+    /// Connection key shared by test modules.
+    const KEY: ConnKey =
+        ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
+
+    /// Builds an incoming packet from the client (port 1234) to the server (port 80).
+    fn client_packet(seq_num: u32, ack_num: u32, flags: TcpFlags, payload: &[u8]) -> TcpHandler {
+        TcpHandler {
+            src_port: KEY.client_port,
+            dst_port: KEY.server_port,
+            seq_num,
+            ack_num,
+            offset_bytes: 20,
+            flags,
+            payload: payload.to_vec(),
+        }
+    }
+
+    /// Builds an expected reply from the server (port 80) to the client (port 1234).
+    fn server_reply(seq_num: u32, ack_num: u32, flags: TcpFlags, payload: &[u8]) -> TcpHandler {
+        TcpHandler {
+            src_port: KEY.server_port,
+            dst_port: KEY.client_port,
+            seq_num,
+            ack_num,
+            offset_bytes: 20,
+            flags,
+            payload: payload.to_vec(),
+        }
+    }
 }

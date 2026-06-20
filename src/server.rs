@@ -14,6 +14,12 @@ use {
     },
 };
 
+/// How long to wait before retransmitting an unacked segment.
+const RETRANSMIT_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// How many times to retransmit an unacked segment before giving up and dropping the connection.
+const MAX_RETRANSMITS: u8 = 5;
+
 fn divider() { println!("\n{}\n", "=".repeat(60)) }
 
 /// Reads and writes IPv4 packets to and from `device`, maintaining TCP connection state and echoing
@@ -38,14 +44,20 @@ pub fn run(
     divider();
 
     loop {
-        // Block indefinitely (-1) if shutdown hasn't started yet
-        let timeout_ms = shutdown_deadline.map_or(-1, |deadline| {
-            deadline
-                .saturating_duration_since(Instant::now())
-                .as_millis()
-                .try_into()
-                .unwrap_or(i32::MAX)
-        });
+        let timeout_ms =
+            [shutdown_deadline, tcp_connections.next_retransmit_deadline(RETRANSMIT_TIMEOUT)]
+                .into_iter()
+                .flatten()
+                .min()
+                // Block indefinitely (-1) if there's no shutdown deadline and no segment pending
+                // retransmission
+                .map_or(-1, |deadline| {
+                    deadline
+                        .saturating_duration_since(Instant::now())
+                        .as_millis()
+                        .try_into()
+                        .unwrap_or(i32::MAX)
+                });
 
         match sys::poll::readable(device.as_raw_fd(), timeout_ms) {
             // If `poll()` was interrupted and returned `EINTR`, a shutdown signal has been
@@ -70,7 +82,7 @@ pub fn run(
 
             Err(e) => break Err(e.into()),
 
-            Ok(false) => {
+            Ok(false) if shutdown_deadline.is_some_and(|deadline| Instant::now() >= deadline) => {
                 println!(
                     "Grace period elapsed with {} remaining connection(s), exiting",
                     tcp_connections.len()
@@ -79,12 +91,25 @@ pub fn run(
                 break Ok(());
             }
 
+            // A retransmit deadline elapsed -> retransmit all expired segments
+            Ok(false) => {
+                for (reply_handler, ip_pair) in ProtocolHandler::retransmit_expired(
+                    &mut tcp_connections,
+                    Instant::now(),
+                    RETRANSMIT_TIMEOUT,
+                    MAX_RETRANSMITS,
+                ) {
+                    println!("\n ==== Packet sent (retransmit) ====");
+                    send_packet(device, &mut write_buf, &reply_handler, Protocol::Tcp, ip_pair)?;
+                }
+            }
+
             Ok(true) => {
                 let n = match device.read(&mut read_buf) {
                     // If `read()` was interrupted and returned `EINTR`, immediately continue to
                     // re-poll and check the shutdown deadline
                     Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                    Err(e) => return Err(e.into()),
+                    Err(e) => break Err(e.into()),
                     Ok(n) => n,
                 };
 
@@ -106,7 +131,7 @@ pub fn run(
                                 println!("{handler}");
                                 println!("\n ==== Packet sent ====");
 
-                                match handler.create_reply(&mut tcp_connections)? {
+                                match handler.into_reply(&mut tcp_connections)? {
                                     None => println!("<no reply>"),
 
                                     Some(reply_handler) => send_packet(
