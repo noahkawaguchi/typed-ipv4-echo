@@ -1,6 +1,7 @@
 use {
     crate::{
         ETHERNET_MTU,
+        addr_pairs::Ipv4AddrPair,
         ipv4_header::Ipv4Header,
         protocol::{Protocol, ProtocolHandler, TcpConnections},
         sys,
@@ -202,7 +203,7 @@ fn send_packet(
     write_buf: &mut [u8; ETHERNET_MTU],
     handler: &ProtocolHandler,
     protocol: Protocol,
-    ip_pair: crate::Ipv4AddrPair,
+    ip_pair: Ipv4AddrPair,
 ) -> Result<(), Box<dyn Error>> {
     // Write the protocol-specific portion of the packet first to have the total length for the IPv4
     // header

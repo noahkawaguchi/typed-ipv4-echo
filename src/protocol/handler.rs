@@ -1,6 +1,6 @@
 use {
     crate::{
-        Ipv4AddrPair,
+        addr_pairs::Ipv4AddrPair,
         protocol::{
             Protocol, TcpConnections, icmp_echo::IcmpEchoHandler, tcp::TcpHandler, udp::UdpHandler,
         },

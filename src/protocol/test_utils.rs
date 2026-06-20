@@ -2,7 +2,9 @@
 
 use {
     crate::{
-        ETHERNET_MTU, Ipv4AddrPair, checksum,
+        ETHERNET_MTU,
+        addr_pairs::Ipv4AddrPair,
+        checksum,
         protocol::Protocol,
         try_ops::{TryGet as _, TryGetMut as _},
     },
