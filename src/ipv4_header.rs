@@ -94,11 +94,7 @@ impl Ipv4Header {
 
 impl fmt::Display for Ipv4Header {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "IPv4 | {} bytes total | {} | {} -> {}",
-            self.total_len, self.protocol, self.ip_pair.src, self.ip_pair.dst,
-        )
+        write!(f, "IPv4 | {} bytes total | {} | {}", self.total_len, self.protocol, self.ip_pair)
     }
 }
 
