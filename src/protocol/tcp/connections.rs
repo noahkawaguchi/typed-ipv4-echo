@@ -1,5 +1,5 @@
 use {
-    super::flags::TcpFlags,
+    crate::protocol::tcp::SendInfo,
     std::{
         collections::HashMap,
         net::Ipv4Addr,
@@ -61,23 +61,20 @@ pub(super) enum TcpState {
     Closed,
 }
 
-/// The most recently sent segment that consumed sequence numbers (SYN-ACK, data echo, or FIN-ACK)
-/// and hasn't yet been acknowledged.
+/// A sent segment that consumed sequence numbers and hasn't yet been acknowledged.
 struct PendingSegment {
-    /// The `seq_num` the segment was sent with, frozen at send time.
-    seq_num: u32,
+    /// The values and data the segment was sent with, frozen at send time.
+    send_info: SendInfo,
 
     /// The sequence number one past the last byte/flag consumed by the segment (`seq_num +
     /// consumed`, e.g. `seq_num + 1` for a SYN/FIN, `seq_num + payload.len()` for data). Compared
     /// against an incoming `ack_num` to tell whether the segment has been fully acknowledged.
     end_seq: u32,
 
-    /// The `ack_num` the segment was sent with, frozen at send time.
-    ack_num: u32,
+    /// The last time at which the segment was sent.
+    last_sent_at: Instant,
 
-    flags: TcpFlags,
-    payload: Vec<u8>,
-    sent_at: Instant,
+    /// The number of times the segment has been retransmitted.
     retries: u8,
 }
 
@@ -204,23 +201,14 @@ impl TcpConnections {
 
     /// Records `seq_num..seq_num + consumed` as the latest unacked segment sent for retransmission,
     /// overwriting any previously pending segment.
-    pub(super) fn record_pending(
-        &mut self,
-        key: &ConnKey,
-        seq_num: u32,
-        consumed: u32,
-        ack_num: u32,
-        flags: TcpFlags,
-        payload: Vec<u8>,
-    ) {
+    pub(super) fn record_pending(&mut self, key: &ConnKey, send_info: SendInfo, consumed: u32) {
         if let Some(conn) = self.0.get_mut(key) {
+            let end_seq = send_info.seq_num.wrapping_add(consumed);
+
             conn.pending = Some(PendingSegment {
-                seq_num,
-                end_seq: seq_num.wrapping_add(consumed),
-                ack_num,
-                flags,
-                payload,
-                sent_at: Instant::now(),
+                send_info,
+                end_seq,
+                last_sent_at: Instant::now(),
                 retries: 0,
             });
         }
@@ -232,7 +220,11 @@ impl TcpConnections {
     pub fn next_retransmit_deadline(&self, rto: Duration) -> Option<Instant> {
         self.0
             .values()
-            .filter_map(|s| s.pending.as_ref().and_then(|p| p.sent_at.checked_add(rto)))
+            .filter_map(|s| {
+                s.pending
+                    .as_ref()
+                    .and_then(|p| p.last_sent_at.checked_add(rto))
+            })
             .min()
     }
 
@@ -244,24 +236,19 @@ impl TcpConnections {
             .filter(|(_, s)| {
                 s.pending
                     .as_ref()
-                    .and_then(|p| p.sent_at.checked_add(rto))
+                    .and_then(|p| p.last_sent_at.checked_add(rto))
                     .is_some_and(|deadline| now >= deadline)
             })
             .map(|(&key, _)| key)
             .collect()
     }
 
-    /// Returns the `seq_num`, `ack_num`, flags, and payload that `key`'s pending segment was
-    /// originally sent with in order to reproduce it unchanged.
-    pub(super) fn pending_for_retransmit(
-        &self,
-        key: &ConnKey,
-    ) -> Option<(u32, u32, TcpFlags, Vec<u8>)> {
-        self.0.get(key).and_then(|conn| {
-            conn.pending
-                .as_ref()
-                .map(|p| (p.seq_num, p.ack_num, p.flags, p.payload.clone()))
-        })
+    /// Returns the `SendInfo` that `key`'s pending segment was originally sent with in order to
+    /// reproduce it unchanged.
+    pub(super) fn pending_for_retransmit(&self, key: &ConnKey) -> Option<SendInfo> {
+        self.0
+            .get(key)
+            .and_then(|conn| conn.pending.as_ref().map(|p| p.send_info.clone()))
     }
 
     /// Either bumps `key`'s pending segment for another retransmission attempt and returns `false`,
@@ -281,7 +268,7 @@ impl TcpConnections {
             true
         } else {
             pending.retries = pending.retries.saturating_add(1);
-            pending.sent_at = now;
+            pending.last_sent_at = now;
             false
         }
     }

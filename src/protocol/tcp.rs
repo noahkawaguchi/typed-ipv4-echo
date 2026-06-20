@@ -51,6 +51,15 @@ pub struct TcpHandler {
     payload: Vec<u8>,
 }
 
+/// Fields that differ when determining a segment to send.
+#[derive(Clone)]
+struct SendInfo {
+    seq_num: u32,
+    ack_num: u32,
+    flags: TcpFlags,
+    payload: Vec<u8>,
+}
+
 impl TcpHandler {
     const PSEUDO_HEADER_LEN: usize = 12;
 
@@ -97,14 +106,6 @@ impl TcpHandler {
         connections: &mut TcpConnections,
         ip_pair: Ipv4AddrPair,
     ) -> io::Result<Option<Self>> {
-        /// Fields to configure when determining a reply.
-        struct ReplyInfo {
-            seq_num: u32,
-            ack_num: u32,
-            flags: TcpFlags,
-            echo_payload: bool,
-        }
-
         let key = ConnKey {
             client_ip: ip_pair.src,
             client_port: self.src_port,
@@ -119,21 +120,17 @@ impl TcpHandler {
                 // seq num = random ISN, local ack num = remote seq num + 1
                 let isn = sys::random_u32()?;
                 connections.store_isn(key, isn);
-                connections.record_pending(
-                    &key,
-                    isn,
-                    1,
-                    self.seq_num.wrapping_add(1),
-                    TcpFlags::SynAck,
-                    Vec::new(),
-                );
 
-                Some(ReplyInfo {
+                let send_info = SendInfo {
                     seq_num: isn,
                     ack_num: self.seq_num.wrapping_add(1),
                     flags: TcpFlags::SynAck,
-                    echo_payload: false,
-                })
+                    payload: Vec::new(),
+                };
+
+                connections.record_pending(&key, send_info.clone(), 1);
+
+                Some(send_info)
             }
 
             // Duplicate SYN while awaiting the handshake ACK (client's retransmission timer resent
@@ -142,21 +139,16 @@ impl TcpHandler {
             (TcpState::SynReceived, TcpFlags::Syn, _)
                 if let Some(isn) = connections.pending_isn(&key) =>
             {
-                connections.record_pending(
-                    &key,
-                    isn,
-                    1,
-                    self.seq_num.wrapping_add(1),
-                    TcpFlags::SynAck,
-                    Vec::new(),
-                );
-
-                Some(ReplyInfo {
+                let send_info = SendInfo {
                     seq_num: isn,
                     ack_num: self.seq_num.wrapping_add(1),
                     flags: TcpFlags::SynAck,
-                    echo_payload: false,
-                })
+                    payload: Vec::new(),
+                };
+
+                connections.record_pending(&key, send_info.clone(), 1);
+
+                Some(send_info)
             }
 
             // Handshake ACK (step 3) -> transition to ESTABLISHED, no reply needed
@@ -179,11 +171,11 @@ impl TcpHandler {
                 if connections.ack_exceeds_snd_nxt(&key, self.ack_num)
                     && let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key) =>
             {
-                Some(ReplyInfo {
+                Some(SendInfo {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt,
                     flags: TcpFlags::Ack,
-                    echo_payload: false,
+                    payload: Vec::new(),
                 })
             }
 
@@ -210,21 +202,17 @@ impl TcpHandler {
                 connections.update_snd_una(&key, self.ack_num);
                 connections.advance_snd_nxt(&key, payload_len);
                 connections.advance_rcv_nxt(&key, payload_len);
-                connections.record_pending(
-                    &key,
-                    snd_nxt,
-                    payload_len,
-                    rcv_nxt.wrapping_add(payload_len),
-                    TcpFlags::Ack,
-                    self.payload.clone(),
-                );
 
-                Some(ReplyInfo {
+                let send_info = SendInfo {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt.wrapping_add(payload_len),
                     flags: TcpFlags::Ack,
-                    echo_payload: true,
-                })
+                    payload: self.payload,
+                };
+
+                connections.record_pending(&key, send_info.clone(), payload_len);
+
+                Some(send_info)
             }
 
             // Out-of-order/duplicate data or out-of-order FIN-ACK on an established connection
@@ -236,11 +224,11 @@ impl TcpHandler {
             {
                 connections.update_snd_una(&key, self.ack_num);
 
-                Some(ReplyInfo {
+                Some(SendInfo {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt,
                     flags: TcpFlags::Ack,
-                    echo_payload: false,
+                    payload: Vec::new(),
                 })
             }
 
@@ -252,21 +240,17 @@ impl TcpHandler {
             {
                 connections.start_last_ack(&key);
                 connections.advance_snd_nxt(&key, 1); // FIN consumes one sequence number
-                connections.record_pending(
-                    &key,
-                    snd_nxt,
-                    1,
-                    rcv_nxt.wrapping_add(1),
-                    TcpFlags::FinAck,
-                    Vec::new(),
-                );
 
-                Some(ReplyInfo {
+                let send_info = SendInfo {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt.wrapping_add(1),
                     flags: TcpFlags::FinAck,
-                    echo_payload: false,
-                })
+                    payload: Vec::new(),
+                };
+
+                connections.record_pending(&key, send_info.clone(), 1);
+
+                Some(send_info)
             }
 
             // Final ACK completing passive close (LAST-ACK) or any RST (never RST a RST)
@@ -301,11 +285,11 @@ impl TcpHandler {
                     connections.start_simultaneous_closing(&key);
                 }
 
-                Some(ReplyInfo {
+                Some(SendInfo {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt.wrapping_add(1),
                     flags: TcpFlags::Ack,
-                    echo_payload: false,
+                    payload: Vec::new(),
                 })
             }
 
@@ -317,11 +301,11 @@ impl TcpHandler {
             {
                 connections.remove(&key);
 
-                Some(ReplyInfo {
+                Some(SendInfo {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt.wrapping_add(1),
                     flags: TcpFlags::Ack,
-                    echo_payload: false,
+                    payload: Vec::new(),
                 })
             }
 
@@ -338,23 +322,23 @@ impl TcpHandler {
             // Something else unrecognized (other than RST caught above) -> RST so the peer fails
             // fast instead of hanging. Per RFC 9293, Section 3.10.7.1, any non-RST segment to a
             // CLOSED (unknown) connection gets a RST.
-            _ => Some(ReplyInfo {
+            _ => Some(SendInfo {
                 seq_num: self.ack_num,
                 // ack_num is 0 because sending bare RST with no ACK flag leaves ack_num undefined
                 ack_num: 0,
                 flags: TcpFlags::Rst,
-                echo_payload: false,
+                payload: Vec::new(),
             }),
         }
-        .map(|info| Self {
+        .map(|SendInfo { seq_num, ack_num, flags, payload }| Self {
             // Swap source and destination ports
             src_port: self.dst_port,
             dst_port: self.src_port,
-            seq_num: info.seq_num,
-            ack_num: info.ack_num,
+            seq_num,
+            ack_num,
             offset_bytes: TCP_HEADER_MIN_LEN,
-            flags: info.flags,
-            payload: if info.echo_payload { self.payload } else { Vec::new() },
+            flags,
+            payload,
         }))
     }
 
@@ -368,17 +352,25 @@ impl TcpHandler {
             .filter_map(|key| {
                 let (snd_nxt, rcv_nxt) = connections.get_snd_rcv_nxt(&key)?;
                 connections.start_active_close(&key);
-                connections.record_pending(&key, snd_nxt, 1, rcv_nxt, TcpFlags::FinAck, Vec::new());
+
+                let send_info = SendInfo {
+                    seq_num: snd_nxt,
+                    ack_num: rcv_nxt,
+                    flags: TcpFlags::FinAck,
+                    payload: Vec::new(),
+                };
+
+                connections.record_pending(&key, send_info.clone(), 1);
 
                 Some((
                     Self {
                         src_port: key.server_port,
                         dst_port: key.client_port,
-                        seq_num: snd_nxt,
-                        ack_num: rcv_nxt,
+                        seq_num: send_info.seq_num,
+                        ack_num: send_info.ack_num,
                         offset_bytes: TCP_HEADER_MIN_LEN,
-                        flags: TcpFlags::FinAck,
-                        payload: Vec::new(),
+                        flags: send_info.flags,
+                        payload: send_info.payload,
                     },
                     Ipv4AddrPair { src: key.server_ip, dst: key.client_ip },
                 ))
@@ -399,19 +391,18 @@ impl TcpHandler {
             .expired_retransmit_keys(now, rto)
             .into_iter()
             .filter_map(|key| {
-                let (seq_num, ack_num, flags, payload) =
-                    connections.pending_for_retransmit(&key)?;
+                let send_info = connections.pending_for_retransmit(&key)?;
                 let gave_up = connections.retransmit_or_give_up(&key, now, max_retries);
 
                 (!gave_up).then_some((
                     Self {
                         src_port: key.server_port,
                         dst_port: key.client_port,
-                        seq_num,
-                        ack_num,
+                        seq_num: send_info.seq_num,
+                        ack_num: send_info.ack_num,
                         offset_bytes: TCP_HEADER_MIN_LEN,
-                        flags,
-                        payload,
+                        flags: send_info.flags,
+                        payload: send_info.payload,
                     },
                     Ipv4AddrPair { src: key.server_ip, dst: key.client_ip },
                 ))
