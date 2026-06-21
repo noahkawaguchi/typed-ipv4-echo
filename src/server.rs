@@ -37,31 +37,31 @@ pub fn run(
     shutdown_check: impl Fn() -> bool,
     shutdown_grace_period: Duration,
 ) -> Result<(), Box<dyn Error>> {
-    let mut tcp_connections = TcpConnections::new();
+    let mut tcp_connections = TcpConnections::new(RETRANSMIT_TIMEOUT, MAX_RETRANSMITS);
+
     let mut read_buf = [0u8; ETHERNET_MTU];
     let mut write_buf = [0u8; ETHERNET_MTU];
 
     // Deadline that bounds how long to wait for established connections to finish closing before
     // exiting unconditionally. Set once a shutdown signal starts active close.
-    let mut shutdown_deadline = Option::<Instant>::None;
+    let mut shutdown_deadline = None;
 
     divider();
 
     loop {
-        let timeout_ms =
-            [shutdown_deadline, tcp_connections.next_retransmit_deadline(RETRANSMIT_TIMEOUT)]
-                .into_iter()
-                .flatten()
-                .min()
-                // Block indefinitely (-1) if there's no shutdown deadline and no segment pending
-                // retransmission
-                .map_or(-1, |deadline| {
-                    deadline
-                        .saturating_duration_since(Instant::now())
-                        .as_millis()
-                        .try_into()
-                        .unwrap_or(i32::MAX)
-                });
+        let timeout_ms = [shutdown_deadline, tcp_connections.next_retransmit_deadline()]
+            .into_iter()
+            .flatten()
+            .min()
+            // Block indefinitely (-1) if there's no shutdown deadline and no segment pending
+            // retransmission
+            .map_or(-1, |deadline| {
+                deadline
+                    .saturating_duration_since(Instant::now())
+                    .as_millis()
+                    .try_into()
+                    .unwrap_or(i32::MAX)
+            });
 
         match sys::poll::readable(device.as_raw_fd(), timeout_ms) {
             // If `poll()` was interrupted and returned `EINTR`, a shutdown signal has been
@@ -97,11 +97,7 @@ pub fn run(
 
             // A retransmit deadline elapsed -> retransmit all expired segments
             Ok(false) => {
-                for (reply_handler, ip_pair) in tcp_connections.make_retransmissions(
-                    Instant::now(),
-                    RETRANSMIT_TIMEOUT,
-                    MAX_RETRANSMITS,
-                ) {
+                for (reply_handler, ip_pair) in tcp_connections.make_retransmissions() {
                     println!("\n ==== Packet sent (retransmit) ====");
                     send_packet(device, &mut write_buf, &reply_handler, Protocol::Tcp, ip_pair)?;
                 }
