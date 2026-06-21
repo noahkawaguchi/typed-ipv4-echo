@@ -65,7 +65,7 @@ impl TcpHandler {
     const PSEUDO_HEADER_LEN: usize = 12;
 
     /// Parses `data` as a TCP header and payload.
-    pub fn parse(data: &[u8]) -> Result<Self, String> {
+    pub(super) fn parse(data: &[u8]) -> Result<Self, String> {
         let Some(tcp_header) = data.first_chunk::<{ TCP_HEADER_MIN_LEN as usize }>() else {
             return Err(format!("Too short for TCP header ({} bytes)", data.len()));
         };
@@ -111,7 +111,7 @@ impl TcpHandler {
         clippy::too_many_lines,
         reason = "Large match expression to express reply cases clearly"
     )]
-    pub fn into_reply(
+    pub(super) fn into_reply(
         self,
         connections: &mut TcpConnections,
         ip_pair: Ipv4AddrPair,

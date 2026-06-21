@@ -26,7 +26,7 @@ impl<'a> IcmpEchoHandler<'a> {
     const ICMP_CODE_ECHO: u8 = 0;
 
     /// Parses `data` as an ICMP Echo Request header and payload.
-    pub fn parse(data: &'a [u8]) -> Result<Self, String> {
+    pub(super) fn parse(data: &'a [u8]) -> Result<Self, String> {
         let Some((icmp_header, payload)) = data.split_first_chunk::<{ ICMP_HEADER_LEN as usize }>()
         else {
             return Err(format!("Too short for ICMP header ({} bytes)", data.len()));
@@ -49,7 +49,7 @@ impl<'a> IcmpEchoHandler<'a> {
     }
 
     /// Creates an ICMP header and payload for replying to `self`.
-    pub const fn create_reply(&self) -> Self {
+    pub(super) const fn create_reply(&self) -> Self {
         // ICMP Echo Reply:
         // - Change type from 8 to 0
         // - Keep the same identifier, sequence number, and payload data

@@ -22,7 +22,7 @@ impl<'a> UdpHandler<'a> {
     const PSEUDO_HEADER_LEN: usize = 12;
 
     /// Parses `data` as a UDP header and payload.
-    pub fn parse(data: &'a [u8]) -> Result<Self, String> {
+    pub(super) fn parse(data: &'a [u8]) -> Result<Self, String> {
         let Some((udp_header, payload)) = data.split_first_chunk::<{ UDP_HEADER_LEN as usize }>()
         else {
             return Err(format!("Too short for UDP header ({} bytes)", data.len()));
@@ -38,7 +38,7 @@ impl<'a> UdpHandler<'a> {
     }
 
     /// Creates a UDP header and payload for replying to `self`.
-    pub const fn create_reply(&self) -> Self {
+    pub(super) const fn create_reply(&self) -> Self {
         Self { ports: self.ports.swapped(), payload: self.payload }
     }
 
