@@ -409,7 +409,7 @@ fn close_established_sends_fin_ack_and_transitions_to_fin_wait_1() -> Result<(),
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097); // snd_nxt=1, rcv_nxt=4097
 
-    let mut replies = TcpHandler::close_established(&mut connections);
+    let mut replies = connections.close_established();
     let (reply, ip_pair) = replies.pop().ok_or("Expected one reply")?;
 
     assert!(replies.is_empty(), "Expected exactly one reply");
@@ -434,7 +434,7 @@ fn fin_wait_1_to_fin_wait_2_on_ack_of_our_fin() -> Result<(), Box<dyn Error>> {
     let mut connections = TcpConnections::new();
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097);
-    TcpHandler::close_established(&mut connections); // -> FIN-WAIT-1, snd_nxt=2
+    connections.close_established(); // -> FIN-WAIT-1, snd_nxt=2
 
     // Client acknowledges our FIN (ack=2), no FIN of its own yet
     let reply = client_packet(4097, 2, TcpFlags::Ack, &[]).into_reply(&mut connections, IP_PAIR)?;
@@ -451,7 +451,7 @@ fn fin_wait_2_closes_on_fin_ack_from_peer() -> Result<(), Box<dyn Error>> {
     let mut connections = TcpConnections::new();
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097);
-    TcpHandler::close_established(&mut connections); // -> FIN-WAIT-1, snd_nxt=2
+    connections.close_established(); // -> FIN-WAIT-1, snd_nxt=2
 
     // Our FIN is acknowledged -> FIN-WAIT-2
     let ack_reply =
@@ -478,7 +478,7 @@ fn fin_wait_1_closes_immediately_if_peers_fin_also_acks_ours() -> Result<(), Box
     let mut connections = TcpConnections::new();
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097);
-    TcpHandler::close_established(&mut connections); // -> FIN-WAIT-1, snd_nxt=2
+    connections.close_established(); // -> FIN-WAIT-1, snd_nxt=2
 
     // Client's FIN arrives in order and also acknowledges our FIN (ack=2)
     let reply =
@@ -495,7 +495,7 @@ fn simultaneous_close_transitions_through_closing_to_closed() -> Result<(), Box<
     let mut connections = TcpConnections::new();
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097);
-    TcpHandler::close_established(&mut connections); // -> FIN-WAIT-1, snd_nxt=2
+    connections.close_established(); // -> FIN-WAIT-1, snd_nxt=2
 
     // Client's FIN arrives in order, but doesn't yet acknowledge our FIN (ack=1, simultaneous
     // close) -> CLOSING

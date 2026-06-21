@@ -3,7 +3,7 @@ use {
         ETHERNET_MTU,
         addr_pairs::{Ipv4AddrPair, PortPair},
         checksum,
-        protocol::{Protocol, payload_to_string},
+        protocol::{Protocol, handler::Encode, payload_to_string},
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
     std::fmt,
@@ -41,10 +41,10 @@ impl<'a> UdpHandler<'a> {
     pub(super) const fn create_reply(&self) -> Self {
         Self { ports: self.ports.swapped(), payload: self.payload }
     }
+}
 
-    /// Copies data from `self` to write a UDP header and payload into `buf`, returning the number
-    /// of bytes written.
-    pub fn write_into(&self, buf: &mut [u8], ip_pair: Ipv4AddrPair) -> Result<u16, String> {
+impl Encode for UdpHandler<'_> {
+    fn write_into(&self, buf: &mut [u8], ip_pair: Ipv4AddrPair) -> Result<u16, String> {
         // Source and destination ports
         buf.try_get_mut(..2)?
             .copy_from_slice(&self.ports.src.to_be_bytes());

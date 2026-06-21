@@ -1,4 +1,11 @@
-use {super::*, crate::protocol::test_utils::IP_PAIR, std::error::Error};
+use {
+    super::*,
+    crate::protocol::test_utils::IP_PAIR,
+    std::{
+        error::Error,
+        time::{Duration, Instant},
+    },
+};
 
 #[test]
 fn syn_ack_is_resent_while_due() -> Result<(), Box<dyn Error>> {
@@ -7,8 +14,7 @@ fn syn_ack_is_resent_while_due() -> Result<(), Box<dyn Error>> {
     client_packet(4096, 0, TcpFlags::Syn, &[]).into_reply(&mut connections, IP_PAIR)?;
     let isn = connections.pending_isn(&KEY).ok_or("ISN not stored")?;
 
-    let mut resent =
-        TcpHandler::retransmit_expired(&mut connections, Instant::now(), Duration::ZERO, 5);
+    let mut resent = connections.make_retransmissions(Instant::now(), Duration::ZERO, 5);
     let (reply, ip_pair) = resent.pop().ok_or("Expected one retransmitted segment")?;
 
     assert!(resent.is_empty(), "Expected exactly one retransmitted segment");
@@ -29,8 +35,7 @@ fn pending_segment_is_cleared_once_acked() -> Result<(), Box<dyn Error>> {
     client_packet(4097, isn.wrapping_add(1), TcpFlags::Ack, &[])
         .into_reply(&mut connections, IP_PAIR)?;
 
-    let resent =
-        TcpHandler::retransmit_expired(&mut connections, Instant::now(), Duration::ZERO, 5);
+    let resent = connections.make_retransmissions(Instant::now(), Duration::ZERO, 5);
 
     assert!(resent.is_empty(), "Acked segment should not be retransmitted");
 
@@ -45,8 +50,7 @@ fn data_echo_is_resent_unchanged() -> Result<(), Box<dyn Error>> {
 
     client_packet(4097, 1, TcpFlags::Ack, b"Hello").into_reply(&mut connections, IP_PAIR)?;
 
-    let mut resent =
-        TcpHandler::retransmit_expired(&mut connections, Instant::now(), Duration::ZERO, 5);
+    let mut resent = connections.make_retransmissions(Instant::now(), Duration::ZERO, 5);
     let (reply, _) = resent.pop().ok_or("Expected one retransmitted segment")?;
 
     assert!(resent.is_empty(), "Expected exactly one retransmitted segment");
@@ -61,10 +65,9 @@ fn fin_ack_is_resent_unchanged() -> Result<(), Box<dyn Error>> {
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097);
 
-    TcpHandler::close_established(&mut connections);
+    connections.close_established();
 
-    let mut resent =
-        TcpHandler::retransmit_expired(&mut connections, Instant::now(), Duration::ZERO, 5);
+    let mut resent = connections.make_retransmissions(Instant::now(), Duration::ZERO, 5);
     let (reply, _) = resent.pop().ok_or("Expected one retransmitted segment")?;
 
     assert!(resent.is_empty(), "Expected exactly one retransmitted segment");
@@ -81,24 +84,14 @@ fn gives_up_after_max_retransmits() -> Result<(), Box<dyn Error>> {
     client_packet(4096, 0, TcpFlags::Syn, &[]).into_reply(&mut connections, IP_PAIR)?;
 
     for _ in 0..MAX_RETRIES {
-        let resent = TcpHandler::retransmit_expired(
-            &mut connections,
-            Instant::now(),
-            Duration::ZERO,
-            MAX_RETRIES,
-        );
+        let resent = connections.make_retransmissions(Instant::now(), Duration::ZERO, MAX_RETRIES);
 
         assert_eq!(resent.len(), 1, "Should still be retried");
         assert_eq!(connections.tcp_state_of(&KEY), TcpState::SynReceived);
     }
 
     // Exceeds MAX_RETRIES -> give up
-    let resent = TcpHandler::retransmit_expired(
-        &mut connections,
-        Instant::now(),
-        Duration::ZERO,
-        MAX_RETRIES,
-    );
+    let resent = connections.make_retransmissions(Instant::now(), Duration::ZERO, MAX_RETRIES);
 
     assert!(resent.is_empty(), "Should give up instead of retransmitting again");
     assert_eq!(connections.tcp_state_of(&KEY), TcpState::Closed, "Connection should be removed");
