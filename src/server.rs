@@ -13,7 +13,7 @@ use {
     std::{
         error::Error,
         io::{self, Read, Write},
-        os::fd::AsRawFd,
+        os::fd::AsFd,
         time::{Duration, Instant},
     },
 };
@@ -33,7 +33,7 @@ fn divider() { println!("\n{}\n", "=".repeat(60)) }
 /// established TCP connections and waits up to `shutdown_grace_period` for them to finish before
 /// returning.
 pub fn run(
-    device: &mut (impl Read + Write + AsRawFd),
+    device: &mut (impl Read + Write + AsFd),
     shutdown_check: impl Fn() -> bool,
     shutdown_grace_period: Duration,
 ) -> Result<(), Box<dyn Error>> {
@@ -49,28 +49,27 @@ pub fn run(
     divider();
 
     loop {
-        let timeout_ms = [shutdown_deadline, tcp_connections.next_retransmit_deadline()]
+        // Block with a `None` timeout if there's no shutdown deadline and no segment pending
+        // retransmission
+        let timeout = [shutdown_deadline, tcp_connections.next_retransmit_deadline()]
             .into_iter()
             .flatten()
             .min()
-            // Block indefinitely (-1) if there's no shutdown deadline and no segment pending
-            // retransmission
-            .map_or(-1, |deadline| {
-                deadline
-                    .saturating_duration_since(Instant::now())
-                    .as_millis()
-                    .try_into()
-                    .unwrap_or(i32::MAX)
-            });
+            .map(|deadline| deadline.saturating_duration_since(Instant::now()));
 
-        match sys::poll::readable(device.as_raw_fd(), timeout_ms) {
+        match sys::poll::readable(&device, timeout) {
             // If `poll()` was interrupted and returned `EINTR`, a shutdown signal has been
             // received. The first time this happens, actively close all established connections and
             // start the shutdown grace period.
             Err(e) if e.kind() == io::ErrorKind::Interrupted && shutdown_check() => {
-                if shutdown_deadline.is_some() {
+                if let Some(deadline) = shutdown_deadline {
                     // SIGINT while already draining -> just print the time left
-                    println!("\nDraining connections, {timeout_ms}ms left");
+                    println!(
+                        "\nDraining connections, {}ms left",
+                        deadline
+                            .saturating_duration_since(Instant::now())
+                            .as_millis()
+                    );
                 } else {
                     shutdown_deadline = match start_active_close(
                         device,
