@@ -13,7 +13,7 @@ use {
     std::{
         error::Error,
         io::{self, Read, Write},
-        os::fd::AsRawFd,
+        os::fd::AsFd,
         time::{Duration, Instant},
     },
 };
@@ -33,7 +33,7 @@ fn divider() { println!("\n{}\n", "=".repeat(60)) }
 /// established TCP connections and waits up to `shutdown_grace_period` for them to finish before
 /// returning.
 pub fn run(
-    device: &mut (impl Read + Write + AsRawFd),
+    device: &mut (impl Read + Write + AsFd),
     shutdown_check: impl Fn() -> bool,
     shutdown_grace_period: Duration,
 ) -> Result<(), Box<dyn Error>> {
@@ -57,7 +57,7 @@ pub fn run(
             .min()
             .map(|deadline| deadline.saturating_duration_since(Instant::now()));
 
-        match sys::poll::readable(device.as_raw_fd(), timeout) {
+        match sys::poll::readable(&device, timeout) {
             // If `poll()` was interrupted and returned `EINTR`, a shutdown signal has been
             // received. The first time this happens, actively close all established connections and
             // start the shutdown grace period.
