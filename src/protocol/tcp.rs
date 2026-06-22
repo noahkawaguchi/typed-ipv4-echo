@@ -269,6 +269,30 @@ impl TcpHandler {
                 None
             }
 
+            // In-order data arriving in FIN-WAIT-1/FIN-WAIT-2, i.e. after we've sent our own FIN
+            // but before the peer's FIN has arrived (half closed) -> ACK it, don't echo because we
+            // have no send side left, and advance rcv_nxt
+            (TcpState::FinWait1 | TcpState::FinWait2, TcpFlags::Ack, 1..)
+                if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key)
+                    && self.seq_num == rcv_nxt =>
+            {
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "`u32::MAX` (4_294_967_295) > `ETHERNET_MTU` (1500)"
+                )]
+                let payload_len = self.payload.len() as u32;
+
+                connections.update_snd_una(&key, self.ack_num);
+                connections.advance_rcv_nxt(&key, payload_len);
+
+                Some(SendInfo {
+                    seq_num: snd_nxt,
+                    ack_num: rcv_nxt.wrapping_add(payload_len),
+                    flags: TcpFlags::Ack,
+                    payload: Vec::new(),
+                })
+            }
+
             // FIN-WAIT-1, our FIN has been acknowledged (and nothing else) -> FIN-WAIT-2, no reply
             (TcpState::FinWait1, TcpFlags::Ack, 0)
                 if let Some((snd_nxt, _)) = connections.get_snd_rcv_nxt(&key)
