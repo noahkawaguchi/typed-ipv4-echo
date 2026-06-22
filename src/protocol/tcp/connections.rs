@@ -81,6 +81,16 @@ struct PendingSegment {
     retries: u8,
 }
 
+impl PendingSegment {
+    /// Returns whether `self` has been sitting unacknowledged long enough to be due for
+    /// retransmission as of `now` (i.e. `rto` elapsed since it was last sent).
+    fn is_due(&self, rto: Duration, now: Instant) -> bool {
+        self.last_sent_at
+            .checked_add(rto)
+            .is_some_and(|deadline| deadline <= now)
+    }
+}
+
 /// The state of a connection in the table, including its TCP state and other locally stored data.
 struct ConnState {
     tcp_state: TcpState,
@@ -98,8 +108,8 @@ struct ConnState {
     /// "RCV.NXT = next sequence number expected on an incoming segment" (RFC 9293, Section 3.4).
     rcv_nxt: u32,
 
-    /// The single latest unacked segment sent by the server, if any, for retransmission purposes.
-    pending: Option<PendingSegment>,
+    /// Unacked segments sent by the server, kept for retransmission purposes.
+    pending: Vec<PendingSegment>,
 }
 
 /// Tracks per-connection state keyed by the 4-tuple.
@@ -125,12 +135,12 @@ impl TcpConnections {
         self.table.insert(
             key,
             ConnState {
-                tcp_state: TcpState::SynReceived,
+                tcp_state: TcpState::SynReceived, // State after initial two-way exchange
                 isn,
-                snd_una: isn, // The SYN-ACK we're about to send is unacknowledged
+                snd_una: isn, // The SYN-ACK we're sending is unacknowledged
                 snd_nxt: isn.wrapping_add(1), // SYN-ACK consumes one sequence number
                 rcv_nxt: 0,   // Set at connection establishment
-                pending: None,
+                pending: Vec::new(),
             },
         );
     }
@@ -165,14 +175,8 @@ impl TcpConnections {
         {
             conn.snd_una = ack_num;
 
-            // Remove `pending` if fully acknowledged
-            if conn
-                .pending
-                .as_ref()
-                .is_some_and(|p| Self::seq_le(p.end_seq, ack_num))
-            {
-                conn.pending = None;
-            }
+            // ACKs are cumulative, so only keep pending segments not fully covered by `ack_num`
+            conn.pending.retain(|p| Self::seq_lt(ack_num, p.end_seq));
         }
     }
 
@@ -200,13 +204,12 @@ impl TcpConnections {
         }
     }
 
-    /// Records `seq_num..seq_num + consumed` as the latest unacked segment sent for retransmission,
-    /// overwriting any previously pending segment.
+    /// Records `seq_num..seq_num + consumed` as an unacked segment eligible for retransmission.
     pub(super) fn record_pending(&mut self, key: &ConnKey, send_info: SendInfo, consumed: u32) {
         if let Some(conn) = self.table.get_mut(key) {
             let end_seq = send_info.seq_num.wrapping_add(consumed);
 
-            conn.pending = Some(PendingSegment {
+            conn.pending.push(PendingSegment {
                 send_info,
                 end_seq,
                 last_sent_at: Instant::now(),
@@ -253,47 +256,63 @@ impl TcpConnections {
         })
     }
 
-    /// Returns the earliest `Instant` at which any connection's pending segment becomes due for
-    /// retransmission, or `None` if no connection has a pending segment.
+    /// Returns the earliest `Instant` at which a pending segment for any connection becomes due for
+    /// retransmission, or `None` if no connection has any pending segments.
     pub fn next_retransmit_deadline(&self) -> Option<Instant> {
         self.table
             .values()
-            .filter_map(|s| s.pending.as_ref()?.last_sent_at.checked_add(self.rto))
+            .flat_map(|s| &s.pending)
+            .filter_map(|p| p.last_sent_at.checked_add(self.rto))
             .min()
     }
 
-    /// Reproduces every connection's pending unacked segment that is due for retransmission, or
-    /// gives up and removes the connection once it has been retried `max_retries` times.
+    /// Reproduces every pending unacked segment that is due for retransmission. If any connection
+    /// has a due segment that has already been retried `max_retries` times, gives up and removes
+    /// that connection entirely.
     pub fn make_retransmissions(&mut self) -> Vec<(TcpHandler, Ipv4AddrPair)> {
         let now = Instant::now();
 
-        self.table
+        let due_keys = self
+            .table
             .iter()
-            .filter_map(|(&key, s)| {
-                (s.pending.as_ref()?.last_sent_at.checked_add(self.rto)? <= now).then_some(key)
+            .filter_map(|(&k, s)| {
+                s.pending
+                    .iter()
+                    .any(|p| p.is_due(self.rto, now))
+                    .then_some(k)
             })
-            .collect::<Vec<_>>()
-            .into_iter()
-            .filter_map(|key| {
-                let pending = self.table.get_mut(&key)?.pending.as_mut()?;
+            .collect::<Vec<_>>();
 
-                if pending.retries < self.max_retries {
-                    pending.retries = pending.retries.saturating_add(1);
-                    pending.last_sent_at = now;
+        let mut retransmissions = Vec::new();
 
-                    Some((
+        for key in due_keys {
+            let Some(conn) = self.table.get_mut(&key) else { continue };
+
+            if conn
+                .pending
+                .iter()
+                .any(|p| p.is_due(self.rto, now) && p.retries >= self.max_retries)
+            {
+                self.table.remove(&key);
+                continue;
+            }
+
+            retransmissions.extend(conn.pending.iter_mut().filter_map(|segment| {
+                segment.is_due(self.rto, now).then(|| {
+                    segment.retries = segment.retries.saturating_add(1);
+                    segment.last_sent_at = now;
+                    (
                         TcpHandler::from_ports_and_info(
                             PortPair { src: key.server_port, dst: key.client_port },
-                            pending.send_info.clone(),
+                            segment.send_info.clone(),
                         ),
                         Ipv4AddrPair { src: key.server_ip, dst: key.client_ip },
-                    ))
-                } else {
-                    self.table.remove(&key);
-                    None
-                }
-            })
-            .collect()
+                    )
+                })
+            }));
+        }
+
+        retransmissions
     }
 
     /// Initiates active close (RFC 9293 "CLOSE" call) for every connection currently ESTABLISHED,
