@@ -74,6 +74,31 @@ fn fin_ack_is_resent_unchanged() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn multiple_unacked_segments_are_all_retransmitted() -> Result<(), Box<dyn Error>> {
+    // If the client pipelines multiple segments before acking the first, the server must keep
+    // retransmitting every unacked segment, not just the most recently sent one.
+
+    let mut connections = TcpConnections::new(Duration::ZERO, 5);
+    connections.store_isn(KEY, 0);
+    connections.establish(&KEY, 4097);
+
+    // First data packet: "Hello" (5 bytes), ack=1 -> echoed, pending segment seq=1..6
+    client_packet(4097, 1, TcpFlags::Ack, b"Hello").into_reply(&mut connections, IP_PAIR)?;
+
+    // Second data packet: "Hi" (2 bytes), still ack=1 (hasn't acked the first echo yet) -> echoed,
+    // pending segment seq=6..8
+    client_packet(4102, 1, TcpFlags::Ack, b"Hi").into_reply(&mut connections, IP_PAIR)?;
+
+    let [(hello, _), (hi, _)] = <[_; 2]>::try_from(connections.make_retransmissions())
+        .map_err(|_| "Expected exactly two retransmitted segments")?;
+
+    assert_eq!(hello, server_reply(1, 4102, TcpFlags::Ack, b"Hello"));
+    assert_eq!(hi, server_reply(6, 4104, TcpFlags::Ack, b"Hi"));
+
+    Ok(())
+}
+
+#[test]
 fn gives_up_after_max_retransmits() -> Result<(), Box<dyn Error>> {
     const MAX_RETRIES: u8 = 3;
 
