@@ -49,28 +49,27 @@ pub fn run(
     divider();
 
     loop {
-        let timeout_ms = [shutdown_deadline, tcp_connections.next_retransmit_deadline()]
+        // Block with a `None` timeout if there's no shutdown deadline and no segment pending
+        // retransmission
+        let timeout = [shutdown_deadline, tcp_connections.next_retransmit_deadline()]
             .into_iter()
             .flatten()
             .min()
-            // Block indefinitely (-1) if there's no shutdown deadline and no segment pending
-            // retransmission
-            .map_or(-1, |deadline| {
-                deadline
-                    .saturating_duration_since(Instant::now())
-                    .as_millis()
-                    .try_into()
-                    .unwrap_or(i32::MAX)
-            });
+            .map(|deadline| deadline.saturating_duration_since(Instant::now()));
 
-        match sys::poll::readable(device.as_raw_fd(), timeout_ms) {
+        match sys::poll::readable(device.as_raw_fd(), timeout) {
             // If `poll()` was interrupted and returned `EINTR`, a shutdown signal has been
             // received. The first time this happens, actively close all established connections and
             // start the shutdown grace period.
             Err(e) if e.kind() == io::ErrorKind::Interrupted && shutdown_check() => {
-                if shutdown_deadline.is_some() {
+                if let Some(deadline) = shutdown_deadline {
                     // SIGINT while already draining -> just print the time left
-                    println!("\nDraining connections, {timeout_ms}ms left");
+                    println!(
+                        "\nDraining connections, {}ms left",
+                        deadline
+                            .saturating_duration_since(Instant::now())
+                            .as_millis()
+                    );
                 } else {
                     shutdown_deadline = match start_active_close(
                         device,
