@@ -9,7 +9,9 @@ use {
         addr_pairs::{Ipv4AddrPair, PortPair},
         checksum,
         protocol::{
-            Protocol, payload_to_string,
+            Protocol,
+            handler::Encode,
+            payload_to_string,
             tcp::{
                 connections::{ConnKey, TcpState},
                 flags::TcpFlags,
@@ -18,10 +20,7 @@ use {
         sys,
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
-    std::{
-        fmt, io,
-        time::{Duration, Instant},
-    },
+    std::{fmt, io},
 };
 
 const TCP_HEADER_MIN_LEN: u8 = 20;
@@ -65,7 +64,7 @@ impl TcpHandler {
     const PSEUDO_HEADER_LEN: usize = 12;
 
     /// Parses `data` as a TCP header and payload.
-    pub fn parse(data: &[u8]) -> Result<Self, String> {
+    pub(super) fn parse(data: &[u8]) -> Result<Self, String> {
         let Some(tcp_header) = data.first_chunk::<{ TCP_HEADER_MIN_LEN as usize }>() else {
             return Err(format!("Too short for TCP header ({} bytes)", data.len()));
         };
@@ -111,7 +110,7 @@ impl TcpHandler {
         clippy::too_many_lines,
         reason = "Large match expression to express reply cases clearly"
     )]
-    pub fn into_reply(
+    pub(super) fn into_reply(
         self,
         connections: &mut TcpConnections,
         ip_pair: Ipv4AddrPair,
@@ -342,68 +341,10 @@ impl TcpHandler {
         }
         .map(|send_info| Self::from_ports_and_info(self.ports.swapped(), send_info)))
     }
+}
 
-    /// Initiates active close (RFC 9293 "CLOSE" call) for every connection currently ESTABLISHED,
-    /// transitioning each to FIN-WAIT-1 and returning a FIN-ACK reply for it along with the
-    /// `Ipv4AddrPair` for its IPv4 header.
-    pub fn close_established(connections: &mut TcpConnections) -> Vec<(Self, Ipv4AddrPair)> {
-        connections
-            .established_keys()
-            .into_iter()
-            .filter_map(|key| {
-                let (snd_nxt, rcv_nxt) = connections.get_snd_rcv_nxt(&key)?;
-                connections.start_active_close(&key);
-
-                let send_info = SendInfo {
-                    seq_num: snd_nxt,
-                    ack_num: rcv_nxt,
-                    flags: TcpFlags::FinAck,
-                    payload: Vec::new(),
-                };
-
-                connections.record_pending(&key, send_info.clone(), 1);
-
-                Some((
-                    Self::from_ports_and_info(
-                        PortPair { src: key.server_port, dst: key.client_port },
-                        send_info,
-                    ),
-                    Ipv4AddrPair { src: key.server_ip, dst: key.client_ip },
-                ))
-            })
-            .collect()
-    }
-
-    /// Reproduces every connection's pending unacked segment that is due for retransmission (`rto`
-    /// elapsed since it was last sent), or gives up and removes the connection once it has been
-    /// retried `max_retries` times.
-    pub fn retransmit_expired(
-        connections: &mut TcpConnections,
-        now: Instant,
-        rto: Duration,
-        max_retries: u8,
-    ) -> Vec<(Self, Ipv4AddrPair)> {
-        connections
-            .expired_retransmit_keys(now, rto)
-            .into_iter()
-            .filter_map(|key| {
-                let send_info = connections.pending_for_retransmit(&key)?;
-                let gave_up = connections.retransmit_or_give_up(&key, now, max_retries);
-
-                (!gave_up).then_some((
-                    Self::from_ports_and_info(
-                        PortPair { src: key.server_port, dst: key.client_port },
-                        send_info,
-                    ),
-                    Ipv4AddrPair { src: key.server_ip, dst: key.client_ip },
-                ))
-            })
-            .collect()
-    }
-
-    /// Copies data from `self` to write a TCP header and payload into `buf`, returning the number
-    /// of bytes written.
-    pub fn write_into(&self, buf: &mut [u8], ip_pair: Ipv4AddrPair) -> Result<u16, String> {
+impl Encode for TcpHandler {
+    fn write_into(&self, buf: &mut [u8], ip_pair: Ipv4AddrPair) -> Result<u16, String> {
         // Source and destination ports
         buf.try_get_mut(..2)?
             .copy_from_slice(&self.ports.src.to_be_bytes());

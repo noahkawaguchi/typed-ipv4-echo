@@ -2,7 +2,7 @@ use {super::*, crate::protocol::test_utils::IP_PAIR, std::error::Error};
 
 #[test]
 fn reply_creates_valid_syn_ack() -> Result<(), Box<dyn Error>> {
-    let mut connections = TcpConnections::new();
+    let mut connections = TcpConnections::default();
 
     let reply = client_packet(4096, 0, TcpFlags::Syn, &[]).into_reply(&mut connections, IP_PAIR)?;
 
@@ -21,7 +21,7 @@ fn duplicate_syn_during_syn_received_resends_same_syn_ack() -> Result<(), Box<dy
     // If our SYN-ACK is lost, the client's retransmission timer will resend its SYN. We must
     // resend the same SYN-ACK (same ISN), not RST the retry, and not generate a new ISN.
 
-    let mut connections = TcpConnections::new();
+    let mut connections = TcpConnections::default();
     connections.store_isn(KEY, 12345); // Simulates having already sent a SYN-ACK with ISN=12345
 
     let reply = client_packet(4096, 0, TcpFlags::Syn, &[]).into_reply(&mut connections, IP_PAIR)?;
@@ -43,7 +43,7 @@ fn duplicate_syn_during_syn_received_resends_same_syn_ack() -> Result<(), Box<dy
 
 #[test]
 fn data_packet_before_complete_handshake_gets_rst() -> Result<(), Box<dyn Error>> {
-    let mut connections = TcpConnections::new();
+    let mut connections = TcpConnections::default();
     connections.store_isn(KEY, 0); // SYN-ACK sent, but handshake not yet completed
 
     let reply =
@@ -56,7 +56,7 @@ fn data_packet_before_complete_handshake_gets_rst() -> Result<(), Box<dyn Error>
 
 #[test]
 fn handshake_ack_establishes_connection_and_returns_none() -> Result<(), Box<dyn Error>> {
-    let mut connections = TcpConnections::new();
+    let mut connections = TcpConnections::default();
 
     // Simulate having sent a SYN-ACK with ISN=0 so ack_num=1 is the correct completion
     connections.store_isn(KEY, 0);
@@ -73,7 +73,7 @@ fn handshake_ack_establishes_connection_and_returns_none() -> Result<(), Box<dyn
 
 #[test]
 fn reply_creates_valid_data_echo() -> Result<(), Box<dyn Error>> {
-    let mut connections = TcpConnections::new();
+    let mut connections = TcpConnections::default();
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097); // rcv_nxt = client's seq at handshake ACK time
 
@@ -88,7 +88,7 @@ fn reply_creates_valid_data_echo() -> Result<(), Box<dyn Error>> {
 #[test]
 fn reply_creates_valid_fin_ack() -> Result<(), Box<dyn Error>> {
     // Simulate an established connection
-    let mut connections = TcpConnections::new();
+    let mut connections = TcpConnections::default();
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097); // FIN-ACK arrives at seq=4097
 
@@ -108,7 +108,7 @@ fn final_ack_after_fin_ack_removes_connection_and_returns_none() -> Result<(), B
     // Simulates the client's final ACK completing the 4-step close. Should get no reply (not RST)
     // so the client can close cleanly from TIME-WAIT.
 
-    let mut connections = TcpConnections::new();
+    let mut connections = TcpConnections::default();
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097);
     connections.start_last_ack(&KEY);
@@ -133,7 +133,7 @@ fn pure_ack_on_established_connection_returns_none() -> Result<(), Box<dyn Error
     // Simulates the client ACKing the server's echo reply. This should get no reply (not RST) so
     // the connection stays open for more data.
 
-    let mut connections = TcpConnections::new();
+    let mut connections = TcpConnections::default();
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4102); // rcv_nxt after having received "Hello" (4097 + 5)
     connections.advance_snd_nxt(&KEY, 5); // snd_nxt after having sent the 5-byte "Hello" echo
@@ -159,7 +159,7 @@ fn consecutive_replies_use_snd_nxt_for_seq_num() -> Result<(), Box<dyn Error>> {
     // mirroring the client's ack_num. After sending a 5-byte echo, snd_nxt=6, then the next reply's
     // seq_num must be 6 even when the client sends a stale ack_num=1.
 
-    let mut connections = TcpConnections::new();
+    let mut connections = TcpConnections::default();
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097);
 
@@ -199,7 +199,7 @@ fn old_ack_num_does_not_regress_snd_una() -> Result<(), Box<dyn Error>> {
     // SND.UNA) must not move SND.UNA backward, even though the segment is otherwise processed
     // normally (seq_num still matches RCV.NXT).
 
-    let mut connections = TcpConnections::new();
+    let mut connections = TcpConnections::default();
     connections.store_isn(KEY, 0); // SND.UNA=0, SND.NXT=1
     connections.establish(&KEY, 4097); // RCV.NXT=4097
 
@@ -250,7 +250,7 @@ fn old_ack_num_does_not_regress_snd_una() -> Result<(), Box<dyn Error>> {
 
 #[test]
 fn rst_packet_cleans_up_connection_and_returns_none() -> Result<(), Box<dyn Error>> {
-    let mut connections = TcpConnections::new();
+    let mut connections = TcpConnections::default();
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097);
 
@@ -275,7 +275,7 @@ fn duplicate_data_packet_gets_duplicate_ack_without_echo() -> Result<(), Box<dyn
     // because the retransmitted packet's seq+len points back to 4102, but rcv_nxt is 4104 after
     // both deliveries.
 
-    let mut connections = TcpConnections::new();
+    let mut connections = TcpConnections::default();
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097);
 
@@ -317,7 +317,7 @@ fn out_of_order_fin_ack_gets_duplicate_ack_without_closing() -> Result<(), Box<d
     // data has been delivered. Until the gap is filled, treat it like out-of-order data by sending
     // a duplicate ACK reflecting the current rcv_nxt with no change to local state.
 
-    let mut connections = TcpConnections::new();
+    let mut connections = TcpConnections::default();
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097); // rcv_nxt = 4097
 
@@ -345,7 +345,7 @@ fn out_of_order_fin_ack_gets_duplicate_ack_without_closing() -> Result<(), Box<d
 fn unrecognized_packet_for_unknown_connection_gets_rst() -> Result<(), Box<dyn Error>> {
     // ACK with payload for a connection the server has no record of (e.g. after restart)
 
-    let mut connections = TcpConnections::new(); // Empty, no known connections
+    let mut connections = TcpConnections::default(); // Empty, no known connections
 
     let reply =
         client_packet(4097, 1, TcpFlags::Ack, b"Hello").into_reply(&mut connections, IP_PAIR)?;
@@ -362,7 +362,7 @@ fn ack_for_unsent_data_is_dropped_and_gets_current_state_reply() -> Result<(), B
     // SND.NXT/RCV.NXT, with no payload echoed and no state change. seq_num matches RCV.NXT, so this
     // would otherwise be treated as valid in-order data.
 
-    let mut connections = TcpConnections::new();
+    let mut connections = TcpConnections::default();
     connections.store_isn(KEY, 0); // SND.NXT = 1
     connections.establish(&KEY, 4097); // RCV.NXT = 4097
 
@@ -386,7 +386,7 @@ fn wraparound_ack_for_unsent_data_is_still_rejected() -> Result<(), Box<dyn Erro
     // unsent data, even though a naive numeric comparison (ack_num > snd_nxt) would say 0 >
     // `u32::MAX` is false and let it through.
 
-    let mut connections = TcpConnections::new();
+    let mut connections = TcpConnections::default();
     connections.store_isn(KEY, u32::MAX - 1); // SND.UNA=MAX-1, SND.NXT=MAX
     connections.establish(&KEY, 4097); // RCV.NXT=4097
     connections.update_snd_una(&KEY, u32::MAX); // simulate handshake ack completing
@@ -405,11 +405,11 @@ fn wraparound_ack_for_unsent_data_is_still_rejected() -> Result<(), Box<dyn Erro
 
 #[test]
 fn close_established_sends_fin_ack_and_transitions_to_fin_wait_1() -> Result<(), Box<dyn Error>> {
-    let mut connections = TcpConnections::new();
+    let mut connections = TcpConnections::default();
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097); // snd_nxt=1, rcv_nxt=4097
 
-    let mut replies = TcpHandler::close_established(&mut connections);
+    let mut replies = connections.close_established();
     let (reply, ip_pair) = replies.pop().ok_or("Expected one reply")?;
 
     assert!(replies.is_empty(), "Expected exactly one reply");
@@ -431,10 +431,10 @@ fn close_established_sends_fin_ack_and_transitions_to_fin_wait_1() -> Result<(),
 
 #[test]
 fn fin_wait_1_to_fin_wait_2_on_ack_of_our_fin() -> Result<(), Box<dyn Error>> {
-    let mut connections = TcpConnections::new();
+    let mut connections = TcpConnections::default();
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097);
-    TcpHandler::close_established(&mut connections); // -> FIN-WAIT-1, snd_nxt=2
+    connections.close_established(); // -> FIN-WAIT-1, snd_nxt=2
 
     // Client acknowledges our FIN (ack=2), no FIN of its own yet
     let reply = client_packet(4097, 2, TcpFlags::Ack, &[]).into_reply(&mut connections, IP_PAIR)?;
@@ -448,10 +448,10 @@ fn fin_wait_1_to_fin_wait_2_on_ack_of_our_fin() -> Result<(), Box<dyn Error>> {
 
 #[test]
 fn fin_wait_2_closes_on_fin_ack_from_peer() -> Result<(), Box<dyn Error>> {
-    let mut connections = TcpConnections::new();
+    let mut connections = TcpConnections::default();
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097);
-    TcpHandler::close_established(&mut connections); // -> FIN-WAIT-1, snd_nxt=2
+    connections.close_established(); // -> FIN-WAIT-1, snd_nxt=2
 
     // Our FIN is acknowledged -> FIN-WAIT-2
     let ack_reply =
@@ -475,10 +475,10 @@ fn fin_wait_1_closes_immediately_if_peers_fin_also_acks_ours() -> Result<(), Box
     // Simultaneous close where the peer's FIN, arriving while we're still in FIN-WAIT-1, also
     // acknowledges our FIN -> fully closed immediately, skipping FIN-WAIT-2/CLOSING.
 
-    let mut connections = TcpConnections::new();
+    let mut connections = TcpConnections::default();
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097);
-    TcpHandler::close_established(&mut connections); // -> FIN-WAIT-1, snd_nxt=2
+    connections.close_established(); // -> FIN-WAIT-1, snd_nxt=2
 
     // Client's FIN arrives in order and also acknowledges our FIN (ack=2)
     let reply =
@@ -492,10 +492,10 @@ fn fin_wait_1_closes_immediately_if_peers_fin_also_acks_ours() -> Result<(), Box
 
 #[test]
 fn simultaneous_close_transitions_through_closing_to_closed() -> Result<(), Box<dyn Error>> {
-    let mut connections = TcpConnections::new();
+    let mut connections = TcpConnections::default();
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097);
-    TcpHandler::close_established(&mut connections); // -> FIN-WAIT-1, snd_nxt=2
+    connections.close_established(); // -> FIN-WAIT-1, snd_nxt=2
 
     // Client's FIN arrives in order, but doesn't yet acknowledge our FIN (ack=1, simultaneous
     // close) -> CLOSING

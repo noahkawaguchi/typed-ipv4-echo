@@ -3,7 +3,10 @@ use {
         ETHERNET_MTU,
         addr_pairs::Ipv4AddrPair,
         ipv4_header::Ipv4Header,
-        protocol::{Protocol, ProtocolHandler, TcpConnections},
+        protocol::{
+            Protocol, TcpConnections,
+            handler::{Encode, ProtocolHandler},
+        },
         sys,
         try_ops::TryGet as _,
     },
@@ -34,31 +37,31 @@ pub fn run(
     shutdown_check: impl Fn() -> bool,
     shutdown_grace_period: Duration,
 ) -> Result<(), Box<dyn Error>> {
-    let mut tcp_connections = TcpConnections::new();
+    let mut tcp_connections = TcpConnections::new(RETRANSMIT_TIMEOUT, MAX_RETRANSMITS);
+
     let mut read_buf = [0u8; ETHERNET_MTU];
     let mut write_buf = [0u8; ETHERNET_MTU];
 
     // Deadline that bounds how long to wait for established connections to finish closing before
     // exiting unconditionally. Set once a shutdown signal starts active close.
-    let mut shutdown_deadline = Option::<Instant>::None;
+    let mut shutdown_deadline = None;
 
     divider();
 
     loop {
-        let timeout_ms =
-            [shutdown_deadline, tcp_connections.next_retransmit_deadline(RETRANSMIT_TIMEOUT)]
-                .into_iter()
-                .flatten()
-                .min()
-                // Block indefinitely (-1) if there's no shutdown deadline and no segment pending
-                // retransmission
-                .map_or(-1, |deadline| {
-                    deadline
-                        .saturating_duration_since(Instant::now())
-                        .as_millis()
-                        .try_into()
-                        .unwrap_or(i32::MAX)
-                });
+        let timeout_ms = [shutdown_deadline, tcp_connections.next_retransmit_deadline()]
+            .into_iter()
+            .flatten()
+            .min()
+            // Block indefinitely (-1) if there's no shutdown deadline and no segment pending
+            // retransmission
+            .map_or(-1, |deadline| {
+                deadline
+                    .saturating_duration_since(Instant::now())
+                    .as_millis()
+                    .try_into()
+                    .unwrap_or(i32::MAX)
+            });
 
         match sys::poll::readable(device.as_raw_fd(), timeout_ms) {
             // If `poll()` was interrupted and returned `EINTR`, a shutdown signal has been
@@ -94,12 +97,7 @@ pub fn run(
 
             // A retransmit deadline elapsed -> retransmit all expired segments
             Ok(false) => {
-                for (reply_handler, ip_pair) in ProtocolHandler::retransmit_expired(
-                    &mut tcp_connections,
-                    Instant::now(),
-                    RETRANSMIT_TIMEOUT,
-                    MAX_RETRANSMITS,
-                ) {
+                for (reply_handler, ip_pair) in tcp_connections.make_retransmissions() {
                     println!("\n ==== Packet sent (retransmit) ====");
                     send_packet(device, &mut write_buf, &reply_handler, Protocol::Tcp, ip_pair)?;
                 }
@@ -121,18 +119,17 @@ pub fn run(
                         println!(" ==== Packet received ====");
                         println!("{ipv4_header}");
 
-                        match ProtocolHandler::parse(
-                            ipv4_payload,
-                            ipv4_header.protocol,
-                            ipv4_header.ip_pair,
-                        ) {
+                        match ProtocolHandler::parse(ipv4_payload, ipv4_header.protocol) {
                             Err(e) => eprintln!("Skipping packet: {e}"),
 
                             Ok(handler) => {
                                 println!("{handler}");
                                 println!("\n ==== Packet sent ====");
 
-                                match handler.into_reply(&mut tcp_connections)? {
+                                match handler.into_reply(
+                                    &mut tcp_connections,
+                                    ipv4_header.ip_pair.swapped(),
+                                )? {
                                     None => println!("<no reply>"),
 
                                     Some(reply_handler) => send_packet(
@@ -171,7 +168,7 @@ fn start_active_close(
 ) -> Result<Option<Instant>, Box<dyn Error>> {
     println!("\nShutdown signal received, closing established connections...");
 
-    for (reply_handler, ip_pair) in ProtocolHandler::close_established(tcp_connections) {
+    for (reply_handler, ip_pair) in tcp_connections.close_established() {
         println!("\n ==== Packet sent ====");
         send_packet(device, write_buf, &reply_handler, Protocol::Tcp, ip_pair)?;
     }
@@ -201,13 +198,13 @@ fn start_active_close(
 fn send_packet(
     device: &mut impl Write,
     write_buf: &mut [u8; ETHERNET_MTU],
-    handler: &ProtocolHandler,
+    handler: &impl Encode,
     protocol: Protocol,
     ip_pair: Ipv4AddrPair,
 ) -> Result<(), Box<dyn Error>> {
     // Write the protocol-specific portion of the packet first to have the total length for the IPv4
     // header
-    let proto_len = handler.write_into(&mut write_buf[Ipv4Header::REPLY_HEADER_LEN..])?;
+    let proto_len = handler.write_into(&mut write_buf[Ipv4Header::REPLY_HEADER_LEN..], ip_pair)?;
 
     let ipv4_header = Ipv4Header::try_new(protocol, ip_pair, proto_len)?;
     ipv4_header.write_into(write_buf);

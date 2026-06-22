@@ -1,6 +1,6 @@
-pub use {handler::ProtocolHandler, tcp::TcpConnections};
+pub mod handler;
+pub use tcp::TcpConnections;
 
-mod handler;
 mod icmp_echo;
 mod tcp;
 mod udp;

@@ -1,7 +1,8 @@
 use {
     crate::{
+        addr_pairs::Ipv4AddrPair,
         checksum,
-        protocol::payload_to_string,
+        protocol::{handler::Encode, payload_to_string},
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
     std::fmt,
@@ -26,7 +27,7 @@ impl<'a> IcmpEchoHandler<'a> {
     const ICMP_CODE_ECHO: u8 = 0;
 
     /// Parses `data` as an ICMP Echo Request header and payload.
-    pub fn parse(data: &'a [u8]) -> Result<Self, String> {
+    pub(super) fn parse(data: &'a [u8]) -> Result<Self, String> {
         let Some((icmp_header, payload)) = data.split_first_chunk::<{ ICMP_HEADER_LEN as usize }>()
         else {
             return Err(format!("Too short for ICMP header ({} bytes)", data.len()));
@@ -49,7 +50,7 @@ impl<'a> IcmpEchoHandler<'a> {
     }
 
     /// Creates an ICMP header and payload for replying to `self`.
-    pub const fn create_reply(&self) -> Self {
+    pub(super) const fn create_reply(&self) -> Self {
         // ICMP Echo Reply:
         // - Change type from 8 to 0
         // - Keep the same identifier, sequence number, and payload data
@@ -60,10 +61,10 @@ impl<'a> IcmpEchoHandler<'a> {
             payload: self.payload,
         }
     }
+}
 
-    /// Copies data from `self` to write an ICMP header and payload into `buf`, returning the number
-    /// of bytes written.
-    pub fn write_into(&self, buf: &mut [u8]) -> Result<u16, String> {
+impl Encode for IcmpEchoHandler<'_> {
+    fn write_into(&self, buf: &mut [u8], _: Ipv4AddrPair) -> Result<u16, String> {
         // Copy echo payload
         buf.try_get_mut(
             usize::from(ICMP_HEADER_LEN)
@@ -121,7 +122,11 @@ impl fmt::Display for IcmpEchoHandler<'_> {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, crate::ETHERNET_MTU, std::assert_matches};
+    use {
+        super::*,
+        crate::{ETHERNET_MTU, protocol::test_utils::IP_PAIR},
+        std::assert_matches,
+    };
 
     #[test]
     fn correctly_parses_valid_request() -> Result<(), String> {
@@ -208,7 +213,9 @@ mod tests {
         let handler = IcmpEchoHandler::parse(&REQUEST)?;
         let mut reply = [0u8; ETHERNET_MTU];
 
-        let icmp_len = handler.create_reply().write_into(&mut reply[20..])?;
+        let icmp_len = handler
+            .create_reply()
+            .write_into(&mut reply[20..], IP_PAIR)?;
 
         // Verify ICMP header at offset 20
         assert_eq!(reply[20], 0); // Type 0 (Echo Reply)

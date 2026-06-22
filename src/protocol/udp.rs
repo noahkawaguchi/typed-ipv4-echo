@@ -3,7 +3,7 @@ use {
         ETHERNET_MTU,
         addr_pairs::{Ipv4AddrPair, PortPair},
         checksum,
-        protocol::{Protocol, payload_to_string},
+        protocol::{Protocol, handler::Encode, payload_to_string},
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
     std::fmt,
@@ -22,7 +22,7 @@ impl<'a> UdpHandler<'a> {
     const PSEUDO_HEADER_LEN: usize = 12;
 
     /// Parses `data` as a UDP header and payload.
-    pub fn parse(data: &'a [u8]) -> Result<Self, String> {
+    pub(super) fn parse(data: &'a [u8]) -> Result<Self, String> {
         let Some((udp_header, payload)) = data.split_first_chunk::<{ UDP_HEADER_LEN as usize }>()
         else {
             return Err(format!("Too short for UDP header ({} bytes)", data.len()));
@@ -38,13 +38,13 @@ impl<'a> UdpHandler<'a> {
     }
 
     /// Creates a UDP header and payload for replying to `self`.
-    pub const fn create_reply(&self) -> Self {
+    pub(super) const fn create_reply(&self) -> Self {
         Self { ports: self.ports.swapped(), payload: self.payload }
     }
+}
 
-    /// Copies data from `self` to write a UDP header and payload into `buf`, returning the number
-    /// of bytes written.
-    pub fn write_into(&self, buf: &mut [u8], ip_pair: Ipv4AddrPair) -> Result<u16, String> {
+impl Encode for UdpHandler<'_> {
+    fn write_into(&self, buf: &mut [u8], ip_pair: Ipv4AddrPair) -> Result<u16, String> {
         // Source and destination ports
         buf.try_get_mut(..2)?
             .copy_from_slice(&self.ports.src.to_be_bytes());
