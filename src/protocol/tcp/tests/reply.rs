@@ -491,6 +491,64 @@ fn fin_wait_1_closes_immediately_if_peers_fin_also_acks_ours() -> Result<(), Box
 }
 
 #[test]
+fn data_after_our_fin_in_fin_wait_1_is_acked_without_echo() -> Result<(), Box<dyn Error>> {
+    // After we've sent our FIN (FIN-WAIT-1), the connection isn't fully closed until the peer's
+    // FIN also arrives, so data already in flight from the peer must still be accepted and ACKed,
+    // even though we have no send side left to echo it with.
+
+    let mut connections = TcpConnections::default();
+    connections.store_isn(KEY, 0);
+    connections.establish(&KEY, 4097); // rcv_nxt=4097
+    connections.close_established(); // -> FIN-WAIT-1, snd_nxt=2
+
+    let reply =
+        client_packet(4097, 1, TcpFlags::Ack, b"Hello").into_reply(&mut connections, IP_PAIR)?;
+
+    assert_eq!(
+        reply,
+        Some(server_reply(2, 4102, TcpFlags::Ack, &[])),
+        "Data arriving after our FIN should be ACKed without being echoed, not RST"
+    );
+
+    assert_eq!(
+        connections.tcp_state_of(&KEY),
+        TcpState::FinWait1,
+        "State should remain FIN-WAIT-1"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn data_after_our_fin_in_fin_wait_2_is_acked_without_echo() -> Result<(), Box<dyn Error>> {
+    let mut connections = TcpConnections::default();
+    connections.store_isn(KEY, 0);
+    connections.establish(&KEY, 4097);
+    connections.close_established(); // -> FIN-WAIT-1, snd_nxt=2
+
+    // Our FIN is acknowledged -> FIN-WAIT-2
+    client_packet(4097, 2, TcpFlags::Ack, &[]).into_reply(&mut connections, IP_PAIR)?;
+    assert_eq!(connections.tcp_state_of(&KEY), TcpState::FinWait2);
+
+    let reply =
+        client_packet(4097, 2, TcpFlags::Ack, b"Hello").into_reply(&mut connections, IP_PAIR)?;
+
+    assert_eq!(
+        reply,
+        Some(server_reply(2, 4102, TcpFlags::Ack, &[])),
+        "Data arriving after our FIN should be ACKed without being echoed, not RST"
+    );
+
+    assert_eq!(
+        connections.tcp_state_of(&KEY),
+        TcpState::FinWait2,
+        "State should remain FIN-WAIT-2"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn simultaneous_close_transitions_through_closing_to_closed() -> Result<(), Box<dyn Error>> {
     let mut connections = TcpConnections::default();
     connections.store_isn(KEY, 0);
