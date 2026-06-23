@@ -21,6 +21,7 @@ pub trait Encode: fmt::Display {
     fn get_ip_pair(&self) -> Ipv4AddrPair;
 }
 
+/// Enum for static dispatch over the supported protocol-specific handlers.
 pub enum ProtocolHandler<'a> {
     Icmp(IcmpEchoHandler<'a>),
     Tcp(TcpHandler),

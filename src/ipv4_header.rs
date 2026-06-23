@@ -11,7 +11,7 @@ const IPV4_HDR_MIN_LEN_U8: u8 = 20;
 /// The minimum number of bytes for an IPv4 header (no options) as a `usize`.
 const IPV4_HDR_MIN_LEN_USIZE: usize = IPV4_HDR_MIN_LEN_U8 as usize;
 
-/// Struct for managing IPv4 packet header fields and replies.
+/// Manages IPv4 header fields.
 #[cfg_attr(test, derive(Debug))]
 pub struct Ipv4Header {
     pub total_len: u16,

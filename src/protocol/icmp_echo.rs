@@ -10,8 +10,7 @@ use {
 
 const ICMP_HEADER_LEN: u16 = 8;
 
-/// Struct for managing ICMP Echo Request packets and creating Echo Reply packets. Includes the ICMP
-/// header and the payload.
+/// Manages ICMP Echo Request/Reply headers, data, and reply logic.
 #[cfg_attr(test, derive(Debug))]
 pub struct IcmpEchoHandler<'a> {
     /// Not a part of the ICMP header or checksum, but used for addressing replies and to stay

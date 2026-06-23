@@ -11,7 +11,7 @@ use {
 
 const UDP_HEADER_LEN: u16 = 8;
 
-/// Struct for managing and replying to UDP packets. Includes the UDP header and the payload.
+/// Manages UDP headers, data, and reply logic.
 #[cfg_attr(test, derive(Debug))]
 pub struct UdpHandler<'a> {
     /// Not a part of the UDP header, but required for checksum calculation.

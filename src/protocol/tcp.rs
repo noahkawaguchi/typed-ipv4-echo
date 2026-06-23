@@ -25,8 +25,7 @@ use {
 
 const TCP_HEADER_MIN_LEN: u8 = 20;
 
-/// Struct for managing and replying to TCP packets. Includes the TCP header and the payload. Field
-/// definitions below from RFC 9293, Section 3.1.
+/// Manages TCP headers, data, and reply logic. Field definitions below from RFC 9293, Section 3.1.
 #[cfg_attr(test, derive(Debug, PartialEq, Eq, Clone))]
 pub struct TcpHandler {
     /// Not a part of the TCP header, but required for connection state and checksum calculation.
