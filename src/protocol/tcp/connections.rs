@@ -269,7 +269,7 @@ impl TcpConnections {
     /// Reproduces every pending unacked segment that is due for retransmission. If any connection
     /// has a due segment that has already been retried `max_retries` times, gives up and removes
     /// that connection entirely.
-    pub fn make_retransmissions(&mut self) -> Vec<(TcpHandler, Ipv4AddrPair)> {
+    pub fn make_retransmissions(&mut self) -> Vec<TcpHandler> {
         let now = Instant::now();
 
         let due_keys = self
@@ -301,12 +301,11 @@ impl TcpConnections {
                 segment.is_due(self.rto, now).then(|| {
                     segment.retries = segment.retries.saturating_add(1);
                     segment.last_sent_at = now;
-                    (
-                        TcpHandler::from_ports_and_info(
-                            PortPair { src: key.server_port, dst: key.client_port },
-                            segment.send_info.clone(),
-                        ),
+
+                    TcpHandler::from_pairs_and_info(
                         Ipv4AddrPair { src: key.server_ip, dst: key.client_ip },
+                        PortPair { src: key.server_port, dst: key.client_port },
+                        segment.send_info.clone(),
                     )
                 })
             }));
@@ -316,9 +315,8 @@ impl TcpConnections {
     }
 
     /// Initiates active close (RFC 9293 "CLOSE" call) for every connection currently ESTABLISHED,
-    /// transitioning each to FIN-WAIT-1 and returning a FIN-ACK reply for it along with the
-    /// `Ipv4AddrPair` for its IPv4 header.
-    pub fn close_established(&mut self) -> Vec<(TcpHandler, Ipv4AddrPair)> {
+    /// transitioning each to FIN-WAIT-1 and returning a FIN-ACK reply for it.
+    pub fn close_established(&mut self) -> Vec<TcpHandler> {
         self.table
             .iter()
             .filter_map(|(&key, s)| (s.tcp_state == TcpState::Established).then_some(key))
@@ -343,12 +341,10 @@ impl TcpConnections {
 
                 self.record_pending(&key, send_info.clone(), 1);
 
-                Some((
-                    TcpHandler::from_ports_and_info(
-                        PortPair { src: key.server_port, dst: key.client_port },
-                        send_info,
-                    ),
+                Some(TcpHandler::from_pairs_and_info(
                     Ipv4AddrPair { src: key.server_ip, dst: key.client_ip },
+                    PortPair { src: key.server_port, dst: key.client_port },
+                    send_info,
                 ))
             })
             .collect()

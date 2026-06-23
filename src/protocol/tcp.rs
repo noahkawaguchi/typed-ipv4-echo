@@ -25,10 +25,12 @@ use {
 
 const TCP_HEADER_MIN_LEN: u8 = 20;
 
-/// Struct for managing and replying to TCP packets. Includes the TCP header and the payload. Field
-/// definitions below from RFC 9293, Section 3.1.
+/// Manages TCP headers, data, and reply logic. Field definitions below from RFC 9293, Section 3.1.
 #[cfg_attr(test, derive(Debug, PartialEq, Eq, Clone))]
 pub struct TcpHandler {
+    /// Not a part of the TCP header, but required for connection state and checksum calculation.
+    ip_pair: Ipv4AddrPair,
+
     ports: PortPair,
 
     /// "The sequence number of the first data octet in this segment (except when the SYN flag is
@@ -64,7 +66,7 @@ impl TcpHandler {
     const PSEUDO_HEADER_LEN: usize = 12;
 
     /// Parses `data` as a TCP header and payload.
-    pub(super) fn parse(data: &[u8]) -> Result<Self, String> {
+    pub(super) fn parse(data: &[u8], ip_pair: Ipv4AddrPair) -> Result<Self, String> {
         let Some(tcp_header) = data.first_chunk::<{ TCP_HEADER_MIN_LEN as usize }>() else {
             return Err(format!("Too short for TCP header ({} bytes)", data.len()));
         };
@@ -73,6 +75,7 @@ impl TcpHandler {
         let offset_bytes = tcp_header[12] >> 4 << 2;
 
         Ok(Self {
+            ip_pair,
             ports: PortPair {
                 src: u16::from_be_bytes([tcp_header[0], tcp_header[1]]),
                 dst: u16::from_be_bytes([tcp_header[2], tcp_header[3]]),
@@ -98,11 +101,12 @@ impl TcpHandler {
         })
     }
 
-    fn from_ports_and_info(
+    fn from_pairs_and_info(
+        ip_pair: Ipv4AddrPair,
         ports: PortPair,
         SendInfo { seq_num, ack_num, flags, payload }: SendInfo,
     ) -> Self {
-        Self { ports, seq_num, ack_num, offset_bytes: TCP_HEADER_MIN_LEN, flags, payload }
+        Self { ip_pair, ports, seq_num, ack_num, offset_bytes: TCP_HEADER_MIN_LEN, flags, payload }
     }
 
     /// Creates a TCP header and payload for replying to `self`, or returns `Ok(None)` for no reply.
@@ -110,15 +114,11 @@ impl TcpHandler {
         clippy::too_many_lines,
         reason = "Large match expression to express reply cases clearly"
     )]
-    pub(super) fn into_reply(
-        self,
-        connections: &mut TcpConnections,
-        ip_pair: Ipv4AddrPair,
-    ) -> io::Result<Option<Self>> {
+    pub(super) fn into_reply(self, connections: &mut TcpConnections) -> io::Result<Option<Self>> {
         let key = ConnKey {
-            client_ip: ip_pair.src,
+            client_ip: self.ip_pair.src,
             client_port: self.ports.src,
-            server_ip: ip_pair.dst,
+            server_ip: self.ip_pair.dst,
             server_port: self.ports.dst,
         };
 
@@ -363,12 +363,14 @@ impl TcpHandler {
                 payload: Vec::new(),
             }),
         }
-        .map(|send_info| Self::from_ports_and_info(self.ports.swapped(), send_info)))
+        .map(|send_info| {
+            Self::from_pairs_and_info(self.ip_pair.swapped(), self.ports.swapped(), send_info)
+        }))
     }
 }
 
 impl Encode for TcpHandler {
-    fn write_into(&self, buf: &mut [u8], ip_pair: Ipv4AddrPair) -> Result<u16, String> {
+    fn write_into(&self, buf: &mut [u8]) -> Result<u16, String> {
         // Source and destination ports
         buf.try_get_mut(..2)?
             .copy_from_slice(&self.ports.src.to_be_bytes());
@@ -414,8 +416,8 @@ impl Encode for TcpHandler {
 
         // Calculate TCP checksum with pseudo-header
         let mut pseudo_header = [0u8; Self::PSEUDO_HEADER_LEN];
-        pseudo_header[0..4].copy_from_slice(&ip_pair.src.octets());
-        pseudo_header[4..8].copy_from_slice(&ip_pair.dst.octets());
+        pseudo_header[0..4].copy_from_slice(&self.ip_pair.src.octets());
+        pseudo_header[4..8].copy_from_slice(&self.ip_pair.dst.octets());
         pseudo_header[8] = 0; // Reserved padding for alignment
         pseudo_header[9] = Protocol::Tcp.into();
         pseudo_header[10..12].copy_from_slice(&tcp_segment_len.to_be_bytes());
@@ -438,6 +440,10 @@ impl Encode for TcpHandler {
 
         Ok(tcp_segment_len)
     }
+
+    fn proto(&self) -> Protocol { Protocol::Tcp }
+
+    fn get_ip_pair(&self) -> Ipv4AddrPair { self.ip_pair }
 }
 
 impl fmt::Display for TcpHandler {
@@ -463,7 +469,7 @@ mod tests {
 
     use {
         super::*,
-        crate::protocol::test_utils::{DST_IP, SRC_IP},
+        crate::protocol::test_utils::{DST_IP, IP_PAIR, SRC_IP},
         std::assert_matches,
     };
 
@@ -474,6 +480,7 @@ mod tests {
     /// Builds an incoming packet from the client (port 1234) to the server (port 80).
     fn client_packet(seq_num: u32, ack_num: u32, flags: TcpFlags, payload: &[u8]) -> TcpHandler {
         TcpHandler {
+            ip_pair: Ipv4AddrPair { src: KEY.client_ip, dst: KEY.server_ip },
             ports: PortPair { src: KEY.client_port, dst: KEY.server_port },
             seq_num,
             ack_num,
@@ -486,6 +493,7 @@ mod tests {
     /// Builds an expected reply from the server (port 80) to the client (port 1234).
     fn server_reply(seq_num: u32, ack_num: u32, flags: TcpFlags, payload: &[u8]) -> TcpHandler {
         TcpHandler {
+            ip_pair: Ipv4AddrPair { src: KEY.server_ip, dst: KEY.client_ip },
             ports: PortPair { src: KEY.server_port, dst: KEY.client_port },
             seq_num,
             ack_num,

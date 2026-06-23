@@ -1,12 +1,9 @@
-use {
-    super::*,
-    crate::protocol::test_utils::{IP_PAIR, tcp_udp_test_checksum},
-    std::error::Error,
-};
+use {super::*, crate::protocol::test_utils::tcp_udp_test_checksum, std::error::Error};
 
 #[test]
 fn write_into_produces_correct_bytes_with_no_payload() -> Result<(), Box<dyn Error>> {
     let handler = TcpHandler {
+        ip_pair: IP_PAIR,
         ports: PortPair { src: 80, dst: 1234 },
         seq_num: 0x1000_0000,
         ack_num: 0x0000_1001,
@@ -16,7 +13,7 @@ fn write_into_produces_correct_bytes_with_no_payload() -> Result<(), Box<dyn Err
     };
 
     let mut reply = [0u8; ETHERNET_MTU];
-    let tcp_len = handler.write_into(&mut reply[20..], IP_PAIR)?;
+    let tcp_len = handler.write_into(&mut reply[20..])?;
 
     assert_eq!(tcp_len, 20, "no payload, so length is just the header");
 
@@ -37,6 +34,7 @@ fn write_into_produces_correct_bytes_with_no_payload() -> Result<(), Box<dyn Err
 #[test]
 fn write_into_produces_correct_bytes_with_payload() -> Result<(), Box<dyn Error>> {
     let handler = TcpHandler {
+        ip_pair: IP_PAIR,
         ports: PortPair { src: 80, dst: 1234 },
         seq_num: 1,
         ack_num: 4102,
@@ -46,7 +44,7 @@ fn write_into_produces_correct_bytes_with_payload() -> Result<(), Box<dyn Error>
     };
 
     let mut reply = [0u8; ETHERNET_MTU];
-    let tcp_len = handler.write_into(&mut reply[20..], IP_PAIR)?;
+    let tcp_len = handler.write_into(&mut reply[20..])?;
 
     assert_eq!(tcp_len, 25, "header (20 bytes) + payload (5 bytes)");
 

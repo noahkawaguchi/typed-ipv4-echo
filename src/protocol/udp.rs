@@ -11,9 +11,12 @@ use {
 
 const UDP_HEADER_LEN: u16 = 8;
 
-/// Struct for managing and replying to UDP packets. Includes the UDP header and the payload.
+/// Manages UDP headers, data, and reply logic.
 #[cfg_attr(test, derive(Debug))]
 pub struct UdpHandler<'a> {
+    /// Not a part of the UDP header, but required for checksum calculation.
+    ip_pair: Ipv4AddrPair,
+
     ports: PortPair,
     payload: &'a [u8],
 }
@@ -22,13 +25,14 @@ impl<'a> UdpHandler<'a> {
     const PSEUDO_HEADER_LEN: usize = 12;
 
     /// Parses `data` as a UDP header and payload.
-    pub(super) fn parse(data: &'a [u8]) -> Result<Self, String> {
+    pub(super) fn parse(data: &'a [u8], ip_pair: Ipv4AddrPair) -> Result<Self, String> {
         let Some((udp_header, payload)) = data.split_first_chunk::<{ UDP_HEADER_LEN as usize }>()
         else {
             return Err(format!("Too short for UDP header ({} bytes)", data.len()));
         };
 
         Ok(Self {
+            ip_pair,
             ports: PortPair {
                 src: u16::from_be_bytes([udp_header[0], udp_header[1]]),
                 dst: u16::from_be_bytes([udp_header[2], udp_header[3]]),
@@ -39,12 +43,12 @@ impl<'a> UdpHandler<'a> {
 
     /// Creates a UDP header and payload for replying to `self`.
     pub(super) const fn create_reply(&self) -> Self {
-        Self { ports: self.ports.swapped(), payload: self.payload }
+        Self { ip_pair: self.ip_pair.swapped(), ports: self.ports.swapped(), payload: self.payload }
     }
 }
 
 impl Encode for UdpHandler<'_> {
-    fn write_into(&self, buf: &mut [u8], ip_pair: Ipv4AddrPair) -> Result<u16, String> {
+    fn write_into(&self, buf: &mut [u8]) -> Result<u16, String> {
         // Source and destination ports
         buf.try_get_mut(..2)?
             .copy_from_slice(&self.ports.src.to_be_bytes());
@@ -70,8 +74,8 @@ impl Encode for UdpHandler<'_> {
 
         // Calculate UDP checksum with pseudo-header
         let mut pseudo_header = [0u8; Self::PSEUDO_HEADER_LEN];
-        pseudo_header[0..4].copy_from_slice(&ip_pair.src.octets()); // Source IP
-        pseudo_header[4..8].copy_from_slice(&ip_pair.dst.octets()); // Dest IP
+        pseudo_header[0..4].copy_from_slice(&self.ip_pair.src.octets()); // Source IP
+        pseudo_header[4..8].copy_from_slice(&self.ip_pair.dst.octets()); // Dest IP
         pseudo_header[8] = 0; // Reserved padding for alignment
         pseudo_header[9] = Protocol::Udp.into();
         pseudo_header[10..12].copy_from_slice(&udp_len.to_be_bytes());
@@ -94,6 +98,10 @@ impl Encode for UdpHandler<'_> {
 
         Ok(udp_len)
     }
+
+    fn proto(&self) -> Protocol { Protocol::Udp }
+
+    fn get_ip_pair(&self) -> Ipv4AddrPair { self.ip_pair }
 }
 
 impl fmt::Display for UdpHandler<'_> {
@@ -122,7 +130,7 @@ mod tests {
             0x6F, 0x21, 0x21, 0x21,  // Payload: "o!!!"
         ];
 
-        let handler = UdpHandler::parse(&DATA)?;
+        let handler = UdpHandler::parse(&DATA, IP_PAIR)?;
 
         assert_eq!(handler.ports, PortPair { src: 1234, dst: 53 });
         assert_eq!(handler.payload, b"Hello!!!");
@@ -133,7 +141,7 @@ mod tests {
     #[test]
     fn parsing_fails_when_too_short() {
         const DATA: [u8; 3] = [0x04, 0xD2, 0x00]; // Only 3 bytes
-        assert_matches!(UdpHandler::parse(&DATA), Err(e) if e.contains("Too short"));
+        assert_matches!(UdpHandler::parse(&DATA, IP_PAIR), Err(e) if e.contains("Too short"));
     }
 
     #[test]
@@ -146,7 +154,7 @@ mod tests {
             0x00, 0x00,              // Checksum
         ];
 
-        let handler = UdpHandler::parse(&DATA)?;
+        let handler = UdpHandler::parse(&DATA, IP_PAIR)?;
 
         assert_eq!(handler.ports, PortPair { src: 8080, dst: 80 });
         assert_eq!(handler.payload.len(), 0);
@@ -165,7 +173,7 @@ mod tests {
             0x74, 0x65, 0x73, 0x74,  // Payload: "test"
         ];
 
-        let handler = UdpHandler::parse(&DATA)?;
+        let handler = UdpHandler::parse(&DATA, IP_PAIR)?;
 
         assert_eq!(handler.ports, PortPair { src: 65535, dst: 1 });
 
@@ -183,26 +191,27 @@ mod tests {
             0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x21, 0x21, 0x21,  // Payload: "Hello!!!"
         ];
 
-        let handler = UdpHandler::parse(&REQUEST)?;
-        let mut reply = [0u8; ETHERNET_MTU];
+        let handler = UdpHandler::parse(&REQUEST, IP_PAIR)?;
+        let mut reply_buf = [0u8; ETHERNET_MTU];
+        let reply = handler.create_reply();
+        let udp_len = reply.write_into(&mut reply_buf[20..])?;
 
-        let udp_len = handler
-            .create_reply()
-            .write_into(&mut reply[20..], IP_PAIR)?;
+        // IPs should be swapped
+        assert_eq!(reply.get_ip_pair(), IP_PAIR.swapped());
 
         // Verify UDP header at offset 20
-        assert_eq!(&reply[20..22], &[0x00, 0x35]); // Source port: 53 (swapped)
-        assert_eq!(&reply[22..24], &[0x04, 0xD2]); // Dest port: 1234 (swapped)
-        assert_eq!(&reply[24..26], &[0x00, 0x10]); // Length: 16
+        assert_eq!(&reply_buf[20..22], &[0x00, 0x35]); // Source port: 53 (swapped)
+        assert_eq!(&reply_buf[22..24], &[0x04, 0xD2]); // Dest port: 1234 (swapped)
+        assert_eq!(&reply_buf[24..26], &[0x00, 0x10]); // Length: 16
 
         // Verify payload echoed
-        assert_eq!(&reply[28..36], b"Hello!!!");
+        assert_eq!(&reply_buf[28..36], b"Hello!!!");
 
         // Verify UDP length
         assert_eq!(udp_len, 8 + 8);
 
         // Verify checksum
-        assert_eq!(tcp_udp_test_checksum(&reply, Protocol::Udp, udp_len, IP_PAIR)?, 0x0000);
+        assert_eq!(tcp_udp_test_checksum(&reply_buf, Protocol::Udp, udp_len, IP_PAIR)?, 0x0000);
 
         Ok(())
     }
