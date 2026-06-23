@@ -2,7 +2,7 @@ use {
     crate::{
         addr_pairs::Ipv4AddrPair,
         checksum,
-        protocol::{handler::Encode, payload_to_string},
+        protocol::{Protocol, handler::Encode, payload_to_string},
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
     std::fmt,
@@ -14,6 +14,10 @@ const ICMP_HEADER_LEN: u16 = 8;
 /// header and the payload.
 #[cfg_attr(test, derive(Debug))]
 pub struct IcmpEchoHandler<'a> {
+    /// Not a part of the ICMP header or checksum, but used for addressing replies and to stay
+    /// parallel to TCP and UDP.
+    ip_pair: Ipv4AddrPair,
+
     icmp_type: u8,
     // The code field is omitted because it is constant 0 for Echo Request/Reply
     identifier: u16,
@@ -27,7 +31,7 @@ impl<'a> IcmpEchoHandler<'a> {
     const ICMP_CODE_ECHO: u8 = 0;
 
     /// Parses `data` as an ICMP Echo Request header and payload.
-    pub(super) fn parse(data: &'a [u8]) -> Result<Self, String> {
+    pub(super) fn parse(data: &'a [u8], ip_pair: Ipv4AddrPair) -> Result<Self, String> {
         let Some((icmp_header, payload)) = data.split_first_chunk::<{ ICMP_HEADER_LEN as usize }>()
         else {
             return Err(format!("Too short for ICMP header ({} bytes)", data.len()));
@@ -42,6 +46,7 @@ impl<'a> IcmpEchoHandler<'a> {
         }
 
         Ok(Self {
+            ip_pair,
             icmp_type,
             identifier: u16::from_be_bytes([icmp_header[4], icmp_header[5]]),
             sequence: u16::from_be_bytes([icmp_header[6], icmp_header[7]]),
@@ -55,6 +60,7 @@ impl<'a> IcmpEchoHandler<'a> {
         // - Change type from 8 to 0
         // - Keep the same identifier, sequence number, and payload data
         Self {
+            ip_pair: self.ip_pair.swapped(),
             icmp_type: Self::ICMP_TYPE_ECHO_REPLY,
             identifier: self.identifier,
             sequence: self.sequence,
@@ -64,7 +70,7 @@ impl<'a> IcmpEchoHandler<'a> {
 }
 
 impl Encode for IcmpEchoHandler<'_> {
-    fn write_into(&self, buf: &mut [u8], _: Ipv4AddrPair) -> Result<u16, String> {
+    fn write_into(&self, buf: &mut [u8]) -> Result<u16, String> {
         // Copy echo payload
         buf.try_get_mut(
             usize::from(ICMP_HEADER_LEN)
@@ -99,6 +105,10 @@ impl Encode for IcmpEchoHandler<'_> {
 
         Ok(icmp_len)
     }
+
+    fn proto(&self) -> Protocol { Protocol::Icmp }
+
+    fn get_ip_pair(&self) -> Ipv4AddrPair { self.ip_pair }
 }
 
 impl fmt::Display for IcmpEchoHandler<'_> {
@@ -139,7 +149,7 @@ mod tests {
             0x41, 0x42, 0x43,  // Payload: "ABC"
         ];
 
-        let handler = IcmpEchoHandler::parse(&DATA)?;
+        let handler = IcmpEchoHandler::parse(&DATA, IP_PAIR)?;
 
         assert_eq!(handler.identifier, 0x1234);
         assert_eq!(handler.sequence, 0x5678);
@@ -151,7 +161,7 @@ mod tests {
     #[test]
     fn parsing_fails_when_too_short() {
         const DATA: [u8; 5] = [8, 0, 0x3A, 0x4B, 0x12]; // Only 5 bytes
-        assert_matches!(IcmpEchoHandler::parse(&DATA), Err(e) if e.contains("Too short"));
+        assert_matches!(IcmpEchoHandler::parse(&DATA, IP_PAIR), Err(e) if e.contains("Too short"));
     }
 
     #[test]
@@ -164,7 +174,10 @@ mod tests {
             0x56, 0x78,        // Sequence
         ];
 
-        assert_matches!(IcmpEchoHandler::parse(&DATA), Err(e) if e.contains("Not an Echo Request"));
+        assert_matches!(
+            IcmpEchoHandler::parse(&DATA, IP_PAIR),
+            Err(e) if e.contains("Not an Echo Request")
+        );
     }
 
     #[test]
@@ -177,7 +190,10 @@ mod tests {
             0x56, 0x78,        // Sequence
         ];
 
-        assert_matches!(IcmpEchoHandler::parse(&DATA), Err(e) if e.contains("Not an Echo Request"));
+        assert_matches!(
+            IcmpEchoHandler::parse(&DATA, IP_PAIR),
+            Err(e) if e.contains("Not an Echo Request")
+        );
     }
 
     #[test]
@@ -190,7 +206,7 @@ mod tests {
             0x00, 0x01,        // Sequence: 1
         ];
 
-        let handler = IcmpEchoHandler::parse(&DATA)?;
+        let handler = IcmpEchoHandler::parse(&DATA, IP_PAIR)?;
 
         assert_eq!(handler.identifier, 0);
         assert_eq!(handler.sequence, 1);
@@ -210,27 +226,28 @@ mod tests {
             0x48, 0x65, 0x6C, 0x6C, 0x6F,  // Payload: "Hello"
         ];
 
-        let handler = IcmpEchoHandler::parse(&REQUEST)?;
-        let mut reply = [0u8; ETHERNET_MTU];
+        let handler = IcmpEchoHandler::parse(&REQUEST, IP_PAIR)?;
+        let mut reply_buf = [0u8; ETHERNET_MTU];
+        let reply = handler.create_reply();
+        let icmp_len = reply.write_into(&mut reply_buf[20..])?;
 
-        let icmp_len = handler
-            .create_reply()
-            .write_into(&mut reply[20..], IP_PAIR)?;
+        // IPs should be swapped
+        assert_eq!(reply.get_ip_pair(), IP_PAIR.swapped());
 
         // Verify ICMP header at offset 20
-        assert_eq!(reply[20], 0); // Type 0 (Echo Reply)
-        assert_eq!(reply[21], 0); // Code 0
-        assert_eq!(&reply[24..26], &[0x12, 0x34]); // Identifier preserved
-        assert_eq!(&reply[26..28], &[0x56, 0x78]); // Sequence preserved
+        assert_eq!(reply_buf[20], 0); // Type 0 (Echo Reply)
+        assert_eq!(reply_buf[21], 0); // Code 0
+        assert_eq!(&reply_buf[24..26], &[0x12, 0x34]); // Identifier preserved
+        assert_eq!(&reply_buf[26..28], &[0x56, 0x78]); // Sequence preserved
 
         // Verify payload echoed
-        assert_eq!(&reply[28..33], b"Hello");
+        assert_eq!(&reply_buf[28..33], b"Hello");
 
         // Verify ICMP length
         assert_eq!(icmp_len, 8 + 5);
 
         // Verify checksum is valid (checksum of ICMP message should be 0)
-        let checksum = checksum::calculate(reply.try_get(20..20 + usize::from(icmp_len))?);
+        let checksum = checksum::calculate(reply_buf.try_get(20..20 + usize::from(icmp_len))?);
         assert_eq!(checksum, 0x0000);
 
         Ok(())

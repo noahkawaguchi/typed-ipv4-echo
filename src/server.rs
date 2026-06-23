@@ -1,10 +1,9 @@
 use {
     crate::{
         ETHERNET_MTU,
-        addr_pairs::Ipv4AddrPair,
         ipv4_header::Ipv4Header,
         protocol::{
-            Protocol, TcpConnections,
+            TcpConnections,
             handler::{Encode, ProtocolHandler},
         },
         sys,
@@ -96,9 +95,9 @@ pub fn run(
 
             // A retransmit deadline elapsed -> retransmit all expired segments
             Ok(false) => {
-                for (reply_handler, ip_pair) in tcp_connections.make_retransmissions() {
+                for reply_handler in tcp_connections.make_retransmissions() {
                     println!("\n ==== Packet sent (retransmit) ====");
-                    send_packet(device, &mut write_buf, &reply_handler, Protocol::Tcp, ip_pair)?;
+                    send_packet(device, &mut write_buf, &reply_handler)?;
                 }
             }
 
@@ -118,26 +117,23 @@ pub fn run(
                         println!(" ==== Packet received ====");
                         println!("{ipv4_header}");
 
-                        match ProtocolHandler::parse(ipv4_payload, ipv4_header.protocol) {
+                        match ProtocolHandler::parse(
+                            ipv4_payload,
+                            ipv4_header.protocol,
+                            ipv4_header.ip_pair,
+                        ) {
                             Err(e) => eprintln!("Skipping packet: {e}"),
 
                             Ok(handler) => {
                                 println!("{handler}");
                                 println!("\n ==== Packet sent ====");
 
-                                match handler.into_reply(
-                                    &mut tcp_connections,
-                                    ipv4_header.ip_pair.swapped(),
-                                )? {
+                                match handler.into_reply(&mut tcp_connections)? {
                                     None => println!("<no reply>"),
 
-                                    Some(reply_handler) => send_packet(
-                                        device,
-                                        &mut write_buf,
-                                        &reply_handler,
-                                        ipv4_header.protocol,
-                                        ipv4_header.ip_pair.swapped(),
-                                    )?,
+                                    Some(reply_handler) => {
+                                        send_packet(device, &mut write_buf, &reply_handler)?;
+                                    }
                                 }
                             }
                         }
@@ -167,9 +163,9 @@ fn start_active_close(
 ) -> Result<Option<Instant>, Box<dyn Error>> {
     println!("\nShutdown signal received, closing established connections...");
 
-    for (reply_handler, ip_pair) in tcp_connections.close_established() {
+    for reply_handler in tcp_connections.close_established() {
         println!("\n ==== Packet sent ====");
-        send_packet(device, write_buf, &reply_handler, Protocol::Tcp, ip_pair)?;
+        send_packet(device, write_buf, &reply_handler)?;
     }
 
     divider();
@@ -192,20 +188,16 @@ fn start_active_close(
 }
 
 /// Writes `handler`'s protocol-specific header and payload into `write_buf`, prefixed with an IPv4
-/// header for `protocol` and `ip_pair`, then writes the resulting packet to `device` and prints its
-/// representation to stdout.
+/// header, then writes the resulting packet to `device` and prints its string representation to
+/// stdout.
 fn send_packet(
     device: &mut impl Write,
     write_buf: &mut [u8; ETHERNET_MTU],
     handler: &impl Encode,
-    protocol: Protocol,
-    ip_pair: Ipv4AddrPair,
 ) -> Result<(), Box<dyn Error>> {
-    // Write the protocol-specific portion of the packet first to have the total length for the IPv4
-    // header
-    let proto_len = handler.write_into(&mut write_buf[Ipv4Header::REPLY_HEADER_LEN..], ip_pair)?;
+    let proto_len = handler.write_into(&mut write_buf[Ipv4Header::REPLY_HEADER_LEN..])?;
 
-    let ipv4_header = Ipv4Header::try_new(protocol, ip_pair, proto_len)?;
+    let ipv4_header = Ipv4Header::try_new(handler.proto(), handler.get_ip_pair(), proto_len)?;
     ipv4_header.write_into(write_buf);
 
     device.write_all(write_buf.try_get(..ipv4_header.total_len.into())?)?;

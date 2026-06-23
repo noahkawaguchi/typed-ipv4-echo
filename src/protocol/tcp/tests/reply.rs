@@ -1,10 +1,10 @@
-use {super::*, crate::protocol::test_utils::IP_PAIR, std::error::Error};
+use {super::*, std::error::Error};
 
 #[test]
 fn reply_creates_valid_syn_ack() -> Result<(), Box<dyn Error>> {
     let mut connections = TcpConnections::default();
 
-    let reply = client_packet(4096, 0, TcpFlags::Syn, &[]).into_reply(&mut connections, IP_PAIR)?;
+    let reply = client_packet(4096, 0, TcpFlags::Syn, &[]).into_reply(&mut connections)?;
 
     // seq_num is the random ISN that was stored in the connection table
     let stored_isn = connections
@@ -24,7 +24,7 @@ fn duplicate_syn_during_syn_received_resends_same_syn_ack() -> Result<(), Box<dy
     let mut connections = TcpConnections::default();
     connections.store_isn(KEY, 12345); // Simulates having already sent a SYN-ACK with ISN=12345
 
-    let reply = client_packet(4096, 0, TcpFlags::Syn, &[]).into_reply(&mut connections, IP_PAIR)?;
+    let reply = client_packet(4096, 0, TcpFlags::Syn, &[]).into_reply(&mut connections)?;
 
     assert_eq!(
         reply,
@@ -46,8 +46,7 @@ fn data_packet_before_complete_handshake_gets_rst() -> Result<(), Box<dyn Error>
     let mut connections = TcpConnections::default();
     connections.store_isn(KEY, 0); // SYN-ACK sent, but handshake not yet completed
 
-    let reply =
-        client_packet(4097, 1, TcpFlags::Ack, b"Hello").into_reply(&mut connections, IP_PAIR)?;
+    let reply = client_packet(4097, 1, TcpFlags::Ack, b"Hello").into_reply(&mut connections)?;
 
     assert_eq!(reply, Some(server_reply(1, 0, TcpFlags::Rst, &[])));
 
@@ -61,10 +60,7 @@ fn handshake_ack_establishes_connection_and_returns_none() -> Result<(), Box<dyn
     // Simulate having sent a SYN-ACK with ISN=0 so ack_num=1 is the correct completion
     connections.store_isn(KEY, 0);
 
-    assert_eq!(
-        client_packet(4097, 1, TcpFlags::Ack, &[]).into_reply(&mut connections, IP_PAIR)?,
-        None
-    );
+    assert_eq!(client_packet(4097, 1, TcpFlags::Ack, &[]).into_reply(&mut connections)?, None);
 
     assert_eq!(connections.tcp_state_of(&KEY), TcpState::Established);
 
@@ -77,8 +73,7 @@ fn reply_creates_valid_data_echo() -> Result<(), Box<dyn Error>> {
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097); // rcv_nxt = client's seq at handshake ACK time
 
-    let reply =
-        client_packet(4097, 1, TcpFlags::Ack, b"Hello").into_reply(&mut connections, IP_PAIR)?;
+    let reply = client_packet(4097, 1, TcpFlags::Ack, b"Hello").into_reply(&mut connections)?;
 
     assert_eq!(reply, Some(server_reply(1, 4102, TcpFlags::Ack, b"Hello")));
 
@@ -92,8 +87,7 @@ fn reply_creates_valid_fin_ack() -> Result<(), Box<dyn Error>> {
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097); // FIN-ACK arrives at seq=4097
 
-    let reply =
-        client_packet(4097, 1, TcpFlags::FinAck, &[]).into_reply(&mut connections, IP_PAIR)?;
+    let reply = client_packet(4097, 1, TcpFlags::FinAck, &[]).into_reply(&mut connections)?;
 
     assert_eq!(reply, Some(server_reply(1, 4098, TcpFlags::FinAck, &[])));
 
@@ -114,10 +108,7 @@ fn final_ack_after_fin_ack_removes_connection_and_returns_none() -> Result<(), B
     connections.start_last_ack(&KEY);
 
     // ack=2 (our FIN-ACK seq + 1)
-    assert_eq!(
-        client_packet(4098, 2, TcpFlags::Ack, &[]).into_reply(&mut connections, IP_PAIR)?,
-        None
-    );
+    assert_eq!(client_packet(4098, 2, TcpFlags::Ack, &[]).into_reply(&mut connections)?, None);
 
     assert_eq!(
         connections.tcp_state_of(&KEY),
@@ -139,10 +130,7 @@ fn pure_ack_on_established_connection_returns_none() -> Result<(), Box<dyn Error
     connections.advance_snd_nxt(&KEY, 5); // snd_nxt after having sent the 5-byte "Hello" echo
 
     // ack=6 (our ISN 0 + 5 bytes echoed + 1)
-    assert_eq!(
-        client_packet(4102, 6, TcpFlags::Ack, &[]).into_reply(&mut connections, IP_PAIR)?,
-        None
-    );
+    assert_eq!(client_packet(4102, 6, TcpFlags::Ack, &[]).into_reply(&mut connections)?, None);
 
     assert_eq!(
         connections.tcp_state_of(&KEY),
@@ -164,8 +152,7 @@ fn consecutive_replies_use_snd_nxt_for_seq_num() -> Result<(), Box<dyn Error>> {
     connections.establish(&KEY, 4097);
 
     // First data packet: "Hello" (5 bytes), ack=1 (acknowledges our ISN+1)
-    let reply1 =
-        client_packet(4097, 1, TcpFlags::Ack, b"Hello").into_reply(&mut connections, IP_PAIR)?;
+    let reply1 = client_packet(4097, 1, TcpFlags::Ack, b"Hello").into_reply(&mut connections)?;
 
     assert_eq!(
         reply1,
@@ -180,8 +167,7 @@ fn consecutive_replies_use_snd_nxt_for_seq_num() -> Result<(), Box<dyn Error>> {
     );
 
     // Second data packet: "Hi" (2 bytes), but with stale ack=1 (hasn't ACKed our "Hello" echo)
-    let reply2 =
-        client_packet(4102, 1, TcpFlags::Ack, b"Hi").into_reply(&mut connections, IP_PAIR)?;
+    let reply2 = client_packet(4102, 1, TcpFlags::Ack, b"Hi").into_reply(&mut connections)?;
 
     assert_eq!(
         reply2,
@@ -204,8 +190,7 @@ fn old_ack_num_does_not_regress_snd_una() -> Result<(), Box<dyn Error>> {
     connections.establish(&KEY, 4097); // RCV.NXT=4097
 
     // First packet: "Hello" (5 bytes), ack=1 -> SND.UNA advances to 1, SND.NXT becomes 6
-    let reply1 =
-        client_packet(4097, 1, TcpFlags::Ack, b"Hello").into_reply(&mut connections, IP_PAIR)?;
+    let reply1 = client_packet(4097, 1, TcpFlags::Ack, b"Hello").into_reply(&mut connections)?;
 
     assert_eq!(
         reply1,
@@ -216,8 +201,7 @@ fn old_ack_num_does_not_regress_snd_una() -> Result<(), Box<dyn Error>> {
     assert_eq!(connections.get_snd_una(&KEY), Some(1));
 
     // Second packet: "Hi" (2 bytes), ack=6 -> SND.UNA advances to 6, SND.NXT becomes 8
-    let reply2 =
-        client_packet(4102, 6, TcpFlags::Ack, b"Hi").into_reply(&mut connections, IP_PAIR)?;
+    let reply2 = client_packet(4102, 6, TcpFlags::Ack, b"Hi").into_reply(&mut connections)?;
 
     assert_eq!(
         reply2,
@@ -228,8 +212,7 @@ fn old_ack_num_does_not_regress_snd_una() -> Result<(), Box<dyn Error>> {
     assert_eq!(connections.get_snd_una(&KEY), Some(6));
 
     // Third packet: "Yo" (2 bytes), ack=1 (now stale, older than SND.UNA=6)
-    let reply3 =
-        client_packet(4104, 1, TcpFlags::Ack, b"Yo").into_reply(&mut connections, IP_PAIR)?;
+    let reply3 = client_packet(4104, 1, TcpFlags::Ack, b"Yo").into_reply(&mut connections)?;
 
     // The stale ack_num doesn't make the segment unacceptable (1 <= SND.NXT=8), so it's still
     // processed normally and "Yo" is echoed
@@ -254,10 +237,7 @@ fn rst_packet_cleans_up_connection_and_returns_none() -> Result<(), Box<dyn Erro
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097);
 
-    assert_eq!(
-        client_packet(4097, 1, TcpFlags::Rst, &[]).into_reply(&mut connections, IP_PAIR)?,
-        None
-    );
+    assert_eq!(client_packet(4097, 1, TcpFlags::Rst, &[]).into_reply(&mut connections)?, None);
 
     assert_eq!(
         connections.tcp_state_of(&KEY),
@@ -283,7 +263,7 @@ fn duplicate_data_packet_gets_duplicate_ack_without_echo() -> Result<(), Box<dyn
     let hi = client_packet(4102, 6, TcpFlags::Ack, b"Hi");
 
     // First packet: "Hello" (seq=4097) -> rcv_nxt advances to 4102, snd_nxt advances to 6
-    let reply1 = hello.clone().into_reply(&mut connections, IP_PAIR)?;
+    let reply1 = hello.clone().into_reply(&mut connections)?;
     assert_eq!(
         reply1,
         Some(server_reply(1, 4102, TcpFlags::Ack, b"Hello")),
@@ -291,7 +271,7 @@ fn duplicate_data_packet_gets_duplicate_ack_without_echo() -> Result<(), Box<dyn
     );
 
     // Second packet: "Hi" (seq=4102) -> rcv_nxt advances to 4104, snd_nxt advances to 8
-    let reply2 = hi.into_reply(&mut connections, IP_PAIR)?;
+    let reply2 = hi.into_reply(&mut connections)?;
     assert_eq!(
         reply2,
         Some(server_reply(6, 4104, TcpFlags::Ack, b"Hi")),
@@ -299,7 +279,7 @@ fn duplicate_data_packet_gets_duplicate_ack_without_echo() -> Result<(), Box<dyn
     );
 
     // Retransmit of "Hello": seq=4097, but rcv_nxt is now 4104
-    let reply3 = hello.into_reply(&mut connections, IP_PAIR)?;
+    let reply3 = hello.into_reply(&mut connections)?;
 
     assert_eq!(
         reply3,
@@ -322,8 +302,7 @@ fn out_of_order_fin_ack_gets_duplicate_ack_without_closing() -> Result<(), Box<d
     connections.establish(&KEY, 4097); // rcv_nxt = 4097
 
     // FIN-ACK arrives at seq=4102, but rcv_nxt is still 4097 (a 5-byte gap)
-    let reply =
-        client_packet(4102, 1, TcpFlags::FinAck, &[]).into_reply(&mut connections, IP_PAIR)?;
+    let reply = client_packet(4102, 1, TcpFlags::FinAck, &[]).into_reply(&mut connections)?;
 
     assert_eq!(
         reply,
@@ -347,8 +326,7 @@ fn unrecognized_packet_for_unknown_connection_gets_rst() -> Result<(), Box<dyn E
 
     let mut connections = TcpConnections::default(); // Empty, no known connections
 
-    let reply =
-        client_packet(4097, 1, TcpFlags::Ack, b"Hello").into_reply(&mut connections, IP_PAIR)?;
+    let reply = client_packet(4097, 1, TcpFlags::Ack, b"Hello").into_reply(&mut connections)?;
 
     assert_eq!(reply, Some(server_reply(1, 0, TcpFlags::Rst, &[])));
 
@@ -367,8 +345,7 @@ fn ack_for_unsent_data_is_dropped_and_gets_current_state_reply() -> Result<(), B
     connections.establish(&KEY, 4097); // RCV.NXT = 4097
 
     // seq_num == RCV.NXT, but ack_num=1000 is far past SND.NXT=1
-    let reply =
-        client_packet(4097, 1000, TcpFlags::Ack, b"Hello").into_reply(&mut connections, IP_PAIR)?;
+    let reply = client_packet(4097, 1000, TcpFlags::Ack, b"Hello").into_reply(&mut connections)?;
 
     assert_eq!(reply, Some(server_reply(1, 4097, TcpFlags::Ack, &[])));
 
@@ -392,7 +369,7 @@ fn wraparound_ack_for_unsent_data_is_still_rejected() -> Result<(), Box<dyn Erro
     connections.update_snd_una(&KEY, u32::MAX); // simulate handshake ack completing
 
     // ack=0 wraps 1 past SND.NXT = u32::MAX
-    let reply = client_packet(4097, 0, TcpFlags::Ack, &[]).into_reply(&mut connections, IP_PAIR)?;
+    let reply = client_packet(4097, 0, TcpFlags::Ack, &[]).into_reply(&mut connections)?;
 
     assert_eq!(reply, Some(server_reply(u32::MAX, 4097, TcpFlags::Ack, &[])));
 
@@ -410,14 +387,13 @@ fn close_established_sends_fin_ack_and_transitions_to_fin_wait_1() -> Result<(),
     connections.establish(&KEY, 4097); // snd_nxt=1, rcv_nxt=4097
 
     let mut replies = connections.close_established();
-    let (reply, ip_pair) = replies.pop().ok_or("Expected one reply")?;
+    let reply = replies.pop().ok_or("Expected one reply")?;
 
     assert!(replies.is_empty(), "Expected exactly one reply");
     assert_eq!(reply, server_reply(1, 4097, TcpFlags::FinAck, &[]));
 
     // IP addresses are swapped: server -> client
-    assert_eq!(ip_pair.src, DST_IP);
-    assert_eq!(ip_pair.dst, SRC_IP);
+    assert_eq!(reply.get_ip_pair(), IP_PAIR.swapped());
 
     assert_eq!(connections.tcp_state_of(&KEY), TcpState::FinWait1);
     assert_eq!(
@@ -437,7 +413,7 @@ fn fin_wait_1_to_fin_wait_2_on_ack_of_our_fin() -> Result<(), Box<dyn Error>> {
     connections.close_established(); // -> FIN-WAIT-1, snd_nxt=2
 
     // Client acknowledges our FIN (ack=2), no FIN of its own yet
-    let reply = client_packet(4097, 2, TcpFlags::Ack, &[]).into_reply(&mut connections, IP_PAIR)?;
+    let reply = client_packet(4097, 2, TcpFlags::Ack, &[]).into_reply(&mut connections)?;
 
     assert_eq!(reply, None);
     assert_eq!(connections.tcp_state_of(&KEY), TcpState::FinWait2);
@@ -454,15 +430,13 @@ fn fin_wait_2_closes_on_fin_ack_from_peer() -> Result<(), Box<dyn Error>> {
     connections.close_established(); // -> FIN-WAIT-1, snd_nxt=2
 
     // Our FIN is acknowledged -> FIN-WAIT-2
-    let ack_reply =
-        client_packet(4097, 2, TcpFlags::Ack, &[]).into_reply(&mut connections, IP_PAIR)?;
+    let ack_reply = client_packet(4097, 2, TcpFlags::Ack, &[]).into_reply(&mut connections)?;
 
     assert_eq!(ack_reply, None);
     assert_eq!(connections.tcp_state_of(&KEY), TcpState::FinWait2);
 
     // Client's FIN arrives in order
-    let fin_reply =
-        client_packet(4097, 2, TcpFlags::FinAck, &[]).into_reply(&mut connections, IP_PAIR)?;
+    let fin_reply = client_packet(4097, 2, TcpFlags::FinAck, &[]).into_reply(&mut connections)?;
 
     assert_eq!(fin_reply, Some(server_reply(2, 4098, TcpFlags::Ack, &[])));
     assert_eq!(connections.tcp_state_of(&KEY), TcpState::Closed, "Connection should be removed");
@@ -481,8 +455,7 @@ fn fin_wait_1_closes_immediately_if_peers_fin_also_acks_ours() -> Result<(), Box
     connections.close_established(); // -> FIN-WAIT-1, snd_nxt=2
 
     // Client's FIN arrives in order and also acknowledges our FIN (ack=2)
-    let reply =
-        client_packet(4097, 2, TcpFlags::FinAck, &[]).into_reply(&mut connections, IP_PAIR)?;
+    let reply = client_packet(4097, 2, TcpFlags::FinAck, &[]).into_reply(&mut connections)?;
 
     assert_eq!(reply, Some(server_reply(2, 4098, TcpFlags::Ack, &[])));
     assert_eq!(connections.tcp_state_of(&KEY), TcpState::Closed, "Connection should be removed");
@@ -501,8 +474,7 @@ fn data_after_our_fin_in_fin_wait_1_is_acked_without_echo() -> Result<(), Box<dy
     connections.establish(&KEY, 4097); // rcv_nxt=4097
     connections.close_established(); // -> FIN-WAIT-1, snd_nxt=2
 
-    let reply =
-        client_packet(4097, 1, TcpFlags::Ack, b"Hello").into_reply(&mut connections, IP_PAIR)?;
+    let reply = client_packet(4097, 1, TcpFlags::Ack, b"Hello").into_reply(&mut connections)?;
 
     assert_eq!(
         reply,
@@ -527,11 +499,10 @@ fn data_after_our_fin_in_fin_wait_2_is_acked_without_echo() -> Result<(), Box<dy
     connections.close_established(); // -> FIN-WAIT-1, snd_nxt=2
 
     // Our FIN is acknowledged -> FIN-WAIT-2
-    client_packet(4097, 2, TcpFlags::Ack, &[]).into_reply(&mut connections, IP_PAIR)?;
+    client_packet(4097, 2, TcpFlags::Ack, &[]).into_reply(&mut connections)?;
     assert_eq!(connections.tcp_state_of(&KEY), TcpState::FinWait2);
 
-    let reply =
-        client_packet(4097, 2, TcpFlags::Ack, b"Hello").into_reply(&mut connections, IP_PAIR)?;
+    let reply = client_packet(4097, 2, TcpFlags::Ack, b"Hello").into_reply(&mut connections)?;
 
     assert_eq!(
         reply,
@@ -557,15 +528,13 @@ fn simultaneous_close_transitions_through_closing_to_closed() -> Result<(), Box<
 
     // Client's FIN arrives in order, but doesn't yet acknowledge our FIN (ack=1, simultaneous
     // close) -> CLOSING
-    let fin_reply =
-        client_packet(4097, 1, TcpFlags::FinAck, &[]).into_reply(&mut connections, IP_PAIR)?;
+    let fin_reply = client_packet(4097, 1, TcpFlags::FinAck, &[]).into_reply(&mut connections)?;
 
     assert_eq!(fin_reply, Some(server_reply(2, 4098, TcpFlags::Ack, &[])));
     assert_eq!(connections.tcp_state_of(&KEY), TcpState::Closing);
 
     // Client's ACK of our FIN finally arrives -> fully closed
-    let ack_reply =
-        client_packet(4098, 2, TcpFlags::Ack, &[]).into_reply(&mut connections, IP_PAIR)?;
+    let ack_reply = client_packet(4098, 2, TcpFlags::Ack, &[]).into_reply(&mut connections)?;
 
     assert_eq!(ack_reply, None);
     assert_eq!(connections.tcp_state_of(&KEY), TcpState::Closed, "Connection should be removed");

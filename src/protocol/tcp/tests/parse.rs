@@ -15,7 +15,7 @@ fn correctly_parses_valid_packet() -> Result<(), String> {
             0x48, 0x65, 0x6C, 0x6C, 0x6F,        // Payload: "Hello"
         ];
 
-    let handler = TcpHandler::parse(&DATA)?;
+    let handler = TcpHandler::parse(&DATA, IP_PAIR)?;
 
     assert_eq!(handler.ports, PortPair { src: 1234, dst: 80 });
     assert_eq!(handler.seq_num, 1);
@@ -30,7 +30,7 @@ fn correctly_parses_valid_packet() -> Result<(), String> {
 #[test]
 fn parsing_fails_when_too_short() {
     const DATA: [u8; 4] = [0x04, 0xD2, 0x00, 0x50]; // Only 4 bytes
-    assert_matches!(TcpHandler::parse(&DATA), Err(e) if e.contains("Too short"));
+    assert_matches!(TcpHandler::parse(&DATA, IP_PAIR), Err(e) if e.contains("Too short"));
 }
 
 #[test]
@@ -47,7 +47,7 @@ fn parsing_handles_large_sequence_numbers() -> Result<(), String> {
             0x00, 0x00,                          // Urgent pointer
         ];
 
-    let handler = TcpHandler::parse(&DATA)?;
+    let handler = TcpHandler::parse(&DATA, IP_PAIR)?;
 
     assert_eq!(handler.seq_num, u32::MAX);
     assert_eq!(handler.ack_num, 0xFEDC_BA98);
