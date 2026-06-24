@@ -98,7 +98,7 @@ impl fmt::Display for UdpHandler<'_> {
 mod tests {
     use {
         super::*,
-        crate::{ETHERNET_MTU, protocol::test_utils::IP_PAIR},
+        crate::{ETHERNET_MTU, protocol::test_consts::IP_PAIR},
         std::assert_matches,
     };
 

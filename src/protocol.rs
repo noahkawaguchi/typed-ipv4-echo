@@ -5,9 +5,6 @@ mod icmp_echo;
 mod tcp;
 mod udp;
 
-#[cfg(test)]
-mod test_utils;
-
 use {
     crate::{
         ETHERNET_MTU,
@@ -97,4 +94,19 @@ impl fmt::Display for Protocol {
             Self::Udp => write!(f, "UDP"),
         }
     }
+}
+
+/// Test constants shared between protocols.
+#[cfg(test)]
+mod test_consts {
+    use {crate::addr_pairs::Ipv4AddrPair, std::net::Ipv4Addr};
+
+    /// Test source IP address: 10.0.0.2
+    pub const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
+
+    /// Test destination IP address: 10.0.0.1
+    pub const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
+
+    /// An `Ipv4AddrPair` of `SRC_IP` and `DST_IP`.
+    pub const IP_PAIR: Ipv4AddrPair = Ipv4AddrPair { src: SRC_IP, dst: DST_IP };
 }

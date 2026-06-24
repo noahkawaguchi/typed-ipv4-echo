@@ -453,7 +453,7 @@ mod tests {
 
     use {
         super::*,
-        crate::protocol::test_utils::{DST_IP, IP_PAIR, SRC_IP},
+        crate::protocol::test_consts::{DST_IP, IP_PAIR, SRC_IP},
         std::assert_matches,
     };
 
