@@ -1,9 +1,7 @@
 use {
     crate::{
-        ETHERNET_MTU,
         addr_pairs::{Ipv4AddrPair, PortPair},
-        checksum,
-        protocol::{Protocol, handler::Encode, payload_to_string},
+        protocol::{Protocol, handler::Encode, payload_to_string, pseudo_header_checksum},
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
     std::fmt,
@@ -22,8 +20,6 @@ pub struct UdpHandler<'a> {
 }
 
 impl<'a> UdpHandler<'a> {
-    const PSEUDO_HEADER_LEN: usize = 12;
-
     /// Parses `data` as a UDP header and payload.
     pub(super) fn parse(data: &'a [u8], ip_pair: Ipv4AddrPair) -> Result<Self, String> {
         let Some((udp_header, payload)) = data.split_first_chunk::<{ UDP_HEADER_LEN as usize }>()
@@ -72,27 +68,15 @@ impl Encode for UdpHandler<'_> {
         )?
         .copy_from_slice(self.payload);
 
-        // Calculate UDP checksum with pseudo-header
-        let mut pseudo_header = [0u8; Self::PSEUDO_HEADER_LEN];
-        pseudo_header[0..4].copy_from_slice(&self.ip_pair.src.octets()); // Source IP
-        pseudo_header[4..8].copy_from_slice(&self.ip_pair.dst.octets()); // Dest IP
-        pseudo_header[8] = 0; // Reserved padding for alignment
-        pseudo_header[9] = Protocol::Udp.into();
-        pseudo_header[10..12].copy_from_slice(&udp_len.to_be_bytes());
+        // Zero out checksum field before calculating checksum
+        buf.try_get_mut(6..8)?.copy_from_slice(&[0x00, 0x00]);
 
-        // Build checksum data: pseudo-header + UDP header + payload
-        let checksum_len = Self::PSEUDO_HEADER_LEN + usize::from(udp_len);
-        let mut checksum_data = [0u8; ETHERNET_MTU + Self::PSEUDO_HEADER_LEN];
-        checksum_data[0..Self::PSEUDO_HEADER_LEN].copy_from_slice(&pseudo_header);
-        checksum_data
-            .try_get_mut(Self::PSEUDO_HEADER_LEN..checksum_len)?
-            .copy_from_slice(buf.try_get(..usize::from(udp_len))?);
+        let udp_checksum = pseudo_header_checksum(
+            buf.try_get(..usize::from(udp_len))?,
+            self.ip_pair,
+            self.proto(),
+        )?;
 
-        // Zero out checksum field before calculating
-        checksum_data[Self::PSEUDO_HEADER_LEN + 6..Self::PSEUDO_HEADER_LEN + 8]
-            .copy_from_slice(&[0x00, 0x00]);
-
-        let udp_checksum = checksum::calculate(checksum_data.try_get(..checksum_len)?);
         buf.try_get_mut(6..8)?
             .copy_from_slice(&udp_checksum.to_be_bytes());
 
@@ -114,7 +98,7 @@ impl fmt::Display for UdpHandler<'_> {
 mod tests {
     use {
         super::*,
-        crate::protocol::test_utils::{IP_PAIR, tcp_udp_test_checksum},
+        crate::{ETHERNET_MTU, protocol::test_utils::IP_PAIR},
         std::assert_matches,
     };
 
@@ -211,7 +195,7 @@ mod tests {
         assert_eq!(udp_len, 8 + 8);
 
         // Verify checksum
-        assert_eq!(tcp_udp_test_checksum(&reply_buf, Protocol::Udp, udp_len, IP_PAIR)?, 0x0000);
+        assert_eq!(pseudo_header_checksum(&reply_buf[20..36], IP_PAIR, Protocol::Udp)?, 0x0000);
 
         Ok(())
     }
