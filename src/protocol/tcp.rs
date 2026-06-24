@@ -67,6 +67,10 @@ impl TcpHandler {
             return Err(format!("Too short for TCP header ({} bytes)", data.len()));
         };
 
+        if pseudo_header_checksum(data, ip_pair, Protocol::Tcp)? != 0 {
+            return Err(String::from("Invalid TCP checksum"));
+        }
+
         // Convert length in 32-bit words in the upper 4 bits to length in bytes in the full 8 bits
         let offset_bytes = tcp_header[12] >> 4 << 2;
 
