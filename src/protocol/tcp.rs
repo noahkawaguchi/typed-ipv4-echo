@@ -125,7 +125,7 @@ impl TcpHandler {
             server_port: self.ports.dst,
         };
 
-        Ok(match (connections.tcp_state_of(&key), self.flags, self.payload_len()) {
+        Ok(match (connections.tcp_state_of(&key), self.flags, self.payload.as_ref()) {
             // SYN packet (step 1 of handshake)
             // Reply with SYN-ACK (step 2), no payload echo
             (TcpState::Closed, TcpFlags::Syn, _) => {
@@ -165,7 +165,7 @@ impl TcpHandler {
 
             // Handshake ACK (step 3) -> transition to ESTABLISHED, no reply needed
             // Remote ack num should be the previous local ISN + 1, which also becomes snd_una
-            (TcpState::SynReceived, TcpFlags::Ack, 0)
+            (TcpState::SynReceived, TcpFlags::Ack, None)
                 if connections
                     .pending_isn(&key)
                     .is_some_and(|isn| isn.wrapping_add(1) == self.ack_num) =>
@@ -193,7 +193,7 @@ impl TcpHandler {
 
             // Pure ACK (no payload) on an established connection (acknowledgment of data sent by
             // the server) -> advance snd_una, no reply
-            (TcpState::Established, TcpFlags::Ack, 0) => {
+            (TcpState::Established, TcpFlags::Ack, None) => {
                 connections.update_snd_una(&key, self.ack_num);
                 None
             }
@@ -201,7 +201,7 @@ impl TcpHandler {
             // In-order data packet on an established connection -> send ACK, echo payload. Use
             // snd_nxt as seq_num and rcv_nxt + bytes received as ack_num, then advance both locally
             // by bytes received.
-            (TcpState::Established, TcpFlags::Ack, 1..)
+            (TcpState::Established, TcpFlags::Ack, Some(payload))
                 if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key)
                     && self.seq_num == rcv_nxt =>
             {
@@ -215,7 +215,7 @@ impl TcpHandler {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt.wrapping_add(payload_len),
                     flags: TcpFlags::Ack,
-                    payload: self.payload.clone(),
+                    payload: Some(Rc::clone(payload)),
                 };
 
                 connections.record_pending(&key, send_info.clone(), payload_len);
@@ -263,7 +263,7 @@ impl TcpHandler {
 
             // Final ACK completing passive close (LAST-ACK) or any RST (never RST a RST)
             // -> remove connection, no reply
-            (TcpState::LastAck, TcpFlags::Ack, 0) | (_, TcpFlags::Rst | TcpFlags::RstAck, _) => {
+            (TcpState::LastAck, TcpFlags::Ack, None) | (_, TcpFlags::Rst | TcpFlags::RstAck, _) => {
                 connections.remove(&key);
                 None
             }
@@ -271,7 +271,7 @@ impl TcpHandler {
             // In-order data arriving in FIN-WAIT-1/FIN-WAIT-2, i.e. after we've sent our own FIN
             // but before the peer's FIN has arrived (half closed) -> ACK it, don't echo because we
             // have no send side left, and advance rcv_nxt
-            (TcpState::FinWait1 | TcpState::FinWait2, TcpFlags::Ack, 1..)
+            (TcpState::FinWait1 | TcpState::FinWait2, TcpFlags::Ack, Some(_))
                 if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key)
                     && self.seq_num == rcv_nxt =>
             {
@@ -289,7 +289,7 @@ impl TcpHandler {
             }
 
             // FIN-WAIT-1, our FIN has been acknowledged (and nothing else) -> FIN-WAIT-2, no reply
-            (TcpState::FinWait1, TcpFlags::Ack, 0)
+            (TcpState::FinWait1, TcpFlags::Ack, None)
                 if let Some((snd_nxt, _)) = connections.get_snd_rcv_nxt(&key)
                     && self.ack_num == snd_nxt =>
             {
@@ -301,7 +301,7 @@ impl TcpHandler {
             // FIN-WAIT-1, the remote peer's FIN arrives before ours is acknowledged (simultaneous
             // close) -> ACK it. If it also acknowledges our FIN, the connection is fully closed
             // (skipping FIN-WAIT-2/TIME-WAIT), otherwise move to CLOSING to await that ACK.
-            (TcpState::FinWait1, TcpFlags::FinAck, 0)
+            (TcpState::FinWait1, TcpFlags::FinAck, None)
                 if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key)
                     && self.seq_num == rcv_nxt =>
             {
@@ -323,7 +323,7 @@ impl TcpHandler {
 
             // FIN-WAIT-2, the remote peer's FIN arrives, in order -> ACK it and finish closing (no
             // TIME-WAIT)
-            (TcpState::FinWait2, TcpFlags::FinAck, 0)
+            (TcpState::FinWait2, TcpFlags::FinAck, None)
                 if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key)
                     && self.seq_num == rcv_nxt =>
             {
@@ -339,7 +339,7 @@ impl TcpHandler {
 
             // CLOSING (simultaneous close), the remote peer's ACK of our FIN arrives -> fully
             // closed, no reply
-            (TcpState::Closing, TcpFlags::Ack, 0)
+            (TcpState::Closing, TcpFlags::Ack, None)
                 if let Some((snd_nxt, _)) = connections.get_snd_rcv_nxt(&key)
                     && self.ack_num == snd_nxt =>
             {
