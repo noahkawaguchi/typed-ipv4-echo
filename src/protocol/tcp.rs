@@ -5,13 +5,11 @@ mod flags;
 
 use {
     crate::{
-        ETHERNET_MTU,
         addr_pairs::{Ipv4AddrPair, PortPair},
-        checksum,
         protocol::{
             Protocol,
             handler::Encode,
-            payload_to_string,
+            payload_to_string, pseudo_header_checksum,
             tcp::{
                 connections::{ConnKey, TcpState},
                 flags::TcpFlags,
@@ -63,8 +61,6 @@ struct SendInfo {
 }
 
 impl TcpHandler {
-    const PSEUDO_HEADER_LEN: usize = 12;
-
     /// Parses `data` as a TCP header and payload.
     pub(super) fn parse(data: &[u8], ip_pair: Ipv4AddrPair) -> Result<Self, String> {
         let Some(tcp_header) = data.first_chunk::<{ TCP_HEADER_MIN_LEN as usize }>() else {
@@ -414,27 +410,15 @@ impl Encode for TcpHandler {
         // TCP segment length: minimum TCP header length (20 bytes) + payload length (0+ bytes)
         let tcp_segment_len = u16::from(TCP_HEADER_MIN_LEN).try_add(self.payload_len())?;
 
-        // Calculate TCP checksum with pseudo-header
-        let mut pseudo_header = [0u8; Self::PSEUDO_HEADER_LEN];
-        pseudo_header[0..4].copy_from_slice(&self.ip_pair.src.octets());
-        pseudo_header[4..8].copy_from_slice(&self.ip_pair.dst.octets());
-        pseudo_header[8] = 0; // Reserved padding for alignment
-        pseudo_header[9] = Protocol::Tcp.into();
-        pseudo_header[10..12].copy_from_slice(&tcp_segment_len.to_be_bytes());
+        // Zero out checksum field before calculating checksum
+        buf.try_get_mut(16..18)?.copy_from_slice(&[0x00, 0x00]);
 
-        // Build checksum data: pseudo-header + TCP header + payload if any
-        let checksum_len = Self::PSEUDO_HEADER_LEN + usize::from(tcp_segment_len);
-        let mut checksum_data = [0u8; ETHERNET_MTU + Self::PSEUDO_HEADER_LEN];
-        checksum_data[..Self::PSEUDO_HEADER_LEN].copy_from_slice(&pseudo_header);
-        checksum_data
-            .try_get_mut(Self::PSEUDO_HEADER_LEN..checksum_len)?
-            .copy_from_slice(buf.try_get(..usize::from(tcp_segment_len))?);
+        let tcp_checksum = pseudo_header_checksum(
+            buf.try_get(..usize::from(tcp_segment_len))?,
+            self.ip_pair,
+            self.proto(),
+        )?;
 
-        // Zero out checksum field before calculating
-        checksum_data[Self::PSEUDO_HEADER_LEN + 16..Self::PSEUDO_HEADER_LEN + 18]
-            .copy_from_slice(&[0x00, 0x00]);
-
-        let tcp_checksum = checksum::calculate(checksum_data.try_get(..checksum_len)?);
         buf.try_get_mut(16..18)?
             .copy_from_slice(&tcp_checksum.to_be_bytes());
 
