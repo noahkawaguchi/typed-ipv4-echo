@@ -336,7 +336,7 @@ impl TcpConnections {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt,
                     flags: TcpFlags::FinAck,
-                    payload: Vec::new(),
+                    payload: None,
                 };
 
                 self.record_pending(&key, send_info.clone(), 1);

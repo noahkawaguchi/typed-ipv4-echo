@@ -22,7 +22,7 @@ fn correctly_parses_valid_packet() -> Result<(), String> {
     assert_eq!(handler.ack_num, 2);
     assert_eq!(handler.offset_bytes, 20);
     assert_eq!(handler.flags, TcpFlags::SynAck);
-    assert_eq!(handler.payload, b"Hello");
+    assert_eq!(handler.payload.as_deref(), Some(b"Hello".as_slice()));
 
     Ok(())
 }

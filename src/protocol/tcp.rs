@@ -20,7 +20,7 @@ use {
         sys,
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
-    std::{fmt, io},
+    std::{fmt, io, rc::Rc},
 };
 
 const TCP_HEADER_MIN_LEN: u8 = 20;
@@ -50,7 +50,7 @@ pub struct TcpHandler {
     offset_bytes: u8,
 
     flags: TcpFlags,
-    payload: Vec<u8>,
+    payload: Option<Rc<[u8]>>,
 }
 
 /// Fields that differ when determining a segment to send.
@@ -59,7 +59,7 @@ struct SendInfo {
     seq_num: u32,
     ack_num: u32,
     flags: TcpFlags,
-    payload: Vec<u8>,
+    payload: Option<Rc<[u8]>>,
 }
 
 impl TcpHandler {
@@ -96,8 +96,8 @@ impl TcpHandler {
             flags: tcp_header[13].try_into()?,
             payload: data
                 .get(offset_bytes.into()..)
-                .ok_or("TCP data shorter than its Data Offset")?
-                .to_vec(),
+                // Use `None` for empty payloads to avoid allocating
+                .and_then(|p| (!p.is_empty()).then(|| Rc::from(p))),
         })
     }
 
@@ -122,7 +122,7 @@ impl TcpHandler {
             server_port: self.ports.dst,
         };
 
-        Ok(match (connections.tcp_state_of(&key), self.flags, self.payload.len()) {
+        Ok(match (connections.tcp_state_of(&key), self.flags, self.payload_len()) {
             // SYN packet (step 1 of handshake)
             // Reply with SYN-ACK (step 2), no payload echo
             (TcpState::Closed, TcpFlags::Syn, _) => {
@@ -134,7 +134,7 @@ impl TcpHandler {
                     seq_num: isn,
                     ack_num: self.seq_num.wrapping_add(1),
                     flags: TcpFlags::SynAck,
-                    payload: Vec::new(),
+                    payload: None,
                 };
 
                 connections.record_pending(&key, send_info.clone(), 1);
@@ -152,7 +152,7 @@ impl TcpHandler {
                     seq_num: isn,
                     ack_num: self.seq_num.wrapping_add(1),
                     flags: TcpFlags::SynAck,
-                    payload: Vec::new(),
+                    payload: None,
                 };
 
                 connections.record_pending(&key, send_info.clone(), 1);
@@ -184,7 +184,7 @@ impl TcpHandler {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt,
                     flags: TcpFlags::Ack,
-                    payload: Vec::new(),
+                    payload: None,
                 })
             }
 
@@ -202,11 +202,7 @@ impl TcpHandler {
                 if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key)
                     && self.seq_num == rcv_nxt =>
             {
-                #[expect(
-                    clippy::cast_possible_truncation,
-                    reason = "`u32::MAX` (4_294_967_295) > `ETHERNET_MTU` (1500)"
-                )]
-                let payload_len = self.payload.len() as u32;
+                let payload_len = u32::from(self.payload_len());
 
                 connections.update_snd_una(&key, self.ack_num);
                 connections.advance_snd_nxt(&key, payload_len);
@@ -237,7 +233,7 @@ impl TcpHandler {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt,
                     flags: TcpFlags::Ack,
-                    payload: Vec::new(),
+                    payload: None,
                 })
             }
 
@@ -254,7 +250,7 @@ impl TcpHandler {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt.wrapping_add(1),
                     flags: TcpFlags::FinAck,
-                    payload: Vec::new(),
+                    payload: None,
                 };
 
                 connections.record_pending(&key, send_info.clone(), 1);
@@ -276,11 +272,7 @@ impl TcpHandler {
                 if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key)
                     && self.seq_num == rcv_nxt =>
             {
-                #[expect(
-                    clippy::cast_possible_truncation,
-                    reason = "`u32::MAX` (4_294_967_295) > `ETHERNET_MTU` (1500)"
-                )]
-                let payload_len = self.payload.len() as u32;
+                let payload_len = u32::from(self.payload_len());
 
                 connections.update_snd_una(&key, self.ack_num);
                 connections.advance_rcv_nxt(&key, payload_len);
@@ -289,7 +281,7 @@ impl TcpHandler {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt.wrapping_add(payload_len),
                     flags: TcpFlags::Ack,
-                    payload: Vec::new(),
+                    payload: None,
                 })
             }
 
@@ -322,7 +314,7 @@ impl TcpHandler {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt.wrapping_add(1),
                     flags: TcpFlags::Ack,
-                    payload: Vec::new(),
+                    payload: None,
                 })
             }
 
@@ -338,7 +330,7 @@ impl TcpHandler {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt.wrapping_add(1),
                     flags: TcpFlags::Ack,
-                    payload: Vec::new(),
+                    payload: None,
                 })
             }
 
@@ -360,13 +352,20 @@ impl TcpHandler {
                 // ack_num is 0 because sending bare RST with no ACK flag leaves ack_num undefined
                 ack_num: 0,
                 flags: TcpFlags::Rst,
-                payload: Vec::new(),
+                payload: None,
             }),
         }
         .map(|send_info| {
             Self::from_pairs_and_info(self.ip_pair.swapped(), self.ports.swapped(), send_info)
         }))
     }
+
+    /// Returns the number of bytes in the payload, or 0 if the payload is `None`.
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "`u16::MAX` (65_535) > ETHERNET_MTU (1500)"
+    )]
+    fn payload_len(&self) -> u16 { self.payload.as_ref().map_or(0, |p| p.len()) as u16 }
 }
 
 impl Encode for TcpHandler {
@@ -400,19 +399,17 @@ impl Encode for TcpHandler {
         // Urgent pointer
         buf.try_get_mut(18..20)?.copy_from_slice(&[0x00, 0x00]);
 
-        // Copy payload into reply (may be empty if not echoing)
-        buf.try_get_mut(
-            usize::from(TCP_HEADER_MIN_LEN)
-                ..usize::from(TCP_HEADER_MIN_LEN).try_add(self.payload.len())?,
-        )?
-        .copy_from_slice(&self.payload);
+        // Copy payload into reply if echoing
+        if let Some(data) = self.payload.as_ref() {
+            buf.try_get_mut(
+                usize::from(TCP_HEADER_MIN_LEN)
+                    ..usize::from(TCP_HEADER_MIN_LEN).try_add(data.len())?,
+            )?
+            .copy_from_slice(data);
+        }
 
         // TCP segment length: minimum TCP header length (20 bytes) + payload length (0+ bytes)
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "u16::MAX (65_535) > ETHERNET_MTU (1500)"
-        )]
-        let tcp_segment_len = u16::from(TCP_HEADER_MIN_LEN).try_add(self.payload.len() as u16)?;
+        let tcp_segment_len = u16::from(TCP_HEADER_MIN_LEN).try_add(self.payload_len())?;
 
         // Calculate TCP checksum with pseudo-header
         let mut pseudo_header = [0u8; Self::PSEUDO_HEADER_LEN];
@@ -455,7 +452,7 @@ impl fmt::Display for TcpHandler {
             self.seq_num,
             self.ack_num,
             self.flags,
-            payload_to_string(&self.payload),
+            payload_to_string(self.payload.as_deref().unwrap_or_default()),
         )
     }
 }
@@ -486,7 +483,7 @@ mod tests {
             ack_num,
             offset_bytes: 20,
             flags,
-            payload: payload.to_vec(),
+            payload: (!payload.is_empty()).then(|| Rc::from(payload)),
         }
     }
 
@@ -499,7 +496,7 @@ mod tests {
             ack_num,
             offset_bytes: 20,
             flags,
-            payload: payload.to_vec(),
+            payload: (!payload.is_empty()).then(|| Rc::from(payload)),
         }
     }
 }
