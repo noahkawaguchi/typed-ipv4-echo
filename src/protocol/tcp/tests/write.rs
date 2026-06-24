@@ -9,7 +9,7 @@ fn write_into_produces_correct_bytes_with_no_payload() -> Result<(), Box<dyn Err
         ack_num: 0x0000_1001,
         offset_bytes: 20,
         flags: TcpFlags::SynAck,
-        payload: Vec::new(),
+        payload: None,
     };
 
     let mut reply = [0u8; ETHERNET_MTU];
@@ -40,7 +40,7 @@ fn write_into_produces_correct_bytes_with_payload() -> Result<(), Box<dyn Error>
         ack_num: 4102,
         offset_bytes: 20,
         flags: TcpFlags::Ack,
-        payload: b"Hello".to_vec(),
+        payload: Some(Rc::new(*b"Hello")),
     };
 
     let mut reply = [0u8; ETHERNET_MTU];

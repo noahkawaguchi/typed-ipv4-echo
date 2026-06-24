@@ -20,7 +20,7 @@ use {
         sys,
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
-    std::{fmt, io},
+    std::{fmt, io, rc::Rc},
 };
 
 const TCP_HEADER_MIN_LEN: u8 = 20;
@@ -50,7 +50,7 @@ pub struct TcpHandler {
     offset_bytes: u8,
 
     flags: TcpFlags,
-    payload: Vec<u8>,
+    payload: Option<Rc<[u8]>>,
 }
 
 /// Fields that differ when determining a segment to send.
@@ -59,7 +59,7 @@ struct SendInfo {
     seq_num: u32,
     ack_num: u32,
     flags: TcpFlags,
-    payload: Vec<u8>,
+    payload: Option<Rc<[u8]>>,
 }
 
 impl TcpHandler {
@@ -96,8 +96,8 @@ impl TcpHandler {
             flags: tcp_header[13].try_into()?,
             payload: data
                 .get(offset_bytes.into()..)
-                .ok_or("TCP data shorter than its Data Offset")?
-                .to_vec(),
+                // Use `None` for empty payloads to avoid allocating
+                .and_then(|p| (!p.is_empty()).then(|| Rc::from(p))),
         })
     }
 
@@ -114,7 +114,10 @@ impl TcpHandler {
         clippy::too_many_lines,
         reason = "Large match expression to express reply cases clearly"
     )]
-    pub(super) fn into_reply(self, connections: &mut TcpConnections) -> io::Result<Option<Self>> {
+    pub(super) fn create_reply(
+        &self,
+        connections: &mut TcpConnections,
+    ) -> io::Result<Option<Self>> {
         let key = ConnKey {
             client_ip: self.ip_pair.src,
             client_port: self.ports.src,
@@ -122,7 +125,7 @@ impl TcpHandler {
             server_port: self.ports.dst,
         };
 
-        Ok(match (connections.tcp_state_of(&key), self.flags, self.payload.len()) {
+        Ok(match (connections.tcp_state_of(&key), self.flags, self.payload.as_ref()) {
             // SYN packet (step 1 of handshake)
             // Reply with SYN-ACK (step 2), no payload echo
             (TcpState::Closed, TcpFlags::Syn, _) => {
@@ -134,7 +137,7 @@ impl TcpHandler {
                     seq_num: isn,
                     ack_num: self.seq_num.wrapping_add(1),
                     flags: TcpFlags::SynAck,
-                    payload: Vec::new(),
+                    payload: None,
                 };
 
                 connections.record_pending(&key, send_info.clone(), 1);
@@ -152,7 +155,7 @@ impl TcpHandler {
                     seq_num: isn,
                     ack_num: self.seq_num.wrapping_add(1),
                     flags: TcpFlags::SynAck,
-                    payload: Vec::new(),
+                    payload: None,
                 };
 
                 connections.record_pending(&key, send_info.clone(), 1);
@@ -162,7 +165,7 @@ impl TcpHandler {
 
             // Handshake ACK (step 3) -> transition to ESTABLISHED, no reply needed
             // Remote ack num should be the previous local ISN + 1, which also becomes snd_una
-            (TcpState::SynReceived, TcpFlags::Ack, 0)
+            (TcpState::SynReceived, TcpFlags::Ack, None)
                 if connections
                     .pending_isn(&key)
                     .is_some_and(|isn| isn.wrapping_add(1) == self.ack_num) =>
@@ -184,13 +187,13 @@ impl TcpHandler {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt,
                     flags: TcpFlags::Ack,
-                    payload: Vec::new(),
+                    payload: None,
                 })
             }
 
             // Pure ACK (no payload) on an established connection (acknowledgment of data sent by
             // the server) -> advance snd_una, no reply
-            (TcpState::Established, TcpFlags::Ack, 0) => {
+            (TcpState::Established, TcpFlags::Ack, None) => {
                 connections.update_snd_una(&key, self.ack_num);
                 None
             }
@@ -198,15 +201,11 @@ impl TcpHandler {
             // In-order data packet on an established connection -> send ACK, echo payload. Use
             // snd_nxt as seq_num and rcv_nxt + bytes received as ack_num, then advance both locally
             // by bytes received.
-            (TcpState::Established, TcpFlags::Ack, 1..)
+            (TcpState::Established, TcpFlags::Ack, Some(payload))
                 if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key)
                     && self.seq_num == rcv_nxt =>
             {
-                #[expect(
-                    clippy::cast_possible_truncation,
-                    reason = "`u32::MAX` (4_294_967_295) > `ETHERNET_MTU` (1500)"
-                )]
-                let payload_len = self.payload.len() as u32;
+                let payload_len = u32::from(self.payload_len());
 
                 connections.update_snd_una(&key, self.ack_num);
                 connections.advance_snd_nxt(&key, payload_len);
@@ -216,7 +215,7 @@ impl TcpHandler {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt.wrapping_add(payload_len),
                     flags: TcpFlags::Ack,
-                    payload: self.payload,
+                    payload: Some(Rc::clone(payload)),
                 };
 
                 connections.record_pending(&key, send_info.clone(), payload_len);
@@ -237,7 +236,7 @@ impl TcpHandler {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt,
                     flags: TcpFlags::Ack,
-                    payload: Vec::new(),
+                    payload: None,
                 })
             }
 
@@ -254,7 +253,7 @@ impl TcpHandler {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt.wrapping_add(1),
                     flags: TcpFlags::FinAck,
-                    payload: Vec::new(),
+                    payload: None,
                 };
 
                 connections.record_pending(&key, send_info.clone(), 1);
@@ -264,7 +263,7 @@ impl TcpHandler {
 
             // Final ACK completing passive close (LAST-ACK) or any RST (never RST a RST)
             // -> remove connection, no reply
-            (TcpState::LastAck, TcpFlags::Ack, 0) | (_, TcpFlags::Rst | TcpFlags::RstAck, _) => {
+            (TcpState::LastAck, TcpFlags::Ack, None) | (_, TcpFlags::Rst | TcpFlags::RstAck, _) => {
                 connections.remove(&key);
                 None
             }
@@ -272,15 +271,11 @@ impl TcpHandler {
             // In-order data arriving in FIN-WAIT-1/FIN-WAIT-2, i.e. after we've sent our own FIN
             // but before the peer's FIN has arrived (half closed) -> ACK it, don't echo because we
             // have no send side left, and advance rcv_nxt
-            (TcpState::FinWait1 | TcpState::FinWait2, TcpFlags::Ack, 1..)
+            (TcpState::FinWait1 | TcpState::FinWait2, TcpFlags::Ack, Some(_))
                 if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key)
                     && self.seq_num == rcv_nxt =>
             {
-                #[expect(
-                    clippy::cast_possible_truncation,
-                    reason = "`u32::MAX` (4_294_967_295) > `ETHERNET_MTU` (1500)"
-                )]
-                let payload_len = self.payload.len() as u32;
+                let payload_len = u32::from(self.payload_len());
 
                 connections.update_snd_una(&key, self.ack_num);
                 connections.advance_rcv_nxt(&key, payload_len);
@@ -289,12 +284,12 @@ impl TcpHandler {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt.wrapping_add(payload_len),
                     flags: TcpFlags::Ack,
-                    payload: Vec::new(),
+                    payload: None,
                 })
             }
 
             // FIN-WAIT-1, our FIN has been acknowledged (and nothing else) -> FIN-WAIT-2, no reply
-            (TcpState::FinWait1, TcpFlags::Ack, 0)
+            (TcpState::FinWait1, TcpFlags::Ack, None)
                 if let Some((snd_nxt, _)) = connections.get_snd_rcv_nxt(&key)
                     && self.ack_num == snd_nxt =>
             {
@@ -306,7 +301,7 @@ impl TcpHandler {
             // FIN-WAIT-1, the remote peer's FIN arrives before ours is acknowledged (simultaneous
             // close) -> ACK it. If it also acknowledges our FIN, the connection is fully closed
             // (skipping FIN-WAIT-2/TIME-WAIT), otherwise move to CLOSING to await that ACK.
-            (TcpState::FinWait1, TcpFlags::FinAck, 0)
+            (TcpState::FinWait1, TcpFlags::FinAck, None)
                 if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key)
                     && self.seq_num == rcv_nxt =>
             {
@@ -322,13 +317,13 @@ impl TcpHandler {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt.wrapping_add(1),
                     flags: TcpFlags::Ack,
-                    payload: Vec::new(),
+                    payload: None,
                 })
             }
 
             // FIN-WAIT-2, the remote peer's FIN arrives, in order -> ACK it and finish closing (no
             // TIME-WAIT)
-            (TcpState::FinWait2, TcpFlags::FinAck, 0)
+            (TcpState::FinWait2, TcpFlags::FinAck, None)
                 if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key)
                     && self.seq_num == rcv_nxt =>
             {
@@ -338,13 +333,13 @@ impl TcpHandler {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt.wrapping_add(1),
                     flags: TcpFlags::Ack,
-                    payload: Vec::new(),
+                    payload: None,
                 })
             }
 
             // CLOSING (simultaneous close), the remote peer's ACK of our FIN arrives -> fully
             // closed, no reply
-            (TcpState::Closing, TcpFlags::Ack, 0)
+            (TcpState::Closing, TcpFlags::Ack, None)
                 if let Some((snd_nxt, _)) = connections.get_snd_rcv_nxt(&key)
                     && self.ack_num == snd_nxt =>
             {
@@ -360,13 +355,20 @@ impl TcpHandler {
                 // ack_num is 0 because sending bare RST with no ACK flag leaves ack_num undefined
                 ack_num: 0,
                 flags: TcpFlags::Rst,
-                payload: Vec::new(),
+                payload: None,
             }),
         }
         .map(|send_info| {
             Self::from_pairs_and_info(self.ip_pair.swapped(), self.ports.swapped(), send_info)
         }))
     }
+
+    /// Returns the number of bytes in the payload, or 0 if the payload is `None`.
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "`u16::MAX` (65_535) > ETHERNET_MTU (1500)"
+    )]
+    fn payload_len(&self) -> u16 { self.payload.as_ref().map_or(0, |p| p.len()) as u16 }
 }
 
 impl Encode for TcpHandler {
@@ -400,19 +402,17 @@ impl Encode for TcpHandler {
         // Urgent pointer
         buf.try_get_mut(18..20)?.copy_from_slice(&[0x00, 0x00]);
 
-        // Copy payload into reply (may be empty if not echoing)
-        buf.try_get_mut(
-            usize::from(TCP_HEADER_MIN_LEN)
-                ..usize::from(TCP_HEADER_MIN_LEN).try_add(self.payload.len())?,
-        )?
-        .copy_from_slice(&self.payload);
+        // Copy payload into reply if echoing
+        if let Some(data) = self.payload.as_ref() {
+            buf.try_get_mut(
+                usize::from(TCP_HEADER_MIN_LEN)
+                    ..usize::from(TCP_HEADER_MIN_LEN).try_add(data.len())?,
+            )?
+            .copy_from_slice(data);
+        }
 
         // TCP segment length: minimum TCP header length (20 bytes) + payload length (0+ bytes)
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "u16::MAX (65_535) > ETHERNET_MTU (1500)"
-        )]
-        let tcp_segment_len = u16::from(TCP_HEADER_MIN_LEN).try_add(self.payload.len() as u16)?;
+        let tcp_segment_len = u16::from(TCP_HEADER_MIN_LEN).try_add(self.payload_len())?;
 
         // Calculate TCP checksum with pseudo-header
         let mut pseudo_header = [0u8; Self::PSEUDO_HEADER_LEN];
@@ -455,7 +455,7 @@ impl fmt::Display for TcpHandler {
             self.seq_num,
             self.ack_num,
             self.flags,
-            payload_to_string(&self.payload),
+            payload_to_string(self.payload.as_deref().unwrap_or_default()),
         )
     }
 }
@@ -486,7 +486,7 @@ mod tests {
             ack_num,
             offset_bytes: 20,
             flags,
-            payload: payload.to_vec(),
+            payload: (!payload.is_empty()).then(|| Rc::from(payload)),
         }
     }
 
@@ -499,7 +499,7 @@ mod tests {
             ack_num,
             offset_bytes: 20,
             flags,
-            payload: payload.to_vec(),
+            payload: (!payload.is_empty()).then(|| Rc::from(payload)),
         }
     }
 }
