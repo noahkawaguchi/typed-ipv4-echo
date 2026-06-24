@@ -114,7 +114,10 @@ impl TcpHandler {
         clippy::too_many_lines,
         reason = "Large match expression to express reply cases clearly"
     )]
-    pub(super) fn into_reply(self, connections: &mut TcpConnections) -> io::Result<Option<Self>> {
+    pub(super) fn create_reply(
+        &self,
+        connections: &mut TcpConnections,
+    ) -> io::Result<Option<Self>> {
         let key = ConnKey {
             client_ip: self.ip_pair.src,
             client_port: self.ports.src,
@@ -212,7 +215,7 @@ impl TcpHandler {
                     seq_num: snd_nxt,
                     ack_num: rcv_nxt.wrapping_add(payload_len),
                     flags: TcpFlags::Ack,
-                    payload: self.payload,
+                    payload: self.payload.clone(),
                 };
 
                 connections.record_pending(&key, send_info.clone(), payload_len);

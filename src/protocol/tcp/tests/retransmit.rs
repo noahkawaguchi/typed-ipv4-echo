@@ -7,7 +7,7 @@ use {
 fn syn_ack_is_resent_while_due() -> Result<(), Box<dyn Error>> {
     let mut connections = TcpConnections::new(Duration::ZERO, 5);
 
-    client_packet(4096, 0, TcpFlags::Syn, &[]).into_reply(&mut connections)?;
+    client_packet(4096, 0, TcpFlags::Syn, &[]).create_reply(&mut connections)?;
     let isn = connections.pending_isn(&KEY).ok_or("ISN not stored")?;
 
     let mut resent = connections.make_retransmissions();
@@ -24,11 +24,11 @@ fn syn_ack_is_resent_while_due() -> Result<(), Box<dyn Error>> {
 fn pending_segment_is_cleared_once_acked() -> Result<(), Box<dyn Error>> {
     let mut connections = TcpConnections::new(Duration::ZERO, 5);
 
-    client_packet(4096, 0, TcpFlags::Syn, &[]).into_reply(&mut connections)?;
+    client_packet(4096, 0, TcpFlags::Syn, &[]).create_reply(&mut connections)?;
     let isn = connections.pending_isn(&KEY).ok_or("ISN not stored")?;
 
     // Handshake ACK completes the connection and should clear the pending SYN-ACK
-    client_packet(4097, isn.wrapping_add(1), TcpFlags::Ack, &[]).into_reply(&mut connections)?;
+    client_packet(4097, isn.wrapping_add(1), TcpFlags::Ack, &[]).create_reply(&mut connections)?;
 
     let resent = connections.make_retransmissions();
 
@@ -43,7 +43,7 @@ fn data_echo_is_resent_unchanged() -> Result<(), Box<dyn Error>> {
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097);
 
-    client_packet(4097, 1, TcpFlags::Ack, b"Hello").into_reply(&mut connections)?;
+    client_packet(4097, 1, TcpFlags::Ack, b"Hello").create_reply(&mut connections)?;
 
     let mut resent = connections.make_retransmissions();
     let reply = resent.pop().ok_or("Expected one retransmitted segment")?;
@@ -81,11 +81,11 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result<(), Box<dyn Error
     connections.establish(&KEY, 4097);
 
     // First data packet: "Hello" (5 bytes), ack=1 -> echoed, pending segment seq=1..6
-    client_packet(4097, 1, TcpFlags::Ack, b"Hello").into_reply(&mut connections)?;
+    client_packet(4097, 1, TcpFlags::Ack, b"Hello").create_reply(&mut connections)?;
 
     // Second data packet: "Hi" (2 bytes), still ack=1 (hasn't acked the first echo yet) -> echoed,
     // pending segment seq=6..8
-    client_packet(4102, 1, TcpFlags::Ack, b"Hi").into_reply(&mut connections)?;
+    client_packet(4102, 1, TcpFlags::Ack, b"Hi").create_reply(&mut connections)?;
 
     let [hello, hi] = connections
         .make_retransmissions()
@@ -103,7 +103,7 @@ fn gives_up_after_max_retransmits() -> Result<(), Box<dyn Error>> {
     const MAX_RETRIES: u8 = 3;
 
     let mut connections = TcpConnections::new(Duration::ZERO, MAX_RETRIES);
-    client_packet(4096, 0, TcpFlags::Syn, &[]).into_reply(&mut connections)?;
+    client_packet(4096, 0, TcpFlags::Syn, &[]).create_reply(&mut connections)?;
 
     for _ in 0..MAX_RETRIES {
         let resent = connections.make_retransmissions();

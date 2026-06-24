@@ -44,11 +44,11 @@ impl<'a> ProtocolHandler<'a> {
 
     /// Creates a protocol-specific header and payload for replying to `self`, or returns `Ok(None)`
     /// for no reply.
-    pub fn into_reply(self, tcp_connections: &mut TcpConnections) -> io::Result<Option<Self>> {
+    pub fn create_reply(&self, tcp_connections: &mut TcpConnections) -> io::Result<Option<Self>> {
         match self {
             Self::Icmp(handler) => Ok(Some(Self::Icmp(handler.create_reply()))),
             // TCP is the only one that's actually optional or fallible
-            Self::Tcp(handler) => Ok(handler.into_reply(tcp_connections)?.map(Self::Tcp)),
+            Self::Tcp(handler) => Ok(handler.create_reply(tcp_connections)?.map(Self::Tcp)),
             Self::Udp(handler) => Ok(Some(Self::Udp(handler.create_reply()))),
         }
     }

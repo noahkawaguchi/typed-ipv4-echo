@@ -128,7 +128,7 @@ pub fn run(
                                 println!("{handler}");
                                 println!("\n ==== Packet sent ====");
 
-                                match handler.into_reply(&mut tcp_connections)? {
+                                match handler.create_reply(&mut tcp_connections)? {
                                     None => println!("<no reply>"),
 
                                     Some(reply_handler) => {
