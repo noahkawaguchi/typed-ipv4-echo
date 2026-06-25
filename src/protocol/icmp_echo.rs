@@ -36,6 +36,10 @@ impl<'a> IcmpEchoHandler<'a> {
             return Err(format!("Too short for ICMP header ({} bytes)", data.len()));
         };
 
+        if checksum::calculate(data) != 0 {
+            return Err(String::from("Invalid ICMP checksum"));
+        }
+
         let icmp_type = icmp_header[0];
         let icmp_code = icmp_header[1];
 
@@ -142,7 +146,7 @@ mod tests {
         #[rustfmt::skip]
         const DATA: [u8; 11] = [
             8, 0,              // Type 8 (Echo Request), Code 0
-            0x3A, 0x4B,        // Checksum
+            0x0B, 0x11,        // Checksum
             0x12, 0x34,        // Identifier: 0x1234
             0x56, 0x78,        // Sequence: 0x5678
             0x41, 0x42, 0x43,  // Payload: "ABC"
@@ -168,7 +172,7 @@ mod tests {
         #[rustfmt::skip]
         const DATA: [u8; 8] = [
             0, 0,              // Type 0 (Echo Reply), Code 0
-            0x3A, 0x4B,        // Checksum
+            0x97, 0x53,        // Checksum
             0x12, 0x34,        // Identifier
             0x56, 0x78,        // Sequence
         ];
@@ -184,7 +188,7 @@ mod tests {
         #[rustfmt::skip]
         const DATA: [u8; 8] = [
             8, 1,              // Type 8 (Echo Request), Code 1 (invalid)
-            0x3A, 0x4B,        // Checksum
+            0x8F, 0x52,        // Checksum
             0x12, 0x34,        // Identifier
             0x56, 0x78,        // Sequence
         ];
@@ -196,11 +200,25 @@ mod tests {
     }
 
     #[test]
+    fn parsing_fails_on_invalid_checksum() {
+        #[rustfmt::skip]
+        const DATA: [u8; 11] = [
+            8, 0,              // Type 8 (Echo Request), Code 0
+            0x3A, 0x4B,        // Checksum (wrong, should be 0x0B11)
+            0x12, 0x34,        // Identifier: 0x1234
+            0x56, 0x78,        // Sequence: 0x5678
+            0x41, 0x42, 0x43,  // Payload: "ABC"
+        ];
+
+        assert_matches!(IcmpEchoHandler::parse(&DATA, IP_PAIR), Err(e) if e.contains("checksum"));
+    }
+
+    #[test]
     fn handles_empty_payload() -> Result<(), String> {
         #[rustfmt::skip]
         const DATA: [u8; 8] = [
             8, 0,              // Type 8 (Echo Request), Code 0
-            0x3A, 0x4B,        // Checksum
+            0xF7, 0xFE,        // Checksum
             0x00, 0x00,        // Identifier: 0
             0x00, 0x01,        // Sequence: 1
         ];
@@ -219,7 +237,7 @@ mod tests {
         #[rustfmt::skip]
         const REQUEST: [u8; 13] = [
             8, 0,                          // Type 8 (Echo Request), Code 0
-            0x3A, 0x4B,                    // Checksum
+            0x6B, 0x81,                    // Checksum
             0x12, 0x34,                    // Identifier: 0x1234
             0x56, 0x78,                    // Sequence: 0x5678
             0x48, 0x65, 0x6C, 0x6C, 0x6F,  // Payload: "Hello"
