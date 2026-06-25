@@ -1,10 +1,7 @@
-use {
-    super::*,
-    std::{error::Error, time::Duration},
-};
+use {super::*, std::time::Duration};
 
 #[test]
-fn syn_ack_is_resent_while_due() -> Result<(), Box<dyn Error>> {
+fn syn_ack_is_resent_while_due() -> Result<()> {
     let mut connections = TcpConnections::new(Duration::ZERO, 5);
 
     client_packet(4096, 0, TcpFlags::Syn, &[]).create_reply(&mut connections)?;
@@ -21,7 +18,7 @@ fn syn_ack_is_resent_while_due() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn pending_segment_is_cleared_once_acked() -> Result<(), Box<dyn Error>> {
+fn pending_segment_is_cleared_once_acked() -> Result<()> {
     let mut connections = TcpConnections::new(Duration::ZERO, 5);
 
     client_packet(4096, 0, TcpFlags::Syn, &[]).create_reply(&mut connections)?;
@@ -38,7 +35,7 @@ fn pending_segment_is_cleared_once_acked() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn data_echo_is_resent_unchanged() -> Result<(), Box<dyn Error>> {
+fn data_echo_is_resent_unchanged() -> Result<()> {
     let mut connections = TcpConnections::new(Duration::ZERO, 5);
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097);
@@ -55,7 +52,7 @@ fn data_echo_is_resent_unchanged() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn fin_ack_is_resent_unchanged() -> Result<(), Box<dyn Error>> {
+fn fin_ack_is_resent_unchanged() -> Result<()> {
     let mut connections = TcpConnections::new(Duration::ZERO, 5);
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097);
@@ -72,7 +69,7 @@ fn fin_ack_is_resent_unchanged() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn multiple_unacked_segments_are_all_retransmitted() -> Result<(), Box<dyn Error>> {
+fn multiple_unacked_segments_are_all_retransmitted() -> Result<()> {
     // If the client pipelines multiple segments before acking the first, the server must keep
     // retransmitting every unacked segment, not just the most recently sent one.
 
@@ -99,7 +96,7 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result<(), Box<dyn Error
 }
 
 #[test]
-fn gives_up_after_max_retransmits() -> Result<(), Box<dyn Error>> {
+fn gives_up_after_max_retransmits() -> Result<()> {
     const MAX_RETRIES: u8 = 3;
 
     let mut connections = TcpConnections::new(Duration::ZERO, MAX_RETRIES);

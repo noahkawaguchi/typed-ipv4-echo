@@ -1,6 +1,6 @@
 use {
     crate::{
-        ETHERNET_MTU,
+        ETHERNET_MTU, Result,
         ipv4_header::Ipv4Header,
         protocol::{
             TcpConnections,
@@ -10,7 +10,6 @@ use {
         try_ops::TryGet as _,
     },
     std::{
-        error::Error,
         io::{self, Read, Write},
         os::fd::AsFd,
         time::{Duration, Instant},
@@ -35,7 +34,7 @@ pub fn run(
     device: &mut (impl Read + Write + AsFd),
     shutdown_check: impl Fn() -> bool,
     shutdown_grace_period: Duration,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<()> {
     let mut tcp_connections = TcpConnections::new(RETRANSMIT_TIMEOUT, MAX_RETRANSMITS);
 
     let mut read_buf = [0u8; ETHERNET_MTU];
@@ -160,7 +159,7 @@ fn start_active_close(
     write_buf: &mut [u8; ETHERNET_MTU],
     tcp_connections: &mut TcpConnections,
     shutdown_grace_period: Duration,
-) -> Result<Option<Instant>, Box<dyn Error>> {
+) -> Result<Option<Instant>> {
     println!("\nShutdown signal received, closing established connections...");
 
     for reply_handler in tcp_connections.close_established() {
@@ -194,7 +193,7 @@ fn send_packet(
     device: &mut impl Write,
     write_buf: &mut [u8; ETHERNET_MTU],
     handler: &impl Encode,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<()> {
     let proto_len = handler.write_into(&mut write_buf[Ipv4Header::REPLY_HEADER_LEN..])?;
 
     let ipv4_header = Ipv4Header::try_new(handler.proto(), handler.get_ip_pair(), proto_len)?;

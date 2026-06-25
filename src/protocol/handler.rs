@@ -1,18 +1,19 @@
 use {
     crate::{
+        Result,
         addr_pairs::Ipv4AddrPair,
         protocol::{
             Protocol, TcpConnections, icmp_echo::IcmpEchoHandler, tcp::TcpHandler, udp::UdpHandler,
         },
     },
-    std::{fmt, io},
+    std::fmt,
 };
 
 /// Trait for protocol-handling types that can be encoded into a byte buffer.
 pub trait Encode: fmt::Display {
     /// Copies data from `self` to write the protocol-specific header and payload into `buf`,
     /// returning the number of bytes written.
-    fn write_into(&self, buf: &mut [u8]) -> Result<u16, String>;
+    fn write_into(&self, buf: &mut [u8]) -> Result<u16>;
 
     /// Returns the protocol of `self`.
     fn proto(&self) -> Protocol;
@@ -30,13 +31,11 @@ pub enum ProtocolHandler<'a> {
 
 impl<'a> ProtocolHandler<'a> {
     /// Parses `data` as the header and payload of a packet of protocol type `protocol`.
-    pub fn parse(
-        data: &'a [u8],
-        protocol: Protocol,
-        ip_pair: Ipv4AddrPair,
-    ) -> Result<Self, String> {
+    pub fn parse(data: &'a [u8], protocol: Protocol, ip_pair: Ipv4AddrPair) -> Result<Self> {
         match protocol {
-            Protocol::Icmp => IcmpEchoHandler::parse(data, ip_pair).map(Self::Icmp),
+            Protocol::Icmp => IcmpEchoHandler::parse(data, ip_pair)
+                .map(Self::Icmp)
+                .map_err(Into::into),
             Protocol::Tcp => TcpHandler::parse(data, ip_pair).map(Self::Tcp),
             Protocol::Udp => UdpHandler::parse(data, ip_pair).map(Self::Udp),
         }
@@ -44,7 +43,7 @@ impl<'a> ProtocolHandler<'a> {
 
     /// Creates a protocol-specific header and payload for replying to `self`, or returns `Ok(None)`
     /// for no reply.
-    pub fn create_reply(&self, tcp_connections: &mut TcpConnections) -> io::Result<Option<Self>> {
+    pub fn create_reply(&self, tcp_connections: &mut TcpConnections) -> Result<Option<Self>> {
         match self {
             Self::Icmp(handler) => Ok(Some(Self::Icmp(handler.create_reply()))),
             // TCP is the only one that's actually optional or fallible
@@ -55,7 +54,7 @@ impl<'a> ProtocolHandler<'a> {
 }
 
 impl Encode for ProtocolHandler<'_> {
-    fn write_into(&self, buf: &mut [u8]) -> Result<u16, String> {
+    fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
         match self {
             Self::Icmp(handler) => handler.write_into(buf),
             Self::Tcp(handler) => handler.write_into(buf),

@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn correctly_parses_valid_packet() -> Result<(), String> {
+fn correctly_parses_valid_packet() -> Result<()> {
     #[rustfmt::skip]
         const DATA: [u8; 25] = [
             0x04, 0xD2,                          // Source port: 1234
@@ -30,7 +30,11 @@ fn correctly_parses_valid_packet() -> Result<(), String> {
 #[test]
 fn parsing_fails_when_too_short() {
     const DATA: [u8; 4] = [0x04, 0xD2, 0x00, 0x50]; // Only 4 bytes
-    assert_matches!(TcpHandler::parse(&DATA, IP_PAIR), Err(e) if e.contains("Too short"));
+
+    assert_matches!(
+        TcpHandler::parse(&DATA, IP_PAIR),
+        Err(e) if e.to_string().contains("Too short")
+    );
 }
 
 #[test]
@@ -48,11 +52,14 @@ fn parsing_fails_on_invalid_checksum() {
             0x48, 0x65, 0x6C, 0x6C, 0x6F,        // Payload: "Hello"
         ];
 
-    assert_matches!(TcpHandler::parse(&DATA, IP_PAIR), Err(e) if e.contains("checksum"));
+    assert_matches!(
+        TcpHandler::parse(&DATA, IP_PAIR),
+        Err(e) if e.to_string().contains("checksum")
+    );
 }
 
 #[test]
-fn parsing_handles_large_sequence_numbers() -> Result<(), String> {
+fn parsing_handles_large_sequence_numbers() -> Result<()> {
     #[rustfmt::skip]
         const DATA: [u8; 20] = [
             0x04, 0xD2,                          // Source port: 1234

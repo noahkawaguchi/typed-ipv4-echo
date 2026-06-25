@@ -1,5 +1,6 @@
 use {
     crate::{
+        Result,
         addr_pairs::{Ipv4AddrPair, PortPair},
         protocol::{Protocol, handler::Encode, payload_to_string, pseudo_header_checksum},
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
@@ -21,10 +22,10 @@ pub struct UdpHandler<'a> {
 
 impl<'a> UdpHandler<'a> {
     /// Parses `data` as a UDP header and payload.
-    pub(super) fn parse(data: &'a [u8], ip_pair: Ipv4AddrPair) -> Result<Self, String> {
+    pub(super) fn parse(data: &'a [u8], ip_pair: Ipv4AddrPair) -> Result<Self> {
         let Some((udp_header, payload)) = data.split_first_chunk::<{ UDP_HEADER_LEN as usize }>()
         else {
-            return Err(format!("Too short for UDP header ({} bytes)", data.len()));
+            return Err(format!("Too short for UDP header ({} bytes)", data.len()).into());
         };
 
         // A receiver should not treat a checksum field of all zeros as invalid because it means the
@@ -32,7 +33,7 @@ impl<'a> UdpHandler<'a> {
         if u16::from_be_bytes([udp_header[6], udp_header[7]]) != 0
             && pseudo_header_checksum(data, ip_pair, Protocol::Udp)? != 0
         {
-            return Err(String::from("Invalid UDP checksum"));
+            return Err("Invalid UDP checksum".into());
         }
 
         Ok(Self {
@@ -52,7 +53,7 @@ impl<'a> UdpHandler<'a> {
 }
 
 impl Encode for UdpHandler<'_> {
-    fn write_into(&self, buf: &mut [u8]) -> Result<u16, String> {
+    fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
         // Source and destination ports
         buf.try_get_mut(..2)?
             .copy_from_slice(&self.ports.src.to_be_bytes());
@@ -60,11 +61,7 @@ impl Encode for UdpHandler<'_> {
             .copy_from_slice(&self.ports.dst.to_be_bytes());
 
         // UDP length: fixed UDP header length (8 bytes) + length of echo payload
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "u16::MAX (65_535) > ETHERNET_MTU (1500)"
-        )]
-        let udp_len = UDP_HEADER_LEN.try_add(self.payload.len() as u16)?;
+        let udp_len = UDP_HEADER_LEN.try_add(self.payload.len().try_into()?)?;
         buf.try_get_mut(4..6)?
             .copy_from_slice(&udp_len.to_be_bytes());
 
@@ -113,7 +110,7 @@ mod tests {
     };
 
     #[test]
-    fn correctly_parses_valid_packet() -> Result<(), String> {
+    fn correctly_parses_valid_packet() -> Result<()> {
         #[rustfmt::skip]
         const DATA: [u8; 16] = [
             0x04, 0xD2,              // Source port: 1234
@@ -135,7 +132,11 @@ mod tests {
     #[test]
     fn parsing_fails_when_too_short() {
         const DATA: [u8; 3] = [0x04, 0xD2, 0x00]; // Only 3 bytes
-        assert_matches!(UdpHandler::parse(&DATA, IP_PAIR), Err(e) if e.contains("Too short"));
+
+        assert_matches!(
+            UdpHandler::parse(&DATA, IP_PAIR),
+            Err(e) if e.to_string().contains("Too short")
+        );
     }
 
     #[test]
@@ -150,11 +151,14 @@ mod tests {
             0x6F, 0x21, 0x21, 0x21,  // Payload: "o!!!"
         ];
 
-        assert_matches!(UdpHandler::parse(&DATA, IP_PAIR), Err(e) if e.contains("checksum"));
+        assert_matches!(
+            UdpHandler::parse(&DATA, IP_PAIR),
+            Err(e) if e.to_string().contains("checksum")
+        );
     }
 
     #[test]
-    fn parsing_accepts_zero_checksum_as_not_computed() -> Result<(), String> {
+    fn parsing_accepts_zero_checksum_as_not_computed() -> Result<()> {
         #[rustfmt::skip]
         const DATA: [u8; 16] = [
             0x04, 0xD2,              // Source port: 1234
@@ -174,7 +178,7 @@ mod tests {
     }
 
     #[test]
-    fn parsing_handles_empty_payload() -> Result<(), String> {
+    fn parsing_handles_empty_payload() -> Result<()> {
         #[rustfmt::skip]
         const DATA: [u8; 8] = [
             0x1F, 0x90,              // Source port: 8080
@@ -192,7 +196,7 @@ mod tests {
     }
 
     #[test]
-    fn extracts_ports_correctly() -> Result<(), String> {
+    fn extracts_ports_correctly() -> Result<()> {
         #[rustfmt::skip]
         const DATA: [u8; 12] = [
             0xFF, 0xFF,              // Source port: 65535 (max)
@@ -210,7 +214,7 @@ mod tests {
     }
 
     #[test]
-    fn transmits_all_ones_when_computed_checksum_is_zero() -> Result<(), String> {
+    fn transmits_all_ones_when_computed_checksum_is_zero() -> Result<()> {
         // Payload [0xE6, 0xB5] results in a pseudo-header checksum of 0x0000 for ports 1234 -> 80
         // over `IP_PAIR`. However, 0xFFFF must be transmitted instead of 0x0000.
 
@@ -229,7 +233,7 @@ mod tests {
     }
 
     #[test]
-    fn creates_valid_echo_reply() -> Result<(), String> {
+    fn creates_valid_echo_reply() -> Result<()> {
         #[rustfmt::skip]
         const REQUEST: [u8; 16] = [
             0x04, 0xD2,              // Source port: 1234

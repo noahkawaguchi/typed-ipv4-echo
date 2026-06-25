@@ -1,5 +1,6 @@
 use {
     crate::{
+        Result,
         addr_pairs::Ipv4AddrPair,
         checksum,
         protocol::{Protocol, handler::Encode, payload_to_string},
@@ -73,7 +74,7 @@ impl<'a> IcmpEchoHandler<'a> {
 }
 
 impl Encode for IcmpEchoHandler<'_> {
-    fn write_into(&self, buf: &mut [u8]) -> Result<u16, String> {
+    fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
         // Copy echo payload
         buf.try_get_mut(
             usize::from(ICMP_HEADER_LEN)
@@ -95,11 +96,7 @@ impl Encode for IcmpEchoHandler<'_> {
             .copy_from_slice(&self.sequence.to_be_bytes());
 
         // ICMP length: fixed ICMP header length (8 bytes) + length of echo payload
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "u16::MAX (65_535) > ETHERNET_MTU (1500)"
-        )]
-        let icmp_len = ICMP_HEADER_LEN.try_add(self.payload.len() as u16)?;
+        let icmp_len = ICMP_HEADER_LEN.try_add(self.payload.len().try_into()?)?;
 
         // Calculate ICMP checksum (covers the entire ICMP message: header + payload)
         let icmp_checksum = checksum::calculate(buf.try_get(..usize::from(icmp_len))?);
@@ -233,7 +230,7 @@ mod tests {
     }
 
     #[test]
-    fn creates_valid_echo_reply() -> Result<(), String> {
+    fn creates_valid_echo_reply() -> Result<()> {
         #[rustfmt::skip]
         const REQUEST: [u8; 13] = [
             8, 0,                          // Type 8 (Echo Request), Code 0
