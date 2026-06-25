@@ -7,22 +7,18 @@ mod udp;
 
 use {
     crate::{
-        ETHERNET_MTU,
+        ETHERNET_MTU, Result,
         addr_pairs::Ipv4AddrPair,
         checksum,
         try_ops::{TryGet as _, TryGetMut as _},
     },
-    std::{error::Error, fmt},
+    std::fmt,
 };
 
 /// Calculates the TCP/UDP checksum of the pseudo-header + `data`. `data` should be the TCP/UDP
 /// header and payload. Does not zero out the checksum field inside the header of `data` before
 /// calculating.
-fn pseudo_header_checksum(
-    data: &[u8],
-    ip_pair: Ipv4AddrPair,
-    protocol: Protocol,
-) -> Result<u16, Box<dyn Error>> {
+fn pseudo_header_checksum(data: &[u8], ip_pair: Ipv4AddrPair, protocol: Protocol) -> Result<u16> {
     /// The number of bytes in the TCP/UDP pseudo-header.
     const PSEUDO_HEADER_LEN: usize = 12;
 

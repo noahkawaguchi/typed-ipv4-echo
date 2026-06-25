@@ -1,7 +1,7 @@
 use {super::*, crate::ETHERNET_MTU};
 
 #[test]
-fn write_into_produces_correct_bytes_with_no_payload() -> Result<(), Box<dyn Error>> {
+fn write_into_produces_correct_bytes_with_no_payload() -> Result<()> {
     let handler = TcpHandler {
         ip_pair: IP_PAIR,
         ports: PortPair { src: 80, dst: 1234 },
@@ -32,7 +32,7 @@ fn write_into_produces_correct_bytes_with_no_payload() -> Result<(), Box<dyn Err
 }
 
 #[test]
-fn write_into_produces_correct_bytes_with_payload() -> Result<(), Box<dyn Error>> {
+fn write_into_produces_correct_bytes_with_payload() -> Result<()> {
     let handler = TcpHandler {
         ip_pair: IP_PAIR,
         ports: PortPair { src: 80, dst: 1234 },

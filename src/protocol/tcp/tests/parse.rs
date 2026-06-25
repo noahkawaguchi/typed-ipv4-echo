@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn correctly_parses_valid_packet() -> Result<(), Box<dyn Error>> {
+fn correctly_parses_valid_packet() -> Result<()> {
     #[rustfmt::skip]
         const DATA: [u8; 25] = [
             0x04, 0xD2,                          // Source port: 1234
@@ -59,7 +59,7 @@ fn parsing_fails_on_invalid_checksum() {
 }
 
 #[test]
-fn parsing_handles_large_sequence_numbers() -> Result<(), Box<dyn Error>> {
+fn parsing_handles_large_sequence_numbers() -> Result<()> {
     #[rustfmt::skip]
         const DATA: [u8; 20] = [
             0x04, 0xD2,                          // Source port: 1234

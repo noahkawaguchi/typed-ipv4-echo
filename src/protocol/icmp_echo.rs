@@ -1,11 +1,12 @@
 use {
     crate::{
+        Result,
         addr_pairs::Ipv4AddrPair,
         checksum,
         protocol::{Protocol, handler::Encode, payload_to_string},
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
-    std::{error::Error, fmt},
+    std::fmt,
 };
 
 const ICMP_HEADER_LEN: u16 = 8;
@@ -73,7 +74,7 @@ impl<'a> IcmpEchoHandler<'a> {
 }
 
 impl Encode for IcmpEchoHandler<'_> {
-    fn write_into(&self, buf: &mut [u8]) -> Result<u16, Box<dyn Error>> {
+    fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
         // Copy echo payload
         buf.try_get_mut(
             usize::from(ICMP_HEADER_LEN)
@@ -229,7 +230,7 @@ mod tests {
     }
 
     #[test]
-    fn creates_valid_echo_reply() -> Result<(), Box<dyn Error>> {
+    fn creates_valid_echo_reply() -> Result<()> {
         #[rustfmt::skip]
         const REQUEST: [u8; 13] = [
             8, 0,                          // Type 8 (Echo Request), Code 0

@@ -1,11 +1,11 @@
 pub use connections::TcpConnections;
-use std::{error::Error, num::TryFromIntError};
 
 mod connections;
 mod flags;
 
 use {
     crate::{
+        Result,
         addr_pairs::{Ipv4AddrPair, PortPair},
         protocol::{
             Protocol,
@@ -19,7 +19,7 @@ use {
         sys,
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
-    std::{fmt, rc::Rc},
+    std::{fmt, num::TryFromIntError, rc::Rc},
 };
 
 const TCP_HEADER_MIN_LEN: u8 = 20;
@@ -63,7 +63,7 @@ struct SendInfo {
 
 impl TcpHandler {
     /// Parses `data` as a TCP header and payload.
-    pub(super) fn parse(data: &[u8], ip_pair: Ipv4AddrPair) -> Result<Self, Box<dyn Error>> {
+    pub(super) fn parse(data: &[u8], ip_pair: Ipv4AddrPair) -> Result<Self> {
         let Some(tcp_header) = data.first_chunk::<{ TCP_HEADER_MIN_LEN as usize }>() else {
             return Err(format!("Too short for TCP header ({} bytes)", data.len()).into());
         };
@@ -115,10 +115,7 @@ impl TcpHandler {
         clippy::too_many_lines,
         reason = "Large match expression to express reply cases clearly"
     )]
-    pub(super) fn create_reply(
-        &self,
-        connections: &mut TcpConnections,
-    ) -> Result<Option<Self>, Box<dyn Error>> {
+    pub(super) fn create_reply(&self, connections: &mut TcpConnections) -> Result<Option<Self>> {
         let key = ConnKey {
             client_ip: self.ip_pair.src,
             client_port: self.ports.src,
@@ -371,7 +368,7 @@ impl TcpHandler {
 }
 
 impl Encode for TcpHandler {
-    fn write_into(&self, buf: &mut [u8]) -> Result<u16, Box<dyn Error>> {
+    fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
         // Source and destination ports
         buf.try_get_mut(..2)?
             .copy_from_slice(&self.ports.src.to_be_bytes());
