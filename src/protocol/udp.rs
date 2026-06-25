@@ -27,6 +27,10 @@ impl<'a> UdpHandler<'a> {
             return Err(format!("Too short for UDP header ({} bytes)", data.len()));
         };
 
+        if pseudo_header_checksum(data, ip_pair, Protocol::Udp)? != 0 {
+            return Err(String::from("Invalid UDP checksum"));
+        }
+
         Ok(Self {
             ip_pair,
             ports: PortPair {
@@ -109,7 +113,7 @@ mod tests {
             0x04, 0xD2,              // Source port: 1234
             0x00, 0x35,              // Dest port: 53 (DNS)
             0x00, 0x10,              // Length: 16 (8 byte header + 8 byte payload)
-            0x00, 0x00,              // Checksum
+            0xA1, 0xB0,              // Checksum (valid for this datagram and `IP_PAIR`)
             0x48, 0x65, 0x6C, 0x6C,  // Payload: "Hell"
             0x6F, 0x21, 0x21, 0x21,  // Payload: "o!!!"
         ];
@@ -129,13 +133,28 @@ mod tests {
     }
 
     #[test]
+    fn parsing_fails_on_invalid_checksum() {
+        #[rustfmt::skip]
+        const DATA: [u8; 16] = [
+            0x04, 0xD2,              // Source port: 1234
+            0x00, 0x35,              // Dest port: 53 (DNS)
+            0x00, 0x10,              // Length: 16 (8 byte header + 8 byte payload)
+            0x00, 0x00,              // Checksum (wrong, should be 0xA1B0)
+            0x48, 0x65, 0x6C, 0x6C,  // Payload: "Hell"
+            0x6F, 0x21, 0x21, 0x21,  // Payload: "o!!!"
+        ];
+
+        assert_matches!(UdpHandler::parse(&DATA, IP_PAIR), Err(e) if e.contains("checksum"));
+    }
+
+    #[test]
     fn parsing_handles_empty_payload() -> Result<(), String> {
         #[rustfmt::skip]
         const DATA: [u8; 8] = [
             0x1F, 0x90,              // Source port: 8080
             0x00, 0x50,              // Dest port: 80
             0x00, 0x08,              // Length: 8 (header only, no payload)
-            0x00, 0x00,              // Checksum
+            0xCB, 0xFB,              // Checksum (valid for this datagram and `IP_PAIR`)
         ];
 
         let handler = UdpHandler::parse(&DATA, IP_PAIR)?;
@@ -153,7 +172,7 @@ mod tests {
             0xFF, 0xFF,              // Source port: 65535 (max)
             0x00, 0x01,              // Dest port: 1 (min non-zero)
             0x00, 0x0C,              // Length: 12
-            0x00, 0x00,              // Checksum
+            0x03, 0xF9,              // Checksum (valid for this datagram and `IP_PAIR`)
             0x74, 0x65, 0x73, 0x74,  // Payload: "test"
         ];
 
@@ -171,7 +190,7 @@ mod tests {
             0x04, 0xD2,              // Source port: 1234
             0x00, 0x35,              // Dest port: 53
             0x00, 0x10,              // Length: 16
-            0x00, 0x00,              // Checksum
+            0xA1, 0xB0,              // Checksum (valid for this datagram and `IP_PAIR`)
             0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x21, 0x21, 0x21,  // Payload: "Hello!!!"
         ];
 
