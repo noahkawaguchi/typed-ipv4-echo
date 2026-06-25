@@ -85,8 +85,10 @@ impl Encode for UdpHandler<'_> {
             self.proto(),
         )?;
 
+        // A computed checksum of 0 must be transmitted as 0xFFFF because a checksum field of all
+        // zeros means the sender chose not to compute one (RFC 768, RFC 1122, Section 4.1.3.4).
         buf.try_get_mut(6..8)?
-            .copy_from_slice(&udp_checksum.to_be_bytes());
+            .copy_from_slice(&if udp_checksum == 0 { 0xFFFF } else { udp_checksum }.to_be_bytes());
 
         Ok(udp_len)
     }
@@ -203,6 +205,25 @@ mod tests {
         let handler = UdpHandler::parse(&DATA, IP_PAIR)?;
 
         assert_eq!(handler.ports, PortPair { src: 65535, dst: 1 });
+
+        Ok(())
+    }
+
+    #[test]
+    fn transmits_all_ones_when_computed_checksum_is_zero() -> Result<(), String> {
+        // Payload [0xE6, 0xB5] results in a pseudo-header checksum of 0x0000 for ports 1234 -> 80
+        // over `IP_PAIR`. However, 0xFFFF must be transmitted instead of 0x0000.
+
+        const HANDLER: UdpHandler = UdpHandler {
+            ip_pair: IP_PAIR,
+            ports: PortPair { src: 1234, dst: 80 },
+            payload: &[0xE6, 0xB5],
+        };
+
+        let mut buf = [0u8; ETHERNET_MTU];
+        HANDLER.write_into(&mut buf)?;
+
+        assert_eq!(&buf[6..8], &[0xFF, 0xFF]);
 
         Ok(())
     }
