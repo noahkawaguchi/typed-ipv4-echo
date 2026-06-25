@@ -27,7 +27,11 @@ impl<'a> UdpHandler<'a> {
             return Err(format!("Too short for UDP header ({} bytes)", data.len()));
         };
 
-        if pseudo_header_checksum(data, ip_pair, Protocol::Udp)? != 0 {
+        // A receiver should not treat a checksum field of all zeros as invalid because it means the
+        // sender chose not to compute one (RFC 768, RFC 1122, Section 4.1.3.4).
+        if u16::from_be_bytes([udp_header[6], udp_header[7]]) != 0
+            && pseudo_header_checksum(data, ip_pair, Protocol::Udp)? != 0
+        {
             return Err(String::from("Invalid UDP checksum"));
         }
 
@@ -133,18 +137,38 @@ mod tests {
     }
 
     #[test]
-    fn parsing_fails_on_invalid_checksum() {
+    fn parsing_fails_on_invalid_nonzero_checksum() {
         #[rustfmt::skip]
         const DATA: [u8; 16] = [
             0x04, 0xD2,              // Source port: 1234
             0x00, 0x35,              // Dest port: 53 (DNS)
             0x00, 0x10,              // Length: 16 (8 byte header + 8 byte payload)
-            0x00, 0x00,              // Checksum (wrong, should be 0xA1B0)
+            0xBE, 0xEF,              // Checksum (wrong, should be 0xA1B0)
             0x48, 0x65, 0x6C, 0x6C,  // Payload: "Hell"
             0x6F, 0x21, 0x21, 0x21,  // Payload: "o!!!"
         ];
 
         assert_matches!(UdpHandler::parse(&DATA, IP_PAIR), Err(e) if e.contains("checksum"));
+    }
+
+    #[test]
+    fn parsing_accepts_zero_checksum_as_not_computed() -> Result<(), String> {
+        #[rustfmt::skip]
+        const DATA: [u8; 16] = [
+            0x04, 0xD2,              // Source port: 1234
+            0x00, 0x35,              // Dest port: 53 (DNS)
+            0x00, 0x10,              // Length: 16 (8 byte header + 8 byte payload)
+            0x00, 0x00,              // Checksum: all zeros means sender didn't compute one
+            0x48, 0x65, 0x6C, 0x6C,  // Payload: "Hell"
+            0x6F, 0x21, 0x21, 0x21,  // Payload: "o!!!"
+        ];
+
+        let handler = UdpHandler::parse(&DATA, IP_PAIR)?;
+
+        assert_eq!(handler.ports, PortPair { src: 1234, dst: 53 });
+        assert_eq!(handler.payload, b"Hello!!!");
+
+        Ok(())
     }
 
     #[test]
