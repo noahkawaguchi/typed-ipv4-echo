@@ -1,4 +1,5 @@
 pub use connections::TcpConnections;
+use std::{error::Error, num::TryFromIntError};
 
 mod connections;
 mod flags;
@@ -18,7 +19,7 @@ use {
         sys,
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
-    std::{fmt, io, rc::Rc},
+    std::{fmt, rc::Rc},
 };
 
 const TCP_HEADER_MIN_LEN: u8 = 20;
@@ -62,13 +63,13 @@ struct SendInfo {
 
 impl TcpHandler {
     /// Parses `data` as a TCP header and payload.
-    pub(super) fn parse(data: &[u8], ip_pair: Ipv4AddrPair) -> Result<Self, String> {
+    pub(super) fn parse(data: &[u8], ip_pair: Ipv4AddrPair) -> Result<Self, Box<dyn Error>> {
         let Some(tcp_header) = data.first_chunk::<{ TCP_HEADER_MIN_LEN as usize }>() else {
-            return Err(format!("Too short for TCP header ({} bytes)", data.len()));
+            return Err(format!("Too short for TCP header ({} bytes)", data.len()).into());
         };
 
         if pseudo_header_checksum(data, ip_pair, Protocol::Tcp)? != 0 {
-            return Err(String::from("Invalid TCP checksum"));
+            return Err("Invalid TCP checksum".into());
         }
 
         // Convert length in 32-bit words in the upper 4 bits to length in bytes in the full 8 bits
@@ -117,7 +118,7 @@ impl TcpHandler {
     pub(super) fn create_reply(
         &self,
         connections: &mut TcpConnections,
-    ) -> io::Result<Option<Self>> {
+    ) -> Result<Option<Self>, Box<dyn Error>> {
         let key = ConnKey {
             client_ip: self.ip_pair.src,
             client_port: self.ports.src,
@@ -205,7 +206,7 @@ impl TcpHandler {
                 if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key)
                     && self.seq_num == rcv_nxt =>
             {
-                let payload_len = u32::from(self.payload_len());
+                let payload_len = u32::from(self.payload_len()?);
 
                 connections.update_snd_una(&key, self.ack_num);
                 connections.advance_snd_nxt(&key, payload_len);
@@ -275,7 +276,7 @@ impl TcpHandler {
                 if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key)
                     && self.seq_num == rcv_nxt =>
             {
-                let payload_len = u32::from(self.payload_len());
+                let payload_len = u32::from(self.payload_len()?);
 
                 connections.update_snd_una(&key, self.ack_num);
                 connections.advance_rcv_nxt(&key, payload_len);
@@ -364,15 +365,13 @@ impl TcpHandler {
     }
 
     /// Returns the number of bytes in the payload, or 0 if the payload is `None`.
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "`u16::MAX` (65_535) > ETHERNET_MTU (1500)"
-    )]
-    fn payload_len(&self) -> u16 { self.payload.as_ref().map_or(0, |p| p.len()) as u16 }
+    fn payload_len(&self) -> Result<u16, TryFromIntError> {
+        self.payload.as_ref().map_or(0, |p| p.len()).try_into()
+    }
 }
 
 impl Encode for TcpHandler {
-    fn write_into(&self, buf: &mut [u8]) -> Result<u16, String> {
+    fn write_into(&self, buf: &mut [u8]) -> Result<u16, Box<dyn Error>> {
         // Source and destination ports
         buf.try_get_mut(..2)?
             .copy_from_slice(&self.ports.src.to_be_bytes());
@@ -412,7 +411,7 @@ impl Encode for TcpHandler {
         }
 
         // TCP segment length: minimum TCP header length (20 bytes) + payload length (0+ bytes)
-        let tcp_segment_len = u16::from(TCP_HEADER_MIN_LEN).try_add(self.payload_len())?;
+        let tcp_segment_len = u16::from(TCP_HEADER_MIN_LEN).try_add(self.payload_len()?)?;
 
         // Zero out checksum field before calculating checksum
         buf.try_get_mut(16..18)?.copy_from_slice(&[0x00, 0x00]);

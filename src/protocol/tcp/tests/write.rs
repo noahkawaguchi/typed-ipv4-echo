@@ -1,4 +1,4 @@
-use {super::*, crate::ETHERNET_MTU, std::error::Error};
+use {super::*, crate::ETHERNET_MTU};
 
 #[test]
 fn write_into_produces_correct_bytes_with_no_payload() -> Result<(), Box<dyn Error>> {

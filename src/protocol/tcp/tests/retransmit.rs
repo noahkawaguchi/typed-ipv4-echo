@@ -1,7 +1,4 @@
-use {
-    super::*,
-    std::{error::Error, time::Duration},
-};
+use {super::*, std::time::Duration};
 
 #[test]
 fn syn_ack_is_resent_while_due() -> Result<(), Box<dyn Error>> {

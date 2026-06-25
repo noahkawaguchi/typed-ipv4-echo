@@ -12,7 +12,7 @@ use {
         checksum,
         try_ops::{TryGet as _, TryGetMut as _},
     },
-    std::fmt,
+    std::{error::Error, fmt},
 };
 
 /// Calculates the TCP/UDP checksum of the pseudo-header + `data`. `data` should be the TCP/UDP
@@ -22,15 +22,11 @@ fn pseudo_header_checksum(
     data: &[u8],
     ip_pair: Ipv4AddrPair,
     protocol: Protocol,
-) -> Result<u16, String> {
+) -> Result<u16, Box<dyn Error>> {
     /// The number of bytes in the TCP/UDP pseudo-header.
     const PSEUDO_HEADER_LEN: usize = 12;
 
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "`u16::MAX` (65_535) > ETHERNET_MTU (1500)"
-    )]
-    let proto_len = data.len() as u16;
+    let proto_len = u16::try_from(data.len())?;
     let checksum_len = PSEUDO_HEADER_LEN + usize::from(proto_len);
 
     let mut checksum_data = [0u8; PSEUDO_HEADER_LEN + ETHERNET_MTU];

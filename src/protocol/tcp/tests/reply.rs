@@ -1,4 +1,4 @@
-use {super::*, std::error::Error};
+use super::*;
 
 #[test]
 fn reply_creates_valid_syn_ack() -> Result<(), Box<dyn Error>> {
