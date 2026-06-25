@@ -1,4 +1,4 @@
-use {super::*, crate::protocol::test_utils::tcp_udp_test_checksum, std::error::Error};
+use {super::*, crate::ETHERNET_MTU, std::error::Error};
 
 #[test]
 fn write_into_produces_correct_bytes_with_no_payload() -> Result<(), Box<dyn Error>> {
@@ -26,7 +26,7 @@ fn write_into_produces_correct_bytes_with_no_payload() -> Result<(), Box<dyn Err
     assert_eq!(&reply[34..36], &[0xFF, 0xFF]); // Window size
     assert_eq!(&reply[38..40], &[0x00, 0x00]); // Urgent pointer
 
-    assert_eq!(tcp_udp_test_checksum(&reply, Protocol::Tcp, tcp_len, IP_PAIR)?, 0x0000);
+    assert_eq!(pseudo_header_checksum(&reply[20..40], IP_PAIR, Protocol::Tcp)?, 0x0000);
 
     Ok(())
 }
@@ -51,7 +51,7 @@ fn write_into_produces_correct_bytes_with_payload() -> Result<(), Box<dyn Error>
     // Payload copied immediately after the 20-byte header
     assert_eq!(&reply[40..45], b"Hello");
 
-    assert_eq!(tcp_udp_test_checksum(&reply, Protocol::Tcp, tcp_len, IP_PAIR)?, 0x0000);
+    assert_eq!(pseudo_header_checksum(&reply[20..45], IP_PAIR, Protocol::Tcp)?, 0x0000);
 
     Ok(())
 }

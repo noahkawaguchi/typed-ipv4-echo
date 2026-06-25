@@ -5,10 +5,46 @@ mod icmp_echo;
 mod tcp;
 mod udp;
 
-#[cfg(test)]
-mod test_utils;
+use {
+    crate::{
+        ETHERNET_MTU,
+        addr_pairs::Ipv4AddrPair,
+        checksum,
+        try_ops::{TryGet as _, TryGetMut as _},
+    },
+    std::fmt,
+};
 
-use std::fmt;
+/// Calculates the TCP/UDP checksum of the pseudo-header + `data`. `data` should be the TCP/UDP
+/// header and payload. Does not zero out the checksum field inside the header of `data` before
+/// calculating.
+fn pseudo_header_checksum(
+    data: &[u8],
+    ip_pair: Ipv4AddrPair,
+    protocol: Protocol,
+) -> Result<u16, String> {
+    /// The number of bytes in the TCP/UDP pseudo-header.
+    const PSEUDO_HEADER_LEN: usize = 12;
+
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "`u16::MAX` (65_535) > ETHERNET_MTU (1500)"
+    )]
+    let proto_len = data.len() as u16;
+    let checksum_len = PSEUDO_HEADER_LEN + usize::from(proto_len);
+
+    let mut checksum_data = [0u8; PSEUDO_HEADER_LEN + ETHERNET_MTU];
+    checksum_data[0..4].copy_from_slice(&ip_pair.src.octets());
+    checksum_data[4..8].copy_from_slice(&ip_pair.dst.octets());
+    // Byte 8 is reserved padding for alignment
+    checksum_data[9] = protocol.into();
+    checksum_data[10..12].copy_from_slice(&proto_len.to_be_bytes());
+    checksum_data
+        .try_get_mut(PSEUDO_HEADER_LEN..checksum_len)?
+        .copy_from_slice(data);
+
+    Ok(checksum::calculate(checksum_data.try_get(..checksum_len)?))
+}
 
 /// Converts raw payload bytes to a printable string representation of the payload's length and
 /// content. Escapes control and non-printable characters.
@@ -58,4 +94,19 @@ impl fmt::Display for Protocol {
             Self::Udp => write!(f, "UDP"),
         }
     }
+}
+
+/// Test constants shared between protocols.
+#[cfg(test)]
+mod test_consts {
+    use {crate::addr_pairs::Ipv4AddrPair, std::net::Ipv4Addr};
+
+    /// Test source IP address: 10.0.0.2
+    pub const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
+
+    /// Test destination IP address: 10.0.0.1
+    pub const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
+
+    /// An `Ipv4AddrPair` of `SRC_IP` and `DST_IP`.
+    pub const IP_PAIR: Ipv4AddrPair = Ipv4AddrPair { src: SRC_IP, dst: DST_IP };
 }

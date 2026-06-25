@@ -53,6 +53,10 @@ impl Ipv4Header {
             version => return Err(format!("Unexpected IP version {version}")),
         }
 
+        if checksum::calculate(ip_header) != 0 {
+            return Err(String::from("Invalid IPv4 header checksum"));
+        }
+
         let ihl_bytes = usize::from(ip_header[0] & 0xF) * 4; // Convert 32-bit words to bytes
 
         Ok((
@@ -108,7 +112,7 @@ mod tests {
         const DATA: [u8; 20] = [
             0x45, 0x00, 0x00, 0x3C,  // Version 4, IHL 5, TOS 0, Total Length 60
             0x1C, 0x46, 0x40, 0x00,  // ID, Flags, Fragment Offset
-            0x40, 0x06, 0xB1, 0xE6,  // TTL 64, Protocol 6 (TCP), Checksum
+            0x40, 0x06, 0xA6, 0x4D,  // TTL 64, Protocol 6 (TCP), Checksum
             192, 168, 1, 100,        // Source IP: 192.168.1.100
             172, 16, 10, 12,         // Dest IP: 172.16.10.12
         ];
@@ -128,6 +132,20 @@ mod tests {
     fn parsing_fails_if_too_short() {
         const DATA: [u8; 3] = [0x45, 0x00, 0x00]; // Only 3 bytes
         assert_matches!(Ipv4Header::parse(&DATA), Err(e) if e.contains("Too short"));
+    }
+
+    #[test]
+    fn parsing_fails_on_invalid_checksum() {
+        #[rustfmt::skip]
+        const DATA: [u8; 20] = [
+            0x45, 0x00, 0x00, 0x3C,  // Version 4, IHL 5, TOS 0, Total Length 60
+            0x1C, 0x46, 0x40, 0x00,  // ID, Flags, Fragment Offset
+            0x40, 0x06, 0x00, 0x00,  // TTL 64, Protocol 6 (TCP), Checksum (wrong, should be 0xA64D)
+            192, 168, 1, 100,        // Source IP: 192.168.1.100
+            172, 16, 10, 12,         // Dest IP: 172.16.10.12
+        ];
+
+        assert_matches!(Ipv4Header::parse(&DATA), Err(e) if e.contains("checksum"));
     }
 
     #[test]
@@ -151,7 +169,7 @@ mod tests {
         const REQUEST: [u8; 20] = [
             0x45, 0x00, 0x00, 0x3C,  // Version 4, IHL 5, TOS 0, Total Length 60
             0x1C, 0x46, 0x40, 0x00,  // ID, Flags, Fragment Offset
-            0x40, 0x11, 0xB1, 0xE6,  // TTL 64, Protocol 17 (UDP), Checksum
+            0x40, 0x11, 0xA6, 0x42,  // TTL 64, Protocol 17 (UDP), Checksum
             192, 168, 1, 100,        // Source IP: 192.168.1.100
             172, 16, 10, 12,         // Dest IP: 172.16.10.12
         ];

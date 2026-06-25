@@ -1,9 +1,7 @@
 use {
     crate::{
-        ETHERNET_MTU,
         addr_pairs::{Ipv4AddrPair, PortPair},
-        checksum,
-        protocol::{Protocol, handler::Encode, payload_to_string},
+        protocol::{Protocol, handler::Encode, payload_to_string, pseudo_header_checksum},
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
     std::fmt,
@@ -22,14 +20,20 @@ pub struct UdpHandler<'a> {
 }
 
 impl<'a> UdpHandler<'a> {
-    const PSEUDO_HEADER_LEN: usize = 12;
-
     /// Parses `data` as a UDP header and payload.
     pub(super) fn parse(data: &'a [u8], ip_pair: Ipv4AddrPair) -> Result<Self, String> {
         let Some((udp_header, payload)) = data.split_first_chunk::<{ UDP_HEADER_LEN as usize }>()
         else {
             return Err(format!("Too short for UDP header ({} bytes)", data.len()));
         };
+
+        // A receiver should not treat a checksum field of all zeros as invalid because it means the
+        // sender chose not to compute one (RFC 768, RFC 1122, Section 4.1.3.4).
+        if u16::from_be_bytes([udp_header[6], udp_header[7]]) != 0
+            && pseudo_header_checksum(data, ip_pair, Protocol::Udp)? != 0
+        {
+            return Err(String::from("Invalid UDP checksum"));
+        }
 
         Ok(Self {
             ip_pair,
@@ -72,29 +76,19 @@ impl Encode for UdpHandler<'_> {
         )?
         .copy_from_slice(self.payload);
 
-        // Calculate UDP checksum with pseudo-header
-        let mut pseudo_header = [0u8; Self::PSEUDO_HEADER_LEN];
-        pseudo_header[0..4].copy_from_slice(&self.ip_pair.src.octets()); // Source IP
-        pseudo_header[4..8].copy_from_slice(&self.ip_pair.dst.octets()); // Dest IP
-        pseudo_header[8] = 0; // Reserved padding for alignment
-        pseudo_header[9] = Protocol::Udp.into();
-        pseudo_header[10..12].copy_from_slice(&udp_len.to_be_bytes());
+        // Zero out checksum field before calculating checksum
+        buf.try_get_mut(6..8)?.copy_from_slice(&[0x00, 0x00]);
 
-        // Build checksum data: pseudo-header + UDP header + payload
-        let checksum_len = Self::PSEUDO_HEADER_LEN + usize::from(udp_len);
-        let mut checksum_data = [0u8; ETHERNET_MTU + Self::PSEUDO_HEADER_LEN];
-        checksum_data[0..Self::PSEUDO_HEADER_LEN].copy_from_slice(&pseudo_header);
-        checksum_data
-            .try_get_mut(Self::PSEUDO_HEADER_LEN..checksum_len)?
-            .copy_from_slice(buf.try_get(..usize::from(udp_len))?);
+        let udp_checksum = pseudo_header_checksum(
+            buf.try_get(..usize::from(udp_len))?,
+            self.ip_pair,
+            self.proto(),
+        )?;
 
-        // Zero out checksum field before calculating
-        checksum_data[Self::PSEUDO_HEADER_LEN + 6..Self::PSEUDO_HEADER_LEN + 8]
-            .copy_from_slice(&[0x00, 0x00]);
-
-        let udp_checksum = checksum::calculate(checksum_data.try_get(..checksum_len)?);
+        // A computed checksum of 0 must be transmitted as 0xFFFF because a checksum field of all
+        // zeros means the sender chose not to compute one (RFC 768, RFC 1122, Section 4.1.3.4).
         buf.try_get_mut(6..8)?
-            .copy_from_slice(&udp_checksum.to_be_bytes());
+            .copy_from_slice(&if udp_checksum == 0 { 0xFFFF } else { udp_checksum }.to_be_bytes());
 
         Ok(udp_len)
     }
@@ -114,7 +108,7 @@ impl fmt::Display for UdpHandler<'_> {
 mod tests {
     use {
         super::*,
-        crate::protocol::test_utils::{IP_PAIR, tcp_udp_test_checksum},
+        crate::{ETHERNET_MTU, protocol::test_consts::IP_PAIR},
         std::assert_matches,
     };
 
@@ -125,7 +119,7 @@ mod tests {
             0x04, 0xD2,              // Source port: 1234
             0x00, 0x35,              // Dest port: 53 (DNS)
             0x00, 0x10,              // Length: 16 (8 byte header + 8 byte payload)
-            0x00, 0x00,              // Checksum
+            0xA1, 0xB0,              // Checksum (valid for this datagram and `IP_PAIR`)
             0x48, 0x65, 0x6C, 0x6C,  // Payload: "Hell"
             0x6F, 0x21, 0x21, 0x21,  // Payload: "o!!!"
         ];
@@ -145,13 +139,48 @@ mod tests {
     }
 
     #[test]
+    fn parsing_fails_on_invalid_nonzero_checksum() {
+        #[rustfmt::skip]
+        const DATA: [u8; 16] = [
+            0x04, 0xD2,              // Source port: 1234
+            0x00, 0x35,              // Dest port: 53 (DNS)
+            0x00, 0x10,              // Length: 16 (8 byte header + 8 byte payload)
+            0xBE, 0xEF,              // Checksum (wrong, should be 0xA1B0)
+            0x48, 0x65, 0x6C, 0x6C,  // Payload: "Hell"
+            0x6F, 0x21, 0x21, 0x21,  // Payload: "o!!!"
+        ];
+
+        assert_matches!(UdpHandler::parse(&DATA, IP_PAIR), Err(e) if e.contains("checksum"));
+    }
+
+    #[test]
+    fn parsing_accepts_zero_checksum_as_not_computed() -> Result<(), String> {
+        #[rustfmt::skip]
+        const DATA: [u8; 16] = [
+            0x04, 0xD2,              // Source port: 1234
+            0x00, 0x35,              // Dest port: 53 (DNS)
+            0x00, 0x10,              // Length: 16 (8 byte header + 8 byte payload)
+            0x00, 0x00,              // Checksum: all zeros means sender didn't compute one
+            0x48, 0x65, 0x6C, 0x6C,  // Payload: "Hell"
+            0x6F, 0x21, 0x21, 0x21,  // Payload: "o!!!"
+        ];
+
+        let handler = UdpHandler::parse(&DATA, IP_PAIR)?;
+
+        assert_eq!(handler.ports, PortPair { src: 1234, dst: 53 });
+        assert_eq!(handler.payload, b"Hello!!!");
+
+        Ok(())
+    }
+
+    #[test]
     fn parsing_handles_empty_payload() -> Result<(), String> {
         #[rustfmt::skip]
         const DATA: [u8; 8] = [
             0x1F, 0x90,              // Source port: 8080
             0x00, 0x50,              // Dest port: 80
             0x00, 0x08,              // Length: 8 (header only, no payload)
-            0x00, 0x00,              // Checksum
+            0xCB, 0xFB,              // Checksum (valid for this datagram and `IP_PAIR`)
         ];
 
         let handler = UdpHandler::parse(&DATA, IP_PAIR)?;
@@ -169,7 +198,7 @@ mod tests {
             0xFF, 0xFF,              // Source port: 65535 (max)
             0x00, 0x01,              // Dest port: 1 (min non-zero)
             0x00, 0x0C,              // Length: 12
-            0x00, 0x00,              // Checksum
+            0x03, 0xF9,              // Checksum (valid for this datagram and `IP_PAIR`)
             0x74, 0x65, 0x73, 0x74,  // Payload: "test"
         ];
 
@@ -181,13 +210,32 @@ mod tests {
     }
 
     #[test]
+    fn transmits_all_ones_when_computed_checksum_is_zero() -> Result<(), String> {
+        // Payload [0xE6, 0xB5] results in a pseudo-header checksum of 0x0000 for ports 1234 -> 80
+        // over `IP_PAIR`. However, 0xFFFF must be transmitted instead of 0x0000.
+
+        const HANDLER: UdpHandler = UdpHandler {
+            ip_pair: IP_PAIR,
+            ports: PortPair { src: 1234, dst: 80 },
+            payload: &[0xE6, 0xB5],
+        };
+
+        let mut buf = [0u8; ETHERNET_MTU];
+        HANDLER.write_into(&mut buf)?;
+
+        assert_eq!(&buf[6..8], &[0xFF, 0xFF]);
+
+        Ok(())
+    }
+
+    #[test]
     fn creates_valid_echo_reply() -> Result<(), String> {
         #[rustfmt::skip]
         const REQUEST: [u8; 16] = [
             0x04, 0xD2,              // Source port: 1234
             0x00, 0x35,              // Dest port: 53
             0x00, 0x10,              // Length: 16
-            0x00, 0x00,              // Checksum
+            0xA1, 0xB0,              // Checksum (valid for this datagram and `IP_PAIR`)
             0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x21, 0x21, 0x21,  // Payload: "Hello!!!"
         ];
 
@@ -211,7 +259,7 @@ mod tests {
         assert_eq!(udp_len, 8 + 8);
 
         // Verify checksum
-        assert_eq!(tcp_udp_test_checksum(&reply_buf, Protocol::Udp, udp_len, IP_PAIR)?, 0x0000);
+        assert_eq!(pseudo_header_checksum(&reply_buf[20..36], IP_PAIR, Protocol::Udp)?, 0x0000);
 
         Ok(())
     }

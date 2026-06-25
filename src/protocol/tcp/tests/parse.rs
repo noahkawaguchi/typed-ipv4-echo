@@ -10,7 +10,7 @@ fn correctly_parses_valid_packet() -> Result<(), String> {
             0x00, 0x00, 0x00, 0x02,              // Ack number: 2
             0x50, 0x12,                          // Data offset: 5 (20 bytes), Flags: SYN|ACK
             0xFF, 0xFF,                          // Window size
-            0x00, 0x00,                          // Checksum
+            0x72, 0xD4,                          // Checksum (valid for this segment and `IP_PAIR`)
             0x00, 0x00,                          // Urgent pointer
             0x48, 0x65, 0x6C, 0x6C, 0x6F,        // Payload: "Hello"
         ];
@@ -34,16 +34,34 @@ fn parsing_fails_when_too_short() {
 }
 
 #[test]
+fn parsing_fails_on_invalid_checksum() {
+    #[rustfmt::skip]
+        const DATA: [u8; 25] = [
+            0x04, 0xD2,                          // Source port: 1234
+            0x00, 0x50,                          // Dest port: 80
+            0x00, 0x00, 0x00, 0x01,              // Sequence number: 1
+            0x00, 0x00, 0x00, 0x02,              // Ack number: 2
+            0x50, 0x12,                          // Data offset: 5 (20 bytes), Flags: SYN|ACK
+            0xFF, 0xFF,                          // Window size
+            0x00, 0x00,                          // Checksum (wrong, should be 0x72D4)
+            0x00, 0x00,                          // Urgent pointer
+            0x48, 0x65, 0x6C, 0x6C, 0x6F,        // Payload: "Hello"
+        ];
+
+    assert_matches!(TcpHandler::parse(&DATA, IP_PAIR), Err(e) if e.contains("checksum"));
+}
+
+#[test]
 fn parsing_handles_large_sequence_numbers() -> Result<(), String> {
     #[rustfmt::skip]
         const DATA: [u8; 20] = [
             0x04, 0xD2,                          // Source port: 1234
             0x00, 0x50,                          // Dest port: 80
-            0xFF, 0xFF, 0xFF, 0xFF,              // Sequence number: u32::MAX
-            0xFE, 0xDC, 0xBA, 0x98,              // Ack number: 4275878552
+            0xFF, 0xFF, 0xFF, 0xFF,              // Sequence number: `u32::MAX`
+            0xFE, 0xDC, 0xBA, 0x98,              // Ack number: 4_275_878_552
             0x50, 0x10,                          // Data offset: 5, Flags: ACK
             0xFF, 0xFF,                          // Window size
-            0x00, 0x00,                          // Checksum
+            0xDD, 0x3A,                          // Checksum (valid for this segment and `IP_PAIR`)
             0x00, 0x00,                          // Urgent pointer
         ];
 
