@@ -2,8 +2,8 @@
 # Connecting as a client
 ####################################################################################################
 
-addr := "10.0.0.2"
-port := "8080"
+addr := '10.0.0.2'
+port := '8080'
 
 # Connect to the server using TCP (telnet)
 tcp:
@@ -33,7 +33,7 @@ test:
     cargo test --workspace --all-targets -- --include-ignored
 
 # Lint with Clippy for {aarch64,x86_64}-unknown-linux-gnu
-lint: (lint-helper "aarch64") (lint-helper "x86_64")
+lint: (lint-helper "aarch64") (lint-helper 'x86_64')
 
 # Lint with Clippy (denying warnings)
 [private]
