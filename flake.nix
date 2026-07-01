@@ -34,6 +34,7 @@
                 ];
               })
 
+              codebook
               inetutils
               just
             ];
