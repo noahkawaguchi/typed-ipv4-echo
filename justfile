@@ -32,13 +32,13 @@ all-checks: test lint fmt-check spell-check
 test:
     cargo test --workspace --all-targets -- --include-ignored
 
-# Lint with Clippy for {aarch64,x86_64}-unknown-linux-gnu
-lint: (lint-helper "aarch64") (lint-helper 'x86_64')
+# Lint with Clippy for {aarch64,x86_64}-unknown-linux-gnu, denying warnings
+lint-targets: (lint '--target' 'aarch64-unknown-linux-gnu') \
+              (lint '--target' 'x86_64-unknown-linux-gnu')
 
-# Lint with Clippy (denying warnings)
-[private]
-lint-helper arch:
-    cargo clippy --workspace --all-targets --target {{ arch }}-unknown-linux-gnu -- --deny warnings
+# Lint with Clippy, denying warnings
+lint *ARGS:
+    cargo clippy --workspace --all-targets {{ ARGS }} -- --deny warnings
 
 # Check formatting
 fmt-check:
