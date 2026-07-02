@@ -9,7 +9,7 @@ on:
 
 jobs:
   test:
-    strategy:
+    strategy: &os-matrix
       fail-fast: false
       matrix: { os: [ubuntu-24.04-arm, ubuntu-24.04] }
     runs-on: ${{ matrix.os }}
@@ -51,11 +51,8 @@ jobs:
         run: just test
 
   lint:
-    strategy:
-      fail-fast: false
-      matrix: { os: [ubuntu-24.04-arm, ubuntu-24.04] }
+    strategy: *os-matrix
     runs-on: ${{ matrix.os }}
-
     steps:
       - *checkout
       - *nix-install
@@ -88,4 +85,4 @@ jobs:
     permissions: {}
     needs: [test, lint, fmt-check, spell-check]
     steps:
-      - run: echo "All checks passed!"
+      - run: echo 'All checks passed!'
