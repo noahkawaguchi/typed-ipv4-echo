@@ -14,8 +14,10 @@
       devShells = nixpkgs.lib.genAttrs [ "aarch64-linux" "x86_64-linux" ] (
         system:
         let
-          overlays = [ rust-overlay.overlays.default ];
-          pkgs = import nixpkgs { inherit system overlays; };
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [ rust-overlay.overlays.default ];
+          };
         in
         {
           default = pkgs.mkShell {
