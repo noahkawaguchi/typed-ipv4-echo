@@ -161,6 +161,23 @@ impl TcpHandler {
                 Some(send_info)
             }
 
+            // Stray SYN on a synchronized connection -> send a challenge ACK, do not reset the
+            // connection (RFC 9293, Section 3.10.7.4).
+            //
+            // Out-of-window SYN is caught at the general "First, check sequence number," while
+            // in-window SYN is caught at "Fourth, check the SYN bit," but both have the same
+            // result.
+            (_, TcpFlags::Syn, _)
+                if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key) =>
+            {
+                Some(SendInfo {
+                    seq_num: snd_nxt,
+                    ack_num: rcv_nxt,
+                    flags: TcpFlags::Ack,
+                    payload: None,
+                })
+            }
+
             // Handshake ACK (step 3) -> transition to ESTABLISHED, no reply needed
             // Remote ack num should be the previous local ISN + 1, which also becomes snd_una
             (TcpState::SynReceived, TcpFlags::Ack, None)
