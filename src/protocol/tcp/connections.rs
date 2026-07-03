@@ -180,6 +180,15 @@ impl TcpConnections {
         }
     }
 
+    /// Returns whether `seq_num` falls within the receive window [RCV.NXT, RCV.NXT + RCV.WND).
+    /// Uses the advertised window size of `u16::MAX` since that is what outgoing segments carry.
+    pub(super) fn seq_in_recv_window(&self, key: &ConnKey, seq_num: u32) -> bool {
+        self.table.get(key).is_some_and(|s| {
+            Self::seq_le(s.rcv_nxt, seq_num)
+                && Self::seq_lt(seq_num, s.rcv_nxt.wrapping_add(u32::from(u16::MAX)))
+        })
+    }
+
     /// Returns whether `ack_num` acknowledges data the server has not yet sent (`ack_num > SND.NXT`
     /// in sequence-number space).
     pub(super) fn ack_exceeds_snd_nxt(&self, key: &ConnKey, ack_num: u32) -> bool {

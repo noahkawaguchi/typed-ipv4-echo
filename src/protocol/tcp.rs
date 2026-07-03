@@ -259,9 +259,8 @@ impl TcpHandler {
                 Some(send_info)
             }
 
-            // Final ACK completing passive close (LAST-ACK) or any RST (never RST a RST)
-            // -> remove connection, no reply
-            (TcpState::LastAck, TcpFlags::Ack, None) | (_, TcpFlags::Rst | TcpFlags::RstAck, _) => {
+            // Final ACK completing passive close (LAST-ACK) -> remove connection, no reply
+            (TcpState::LastAck, TcpFlags::Ack, None) => {
                 connections.remove(&key);
                 None
             }
@@ -343,6 +342,36 @@ impl TcpHandler {
             {
                 connections.remove(&key);
                 None
+            }
+
+            // Any RST -> RFC 9293, Section 3.10.7.4 has three cases for when the RST bit is set,
+            // protecting against a blind reset attack (as described in RFC 5961, Section 3):
+            //
+            // Case 1: SEG.SEQ outside window           -> silently drop segment
+            // Case 2: SEG.SEQ == RCV.NXT               -> reset connection, no reply
+            // Case 3: SEG.SEQ in window but != RCV.NXT -> no connection reset, send challenge ACK
+            //
+            // A RST from an unknown (CLOSED) connection is also silently dropped (never RST a RST)
+            (_, TcpFlags::Rst | TcpFlags::RstAck, _) => {
+                connections
+                    .get_snd_rcv_nxt(&key)
+                    .and_then(|(snd_nxt, rcv_nxt)| {
+                        if self.seq_num == rcv_nxt {
+                            // Case 2
+                            connections.remove(&key);
+                            None
+                        } else {
+                            // Cases 1 and 3
+                            connections
+                                .seq_in_recv_window(&key, self.seq_num)
+                                .then_some(SendInfo {
+                                    seq_num: snd_nxt,
+                                    ack_num: rcv_nxt,
+                                    flags: TcpFlags::Ack,
+                                    payload: None,
+                                })
+                        }
+                    })
             }
 
             // Something else unrecognized (other than RST caught above) -> RST so the peer fails
