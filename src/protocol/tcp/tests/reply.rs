@@ -42,6 +42,89 @@ fn duplicate_syn_during_syn_received_resends_same_syn_ack() -> Result<()> {
 }
 
 #[test]
+fn stray_syn_out_of_window_on_established_gets_challenge_ack() -> Result<()> {
+    // RFC 9293, Section 3.10.7.4, "First, check sequence number": a segment outside the receive
+    // window gets a challenge ACK (<SEQ=SND.NXT><ACK=RCV.NXT><CTL=ACK>) and is dropped. "Fourth,
+    // check the SYN bit" is not reached.
+
+    let mut connections = TcpConnections::default();
+    connections.store_isn(KEY, 0); // snd_nxt=1
+    connections.establish(&KEY, 4097); // rcv_nxt=4097
+
+    // seq=42 < rcv_nxt=4097, outside the receive window, caught at "First, check sequence number"
+    let reply = client_packet(42, 0, TcpFlags::Syn, &[]).create_reply(&mut connections)?;
+
+    assert_eq!(
+        reply,
+        Some(server_reply(1, 4097, TcpFlags::Ack, &[])),
+        "Out-of-window stray SYN must produce a challenge ACK, not a RST"
+    );
+
+    assert_eq!(
+        connections.tcp_state_of(&KEY),
+        TcpState::Established,
+        "Out-of-window stray SYN must not destroy the connection"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn stray_syn_in_window_on_established_gets_challenge_ack() -> Result<()> {
+    // RFC 9293, Section 3.10.7.4, "Fourth, check the SYN bit": for synchronized states, RFC 5961
+    // (incorporated into RFC 9293) recommends a challenge ACK irrespective of the sequence number,
+    // and the connection must not be reset.
+
+    let mut connections = TcpConnections::default();
+    connections.store_isn(KEY, 0); // snd_nxt=1
+    connections.establish(&KEY, 4097); // rcv_nxt=4097
+
+    // seq=4097 == rcv_nxt, inside the receive window, reaches "Fourth, check the SYN bit"
+    let reply = client_packet(4097, 0, TcpFlags::Syn, &[]).create_reply(&mut connections)?;
+
+    assert_eq!(
+        reply,
+        Some(server_reply(1, 4097, TcpFlags::Ack, &[])),
+        "In-window stray SYN must produce a challenge ACK, not a RST"
+    );
+
+    assert_eq!(
+        connections.tcp_state_of(&KEY),
+        TcpState::Established,
+        "In-window stray SYN must not destroy the connection"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn stray_syn_in_window_on_fin_wait_1_gets_challenge_ack() -> Result<()> {
+    // The same RFC 9293, Section 3.10.7.4 SYN rule as above applies to all synchronized states
+    // listed there, not just ESTABLISHED.
+
+    let mut connections = TcpConnections::default();
+    connections.store_isn(KEY, 0);
+    connections.establish(&KEY, 4097); // rcv_nxt=4097
+    connections.close_established(); // -> FIN-WAIT-1, snd_nxt=2
+
+    let reply = client_packet(4097, 0, TcpFlags::Syn, &[]).create_reply(&mut connections)?;
+
+    assert_eq!(
+        reply,
+        Some(server_reply(2, 4097, TcpFlags::Ack, &[])),
+        "Stray SYN in FIN-WAIT-1 must produce a challenge ACK using snd_nxt=2"
+    );
+
+    assert_eq!(
+        connections.tcp_state_of(&KEY),
+        TcpState::FinWait1,
+        "In-window stray SYN must not destroy the connection"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn data_packet_before_complete_handshake_gets_rst() -> Result<()> {
     let mut connections = TcpConnections::default();
     connections.store_isn(KEY, 0); // SYN-ACK sent, but handshake not yet completed
@@ -232,7 +315,9 @@ fn old_ack_num_does_not_regress_snd_una() -> Result<()> {
 }
 
 #[test]
-fn rst_packet_cleans_up_connection_and_returns_none() -> Result<()> {
+fn rst_exactly_at_rcv_nxt_cleans_up_connection_and_returns_none() -> Result<()> {
+    // RFC 9293, Section 3.10.7.4, RST bit set, SEG.SEQ == RCV.NXT -> reset connection
+
     let mut connections = TcpConnections::default();
     connections.store_isn(KEY, 0);
     connections.establish(&KEY, 4097);
@@ -243,6 +328,56 @@ fn rst_packet_cleans_up_connection_and_returns_none() -> Result<()> {
         connections.tcp_state_of(&KEY),
         TcpState::Closed,
         "Connection should be removed after RST"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn rst_within_window_but_not_at_rcv_nxt_gets_challenge_ack() -> Result<()> {
+    // RFC 9293, Section 3.10.7.4, RST bit set, SEG.SEQ in receive window but SEG.SEQ != RCV.NXT ->
+    // send challenge ACK, don't reset connection
+
+    let mut connections = TcpConnections::default();
+    connections.store_isn(KEY, 0);
+    connections.establish(&KEY, 4097); // rcv_nxt=4097, snd_nxt=1
+
+    // seq_num=5000 is inside the receive window [4097, 4097+65535) but != rcv_nxt
+    let reply = client_packet(5000, 1, TcpFlags::Rst, &[]).create_reply(&mut connections)?;
+
+    assert_eq!(
+        reply,
+        Some(server_reply(1, 4097, TcpFlags::Ack, &[])),
+        "In-window non-exact RST should get a challenge ACK, not a silent drop or reset"
+    );
+
+    assert_eq!(
+        connections.tcp_state_of(&KEY),
+        TcpState::Established,
+        "Connection must not be torn down by a non-exact in-window RST"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn rst_with_out_of_window_seq_is_silently_dropped() -> Result<()> {
+    // RFC 9293, Section 3.10.7.4, RST bit set, SEG.SEQ outside the current receive window -> must
+    // be silently ignored. (This is protection against blind RST-spoofing where an attacker knows
+    // the 4-tuple but not the current sequence numbers.)
+
+    let mut connections = TcpConnections::default();
+    connections.store_isn(KEY, 0);
+    connections.establish(&KEY, 4097); // rcv_nxt = 4097
+
+    // seq_num=42 is nowhere near rcv_nxt=4097, so this RST is outside the receive window
+    let reply = client_packet(42, 1, TcpFlags::Rst, &[]).create_reply(&mut connections)?;
+    assert_eq!(reply, None, "Out-of-window RST should be silently dropped");
+
+    assert_eq!(
+        connections.tcp_state_of(&KEY),
+        TcpState::Established,
+        "Connection must not be torn down by an out-of-window RST"
     );
 
     Ok(())
