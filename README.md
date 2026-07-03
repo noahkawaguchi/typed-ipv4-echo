@@ -66,9 +66,12 @@ Each variant wraps a concrete protocol handler responsible for:
 ### Prerequisites
 
 - Linux (for its TUN device API)
-- Rust toolchain ([install here](https://rust-lang.org/tools/install))
 - `sudo` privileges (specifically CAP_NET_ADMIN for creating network interfaces)
-- Optional: [Just](https://github.com/casey/just) command runner
+- For [Nix](https://github.com/NixOS/nix) users, the toolchain is included as a flake.
+- Otherwise, install:
+  - The [Rust toolchain](https://rust-lang.org/tools/install)
+  - `telnet`, `nc`/`netcat`, and `ping` (likely already installed)
+  - Optional: the command runner [Just](https://github.com/casey/just)
 
 ### Steps
 

@@ -8,71 +8,81 @@ on:
   workflow_dispatch: {}
 
 jobs:
-  format-check:
-    runs-on: ubuntu-24.04-arm
-    steps:
-      - uses: actions/checkout@v6
-        with: { persist-credentials: false }
-      - uses: dtolnay/rust-toolchain@nightly
-        with: { components: rustfmt }
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt --all --check
-
-  lint:
-    strategy:
-      fail-fast: false
-      matrix: { os: [ubuntu-24.04-arm, ubuntu-24.04] }
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - uses: actions/checkout@v6
-        with: { persist-credentials: false }
-      - uses: dtolnay/rust-toolchain@1.96.0
-        with: { components: clippy }
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --workspace --all-targets -- --deny warnings
-
-  spell-check:
-    runs-on: ubuntu-24.04-arm
-    steps:
-      - uses: actions/checkout@v6
-        with: { persist-credentials: false }
-
-      - name: Download Codebook
-        env:
-          CODEBOOK_VERSION: v0.3.41
-          CODEBOOK_SHA256: f4cad62804fd2cbe0766f4cdbda9b446568c9ef75fd1af3337f43b4ec8901148
-        run: |
-          cd "${RUNNER_TEMP:?}"
-          curl -fsSLo codebook.tar.gz "https://github.com/blopker/codebook/releases/download/${CODEBOOK_VERSION:?}/codebook-lsp-aarch64-unknown-linux-musl.tar.gz"
-          echo "${CODEBOOK_SHA256:?}  codebook.tar.gz" | sha256sum -c
-          tar -xzf codebook.tar.gz
-
-      - name: Check spelling
-        run: |
-          git ls-files -z | xargs -0 "${RUNNER_TEMP:?}/codebook-lsp" lint
-
   test:
-    strategy:
+    strategy: &os-matrix
       fail-fast: false
       matrix: { os: [ubuntu-24.04-arm, ubuntu-24.04] }
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v6
+      - &checkout
+        uses: actions/checkout@v7
         with: { persist-credentials: false }
-      - uses: dtolnay/rust-toolchain@1.96.0
-      - uses: Swatinem/rust-cache@v2
+
+      - &nix-install
+        name: Install Nix
+        uses: nixbuild/nix-quick-install-action@v35
+
+      - &nix-cache
+        name: Cache Nix store
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: >-
+            nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-
+          # Purge matching prefixes last accessed more than 7 days ago
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-${{ runner.arch }}-
+          purge-last-accessed: P7D
+
+      # Load the flake's devShell environment so rust-cache finds the correct rustc version
+      - &nix-develop
+        name: Load flake devShell
+        uses: nicknovitski/nix-develop@v1
+
+      - &rust-cache
+        name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
 
       - name: Set up TUN device
         run: sudo ./create-tun.sh
 
       - name: Run tests
-        run: cargo test --workspace --all-targets -- --include-ignored
+        run: just test
+
+  lint:
+    strategy: *os-matrix
+    runs-on: ${{ matrix.os }}
+    steps:
+      - *checkout
+      - *nix-install
+      - *nix-cache
+      - *nix-develop
+      - *rust-cache
+      - name: Run lints
+        run: just lint
+
+  fmt-check:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - *checkout
+      - *nix-install
+      - *nix-cache
+      - name: Check formatting
+        run: nix develop --command just fmt-check
+
+  spell-check:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - *checkout
+      - *nix-install
+      - *nix-cache
+      - name: Check spelling
+        run: nix develop --command just spell-check
 
   all-checks:
     runs-on: ubuntu-slim
     permissions: {}
-    needs: [format-check, lint, spell-check, test]
+    needs: [test, lint, fmt-check, spell-check]
     steps:
-      - run: echo "All checks passed!"
+      - run: echo 'All checks passed!'
