@@ -22,7 +22,7 @@ udp:
     nc -u {{ addr }} {{ port }}
 
 ####################################################################################################
-# Testing and code quality
+# Testing and quality
 ####################################################################################################
 
 # Run tests, lints, format checking, and spell checking to match CI
