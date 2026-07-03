@@ -26,7 +26,10 @@ pub(super) struct ConnKey {
 pub(super) enum TcpState {
     /// "SYN-RECEIVED - represents waiting for a confirming connection request acknowledgment after
     /// having both received and sent a connection request."
-    SynReceived,
+    ///
+    /// ISN field: "The Initial Sequence Number. The first sequence number used on a connection"
+    /// (RFC 9293, Section 4).
+    SynReceived(u32),
 
     /// "ESTABLISHED - represents an open connection, data received can be delivered to the user.
     /// The normal state for the data transfer phase of the connection."
@@ -95,10 +98,6 @@ impl PendingSegment {
 struct ConnState {
     tcp_state: TcpState,
 
-    /// "The Initial Sequence Number. The first sequence number used on a connection" (RFC 9293,
-    /// Section 4).
-    isn: u32,
-
     /// "SND.UNA = oldest unacknowledged sequence number" (RFC 9293, Section 3.4).
     snd_una: u32,
 
@@ -135,22 +134,15 @@ impl TcpConnections {
         self.table.insert(
             key,
             ConnState {
-                tcp_state: TcpState::SynReceived, // State after initial two-way exchange
-                isn,
-                snd_una: isn, // The SYN-ACK we're sending is unacknowledged
+                // State after initial two-way exchange
+                tcp_state: TcpState::SynReceived(isn),
+                // The SYN-ACK we're sending is  unacknowledged
+                snd_una: isn,
                 snd_nxt: isn.wrapping_add(1), // SYN-ACK consumes one sequence number
-                rcv_nxt: 0,   // Set at connection establishment
+                rcv_nxt: 0,                   // Set at connection establishment
                 pending: Vec::new(),
             },
         );
-    }
-
-    /// Returns the ISN only while the connection is still in SYN-RECEIVED state.
-    pub(super) fn pending_isn(&self, key: &ConnKey) -> Option<u32> {
-        self.table
-            .get(key)
-            .filter(|s| s.tcp_state == TcpState::SynReceived)
-            .map(|s| s.isn)
     }
 
     pub(super) fn establish(&mut self, key: &ConnKey, rcv_nxt: u32) {

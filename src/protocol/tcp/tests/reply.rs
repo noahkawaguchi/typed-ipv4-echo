@@ -7,9 +7,9 @@ fn reply_creates_valid_syn_ack() -> Result<()> {
     let reply = client_packet(4096, 0, TcpFlags::Syn, &[]).create_reply(&mut connections)?;
 
     // seq_num is the random ISN that was stored in the connection table
-    let stored_isn = connections
-        .pending_isn(&KEY)
-        .ok_or("ISN not stored in connection table")?;
+    let TcpState::SynReceived(stored_isn) = connections.tcp_state_of(&KEY) else {
+        return Err("TCP state stored in connection table was not SYN-RECEIVED".into());
+    };
 
     assert_eq!(reply, Some(server_reply(stored_isn, 4097, TcpFlags::SynAck, &[])));
 
@@ -34,7 +34,7 @@ fn duplicate_syn_during_syn_received_resends_same_syn_ack() -> Result<()> {
 
     assert_eq!(
         connections.tcp_state_of(&KEY),
-        TcpState::SynReceived,
+        TcpState::SynReceived(12345),
         "State should remain SYN-RECEIVED, not reset or advance"
     );
 
