@@ -62,7 +62,7 @@ fn stray_syn_out_of_window_on_established_gets_challenge_ack() -> Result<()> {
 
     assert_eq!(
         connections.tcp_state_of(&KEY),
-        TcpState::Established,
+        TcpState::Synced(SyncState::Established, 1, 4097),
         "Out-of-window stray SYN must not destroy the connection"
     );
 
@@ -90,7 +90,7 @@ fn stray_syn_in_window_on_established_gets_challenge_ack() -> Result<()> {
 
     assert_eq!(
         connections.tcp_state_of(&KEY),
-        TcpState::Established,
+        TcpState::Synced(SyncState::Established, 1, 4097),
         "In-window stray SYN must not destroy the connection"
     );
 
@@ -117,7 +117,7 @@ fn stray_syn_in_window_on_fin_wait_1_gets_challenge_ack() -> Result<()> {
 
     assert_eq!(
         connections.tcp_state_of(&KEY),
-        TcpState::FinWait1,
+        TcpState::Synced(SyncState::FinWait1, 2, 4097),
         "In-window stray SYN must not destroy the connection"
     );
 
@@ -145,7 +145,7 @@ fn handshake_ack_establishes_connection_and_returns_none() -> Result<()> {
 
     assert_eq!(client_packet(4097, 1, TcpFlags::Ack, &[]).create_reply(&mut connections)?, None);
 
-    assert_eq!(connections.tcp_state_of(&KEY), TcpState::Established);
+    assert_eq!(connections.tcp_state_of(&KEY), TcpState::Synced(SyncState::Established, 1, 4097));
 
     Ok(())
 }
@@ -175,7 +175,7 @@ fn reply_creates_valid_fin_ack() -> Result<()> {
     assert_eq!(reply, Some(server_reply(1, 4098, TcpFlags::FinAck, &[])));
 
     // Connection is now in LAST-ACK state (waiting for client's final ACK), not yet removed
-    assert_eq!(connections.tcp_state_of(&KEY), TcpState::LastAck);
+    assert_eq!(connections.tcp_state_of(&KEY), TcpState::Synced(SyncState::LastAck, 2, 4098));
 
     Ok(())
 }
@@ -217,7 +217,7 @@ fn pure_ack_on_established_connection_returns_none() -> Result<()> {
 
     assert_eq!(
         connections.tcp_state_of(&KEY),
-        TcpState::Established,
+        TcpState::Synced(SyncState::Established, 6, 4102),
         "Connection should remain open after pure ACK"
     );
 
@@ -244,8 +244,8 @@ fn consecutive_replies_use_snd_nxt_for_seq_num() -> Result<()> {
     );
 
     assert_eq!(
-        connections.get_snd_rcv_nxt(&KEY),
-        Some((6, 4102)),
+        connections.tcp_state_of(&KEY),
+        TcpState::Synced(SyncState::Established, 6, 4102),
         "Stored snd_nxt should be 6 (1 + 5 bytes echoed) between replies"
     );
 
@@ -353,7 +353,7 @@ fn rst_within_window_but_not_at_rcv_nxt_gets_challenge_ack() -> Result<()> {
 
     assert_eq!(
         connections.tcp_state_of(&KEY),
-        TcpState::Established,
+        TcpState::Synced(SyncState::Established, 1, 4097),
         "Connection must not be torn down by a non-exact in-window RST"
     );
 
@@ -376,7 +376,7 @@ fn rst_with_out_of_window_seq_is_silently_dropped() -> Result<()> {
 
     assert_eq!(
         connections.tcp_state_of(&KEY),
-        TcpState::Established,
+        TcpState::Synced(SyncState::Established, 1, 4097),
         "Connection must not be torn down by an out-of-window RST"
     );
 
@@ -448,7 +448,7 @@ fn out_of_order_fin_ack_gets_duplicate_ack_without_closing() -> Result<()> {
 
     assert_eq!(
         connections.tcp_state_of(&KEY),
-        TcpState::Established,
+        TcpState::Synced(SyncState::Established, 1, 4097),
         "Connection must remain established, out-of-order FIN-ACK must not start closing"
     );
 
@@ -486,7 +486,7 @@ fn ack_for_unsent_data_is_dropped_and_gets_current_state_reply() -> Result<()> {
     assert_eq!(reply, Some(server_reply(1, 4097, TcpFlags::Ack, &[])));
 
     // State must be untouched
-    assert_eq!(connections.get_snd_rcv_nxt(&KEY), Some((1, 4097)));
+    assert_eq!(connections.tcp_state_of(&KEY), TcpState::Synced(SyncState::Established, 1, 4097));
     assert_eq!(connections.get_snd_una(&KEY), Some(0));
 
     Ok(())
@@ -510,7 +510,10 @@ fn wraparound_ack_for_unsent_data_is_still_rejected() -> Result<()> {
     assert_eq!(reply, Some(server_reply(u32::MAX, 4097, TcpFlags::Ack, &[])));
 
     // State must be untouched
-    assert_eq!(connections.get_snd_rcv_nxt(&KEY), Some((u32::MAX, 4097)));
+    assert_eq!(
+        connections.tcp_state_of(&KEY),
+        TcpState::Synced(SyncState::Established, u32::MAX, 4097)
+    );
     assert_eq!(connections.get_snd_una(&KEY), Some(u32::MAX));
 
     Ok(())
@@ -531,10 +534,9 @@ fn close_established_sends_fin_ack_and_transitions_to_fin_wait_1() -> Result<()>
     // IP addresses are swapped: server -> client
     assert_eq!(reply.get_ip_pair(), IP_PAIR.swapped());
 
-    assert_eq!(connections.tcp_state_of(&KEY), TcpState::FinWait1);
     assert_eq!(
-        connections.get_snd_rcv_nxt(&KEY),
-        Some((2, 4097)),
+        connections.tcp_state_of(&KEY),
+        TcpState::Synced(SyncState::FinWait1, 2, 4097),
         "FIN consumes one sequence number"
     );
 
@@ -552,7 +554,7 @@ fn fin_wait_1_to_fin_wait_2_on_ack_of_our_fin() -> Result<()> {
     let reply = client_packet(4097, 2, TcpFlags::Ack, &[]).create_reply(&mut connections)?;
 
     assert_eq!(reply, None);
-    assert_eq!(connections.tcp_state_of(&KEY), TcpState::FinWait2);
+    assert_eq!(connections.tcp_state_of(&KEY), TcpState::Synced(SyncState::FinWait2, 2, 4097));
     assert_eq!(connections.get_snd_una(&KEY), Some(2));
 
     Ok(())
@@ -569,7 +571,7 @@ fn fin_wait_2_closes_on_fin_ack_from_peer() -> Result<()> {
     let ack_reply = client_packet(4097, 2, TcpFlags::Ack, &[]).create_reply(&mut connections)?;
 
     assert_eq!(ack_reply, None);
-    assert_eq!(connections.tcp_state_of(&KEY), TcpState::FinWait2);
+    assert_eq!(connections.tcp_state_of(&KEY), TcpState::Synced(SyncState::FinWait2, 2, 4097));
 
     // Client's FIN arrives in order
     let fin_reply = client_packet(4097, 2, TcpFlags::FinAck, &[]).create_reply(&mut connections)?;
@@ -620,7 +622,7 @@ fn data_after_our_fin_in_fin_wait_1_is_acked_without_echo() -> Result<()> {
 
     assert_eq!(
         connections.tcp_state_of(&KEY),
-        TcpState::FinWait1,
+        TcpState::Synced(SyncState::FinWait1, 2, 4102),
         "State should remain FIN-WAIT-1"
     );
 
@@ -636,7 +638,7 @@ fn data_after_our_fin_in_fin_wait_2_is_acked_without_echo() -> Result<()> {
 
     // Our FIN is acknowledged -> FIN-WAIT-2
     client_packet(4097, 2, TcpFlags::Ack, &[]).create_reply(&mut connections)?;
-    assert_eq!(connections.tcp_state_of(&KEY), TcpState::FinWait2);
+    assert_eq!(connections.tcp_state_of(&KEY), TcpState::Synced(SyncState::FinWait2, 2, 4097));
 
     let reply = client_packet(4097, 2, TcpFlags::Ack, b"Hello").create_reply(&mut connections)?;
 
@@ -648,7 +650,7 @@ fn data_after_our_fin_in_fin_wait_2_is_acked_without_echo() -> Result<()> {
 
     assert_eq!(
         connections.tcp_state_of(&KEY),
-        TcpState::FinWait2,
+        TcpState::Synced(SyncState::FinWait2, 2, 4102),
         "State should remain FIN-WAIT-2"
     );
 
@@ -667,7 +669,7 @@ fn simultaneous_close_transitions_through_closing_to_closed() -> Result<()> {
     let fin_reply = client_packet(4097, 1, TcpFlags::FinAck, &[]).create_reply(&mut connections)?;
 
     assert_eq!(fin_reply, Some(server_reply(2, 4098, TcpFlags::Ack, &[])));
-    assert_eq!(connections.tcp_state_of(&KEY), TcpState::Closing);
+    assert_eq!(connections.tcp_state_of(&KEY), TcpState::Synced(SyncState::Closing, 2, 4098));
 
     // Client's ACK of our FIN finally arrives -> fully closed
     let ack_reply = client_packet(4098, 2, TcpFlags::Ack, &[]).create_reply(&mut connections)?;
