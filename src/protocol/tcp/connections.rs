@@ -96,6 +96,12 @@ struct PendingSegment {
 }
 
 impl PendingSegment {
+    /// Creates a new `Self` with `seq_num + consumed` as `end_seq`.
+    fn new(send_info: SendInfo, consumed: u32) -> Self {
+        let end_seq = send_info.seq_num.wrapping_add(consumed);
+        Self { send_info, end_seq, last_sent_at: Instant::now(), retries: 0 }
+    }
+
     /// Returns whether `self` has been sitting unacknowledged long enough to be due for
     /// retransmission as of `now` (i.e. `rto` elapsed since it was last sent).
     fn is_due(&self, rto: Duration, now: Instant) -> bool {
@@ -220,14 +226,7 @@ impl TcpConnections {
     /// Records `seq_num..seq_num + consumed` as an unacked segment eligible for retransmission.
     pub(super) fn record_pending(&mut self, key: &ConnKey, send_info: SendInfo, consumed: u32) {
         if let Some(conn) = self.table.get_mut(key) {
-            let end_seq = send_info.seq_num.wrapping_add(consumed);
-
-            conn.pending.push(PendingSegment {
-                send_info,
-                end_seq,
-                last_sent_at: Instant::now(),
-                retries: 0,
-            });
+            conn.pending.push(PendingSegment::new(send_info, consumed));
         }
     }
 
@@ -345,20 +344,14 @@ impl TcpConnections {
     /// transitioning each to FIN-WAIT-1 and returning a FIN-ACK reply for it.
     pub fn close_established(&mut self) -> Vec<TcpHandler> {
         self.table
-            .keys()
-            .copied()
-            .collect::<Vec<_>>()
-            .into_iter()
-            .filter_map(|key| {
-                // Transition each ESTABLISHED connection to FIN-WAIT-1, initiating active close.
-                // Consume one sequence number in SND.NXT for the FIN about to be sent.
-                let conn = self.table.get_mut(&key)?;
-
+            .iter_mut()
+            .filter_map(|(key, conn)| {
                 let TcpState::Synced(SyncState::Established, snd_nxt, rcv_nxt) = conn.tcp_state
                 else {
                     return None;
                 };
 
+                // Consume one sequence number in SND.NXT for the FIN about to be sent
                 conn.tcp_state =
                     TcpState::Synced(SyncState::FinWait1, snd_nxt.wrapping_add(1), rcv_nxt);
 
@@ -369,7 +362,7 @@ impl TcpConnections {
                     payload: None,
                 };
 
-                self.record_pending(&key, send_info.clone(), 1);
+                conn.pending.push(PendingSegment::new(send_info.clone(), 1));
 
                 Some(TcpHandler::from_pairs_and_info(
                     Ipv4AddrPair { src: key.server_ip, dst: key.client_ip },
