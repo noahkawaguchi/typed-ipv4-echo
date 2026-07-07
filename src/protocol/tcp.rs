@@ -63,6 +63,13 @@ struct SendInfo {
 }
 
 impl TcpHandler {
+    /// "This represents the sequence numbers the local (receiving) TCP endpoint is willing to
+    /// receive... segments overlapping the range RCV.NXT to RCV.NXT + RCV.WND - 1 carry acceptable
+    /// data or control" (RFC 9293, Section 4).
+    ///
+    /// Currently left at max for simplicity.
+    const RCV_WND: u16 = u16::MAX;
+
     /// Parses `data` as a TCP header and payload.
     pub(super) fn parse(data: &[u8], ip_pair: Ipv4AddrPair) -> Result<Self> {
         let Some(tcp_header) = data.first_chunk::<{ TCP_HEADER_MIN_LEN as usize }>() else {
@@ -444,11 +451,13 @@ impl TcpHandler {
                     connections.remove(&key);
                     None
                 } else {
-                    // Check whether `seq_num` falls within the receive window `[RCV.NXT, RCV.NXT +
-                    // RCV.WND)` (using the window size of `u16::MAX` advertised by outgoing
-                    // segments). true -> Case 3, false -> Case 1.
+                    // Check whether `seq_num` falls within the receive window [RCV.NXT, RCV.NXT +
+                    // RCV.WND). true -> Case 3, false -> Case 1.
                     (seq_space::le(rcv_nxt, self.seq_num)
-                        && seq_space::lt(self.seq_num, rcv_nxt.wrapping_add(u32::from(u16::MAX))))
+                        && seq_space::lt(
+                            self.seq_num,
+                            rcv_nxt.wrapping_add(u32::from(Self::RCV_WND)),
+                        ))
                     .then_some(SendInfo {
                         seq_num: snd_nxt,
                         ack_num: rcv_nxt,
@@ -540,9 +549,9 @@ impl Encode for TcpHandler {
         // Flags
         *buf.try_get_mut(13)? = self.flags.into();
 
-        // Window size for flow control, left at max for simplicity
+        // Window size for flow control
         buf.try_get_mut(14..16)?
-            .copy_from_slice(&u16::MAX.to_be_bytes());
+            .copy_from_slice(&Self::RCV_WND.to_be_bytes());
 
         // Checksum at bytes 16-17 calculated later with pseudo-header
 
