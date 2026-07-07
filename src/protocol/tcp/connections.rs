@@ -141,68 +141,6 @@ impl TcpConnections {
         self.table.get_mut(key)
     }
 
-    #[cfg(test)]
-    pub(super) fn old_store_isn(&mut self, key: ConnKey, isn: u32) {
-        self.table.insert(
-            key,
-            ConnState {
-                // State after initial two-way exchange
-                tcp_state: TcpState::SynReceived,
-                // SYN-ACK consumes one sequence number
-                snd_nxt: isn.wrapping_add(1),
-                // Set at connection establishment
-                rcv_nxt: 0,
-                // The SYN-ACK we're sending is unacknowledged
-                snd_una: isn,
-                pending: Vec::new(),
-            },
-        );
-    }
-
-    /// Transitions an ESTABLISHED connection to LAST-ACK (passive close). The remote peer's FIN has
-    /// been acknowledged with our own FIN, awaiting their final ACK.
-    #[cfg(test)]
-    pub(super) fn start_last_ack(&mut self, key: &ConnKey) {
-        if let Some(conn) = self.get_mut(key)
-            && conn.tcp_state == TcpState::Established
-        {
-            conn.tcp_state = TcpState::LastAck;
-        }
-    }
-
-    #[cfg(test)]
-    pub(super) fn establish(&mut self, key: &ConnKey, rcv_nxt: u32) {
-        if let Some(conn) = self.table.get_mut(key)
-            && conn.tcp_state == TcpState::SynReceived
-        {
-            conn.tcp_state = TcpState::Established;
-            conn.rcv_nxt = rcv_nxt;
-        }
-    }
-
-    #[cfg(test)]
-    pub(super) fn advance_snd_nxt(&mut self, key: &ConnKey, n: u32) {
-        if let Some(conn) = self.table.get_mut(key) {
-            conn.snd_nxt = conn.snd_nxt.wrapping_add(n);
-        }
-    }
-
-    /// Advances SND.UNA to `ack_num` if it is a "new" acknowledgment, i.e. `SND.UNA < ack_num <=
-    /// SND.NXT` (RFC 9293, Section 3.10.7.4). Old/duplicate ACKs and ACKs for data not yet sent
-    /// leave SND.UNA unchanged.
-    #[cfg(test)]
-    pub(super) fn update_snd_una(&mut self, key: &ConnKey, ack_num: u32) {
-        if let Some(conn) = self.get_mut(key)
-            && seq_space::lt(conn.snd_una, ack_num)
-            && seq_space::le(ack_num, conn.snd_nxt)
-        {
-            conn.snd_una = ack_num;
-
-            // ACKs are cumulative, so only keep pending segments not fully covered by `ack_num`
-            conn.pending.retain(|p| seq_space::lt(ack_num, p.end_seq));
-        }
-    }
-
     pub(super) fn store_isn(&mut self, key: ConnKey, send_info: SendInfo) {
         self.table.insert(
             key,
@@ -324,6 +262,8 @@ impl TcpConnections {
             .collect()
     }
 
+    /// Attempts to retrieve the connection in the table under `KEY`, returning `Err` if not
+    /// present.
     #[cfg(test)]
     pub(super) fn try_get(&self) -> Result<&ConnState, String> {
         use crate::protocol::tcp::tests::KEY;
@@ -331,6 +271,49 @@ impl TcpConnections {
         self.table
             .get(&KEY)
             .ok_or_else(|| String::from("Connection not found"))
+    }
+
+    /// Inserts `conn` into the connection table using `KEY`.
+    #[cfg(test)]
+    pub(super) fn insert(&mut self, conn: ConnState) {
+        use crate::protocol::tcp::tests::KEY;
+
+        self.table.insert(KEY, conn);
+    }
+
+    /// Inserts a SYN-RECEIVED connection into the table using `KEY`, `CLIENT_ISN`, AND
+    /// `SERVER_ISN`.
+    #[cfg(test)]
+    pub(super) fn insert_syn_recv(&mut self) {
+        use crate::protocol::tcp::tests::{CLIENT_ISN, KEY, SERVER_ISN};
+
+        self.store_isn(
+            KEY,
+            SendInfo {
+                seq_num: SERVER_ISN,
+                ack_num: CLIENT_ISN + 1,
+                flags: TcpFlags::SynAck,
+                payload: None,
+            },
+        );
+    }
+
+    /// Inserts an ESTABLISHED connection into the table using `KEY`, `CLIENT_ISN`, AND
+    /// `SERVER_ISN`.
+    #[cfg(test)]
+    pub(super) fn insert_established(&mut self) {
+        use crate::protocol::tcp::tests::{CLIENT_ISN, KEY, SERVER_ISN};
+
+        self.table.insert(
+            KEY,
+            ConnState {
+                tcp_state: TcpState::Established,
+                snd_nxt: SERVER_ISN + 1,
+                rcv_nxt: CLIENT_ISN + 1,
+                snd_una: SERVER_ISN + 1,
+                pending: Vec::new(),
+            },
+        );
     }
 }
 

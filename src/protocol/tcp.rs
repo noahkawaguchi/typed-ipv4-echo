@@ -617,6 +617,16 @@ mod tests {
         std::assert_matches,
     };
 
+    /// Fixed value to use as the ISN randomly chosen by the client.
+    pub(super) const CLIENT_ISN: u32 = 100;
+
+    /// Fixed value to use as the ISN randomly chosen by the server.
+    pub(super) const SERVER_ISN: u32 = 400;
+
+    /// Checks at compile time that `CLIENT_ISN` and `SERVER_ISN` are sufficiently far from each
+    /// other so they cannot be mixed up in tests.
+    const _: () = assert!(CLIENT_ISN.abs_diff(SERVER_ISN) >= 100);
+
     /// Connection key shared by test modules.
     pub(super) const KEY: ConnKey =
         ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
