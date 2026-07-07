@@ -21,7 +21,7 @@ pub(super) struct ConnKey {
 
 /// The set of states of a TCP connection (non-exhaustive). Variant meanings below from RFC 9293,
 /// Section 3.3.2.
-#[derive(PartialEq, Eq, Clone, Copy, Default)]
+#[derive(PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(test, derive(Debug))]
 pub(super) enum TcpState {
     /// "SYN-RECEIVED - represents waiting for a confirming connection request acknowledgment after
@@ -29,23 +29,8 @@ pub(super) enum TcpState {
     ///
     /// ISN field: "The Initial Sequence Number. The first sequence number used on a connection"
     /// (RFC 9293, Section 4).
-    SynReceived(u32),
+    SynReceived,
 
-    /// Synchronized states carry `snd_nxt` and `rcv_nxt` with the following meanings:
-    /// - "SND.NXT = next sequence number to be sent" (RFC 9293, Section 3.4).
-    /// - "RCV.NXT = next sequence number expected on an incoming segment" (RFC 9293, Section 3.4).
-    Synced(SyncState, u32, u32),
-
-    /// "CLOSED - represents no connection state at all."
-    #[default]
-    Closed,
-}
-
-/// The set of synchronized states of a TCP connection (non-exhaustive). Variant meanings below from
-/// RFC 9293, Section 3.3.2.
-#[derive(PartialEq, Eq, Clone, Copy)]
-#[cfg_attr(test, derive(Debug))]
-pub(super) enum SyncState {
     /// "ESTABLISHED - represents an open connection, data received can be delivered to the user.
     /// The normal state for the data transfer phase of the connection."
     Established,
@@ -79,7 +64,8 @@ pub(super) enum SyncState {
 }
 
 /// A sent segment that consumed sequence numbers and hasn't yet been acknowledged.
-struct PendingSegment {
+#[cfg_attr(test, derive(Debug))]
+pub(super) struct PendingSegment {
     /// The values and data the segment was sent with, frozen at send time.
     send_info: SendInfo,
 
@@ -96,8 +82,9 @@ struct PendingSegment {
 }
 
 impl PendingSegment {
-    /// Creates a new `Self` with `seq_num + consumed` as `end_seq`.
-    fn new(send_info: SendInfo, consumed: u32) -> Self {
+    /// Creates a new unacked segment eligible for retransmission, covering
+    /// `send_info.seq_num..send_info.seq_num + consumed`.
+    pub(super) fn new(send_info: SendInfo, consumed: u32) -> Self {
         let end_seq = send_info.seq_num.wrapping_add(consumed);
         Self { send_info, end_seq, last_sent_at: Instant::now(), retries: 0 }
     }
@@ -109,17 +96,30 @@ impl PendingSegment {
             .checked_add(rto)
             .is_some_and(|deadline| deadline <= now)
     }
+
+    /// Returns whether `self` is fully covered by `ack_num`.
+    pub(super) const fn is_covered_by(&self, ack_num: u32) -> bool {
+        seq_space::le(self.end_seq, ack_num)
+    }
 }
 
 /// The state of a connection in the table, including its TCP state and other locally stored data.
-struct ConnState {
-    tcp_state: TcpState,
+/// Definitions below from RFC 9293, Section 3.4.
+#[cfg_attr(test, derive(Debug))]
+pub(super) struct ConnState {
+    pub(super) tcp_state: TcpState,
 
-    /// "SND.UNA = oldest unacknowledged sequence number" (RFC 9293, Section 3.4).
-    snd_una: u32,
+    /// "SND.NXT = next sequence number to be sent"
+    pub(super) snd_nxt: u32,
+
+    /// "RCV.NXT = next sequence number expected on an incoming segment"
+    pub(super) rcv_nxt: u32,
+
+    /// "SND.UNA = oldest unacknowledged sequence number"
+    pub(super) snd_una: u32,
 
     /// Unacked segments sent by the server, kept for retransmission purposes.
-    pending: Vec<PendingSegment>,
+    pub(super) pending: Vec<PendingSegment>,
 }
 
 /// Tracks per-connection state keyed by the 4-tuple.
@@ -137,19 +137,21 @@ impl TcpConnections {
 
     pub fn len(&self) -> usize { self.table.len() }
 
-    pub(super) fn tcp_state_of(&self, key: &ConnKey) -> TcpState {
-        self.table
-            .get(key)
-            .map(|conn| conn.tcp_state)
-            .unwrap_or_default()
+    pub(super) fn get_mut(&mut self, key: &ConnKey) -> Option<&mut ConnState> {
+        self.table.get_mut(key)
     }
 
-    pub(super) fn store_isn(&mut self, key: ConnKey, isn: u32) {
+    #[cfg(test)]
+    pub(super) fn old_store_isn(&mut self, key: ConnKey, isn: u32) {
         self.table.insert(
             key,
             ConnState {
                 // State after initial two-way exchange
-                tcp_state: TcpState::SynReceived(isn),
+                tcp_state: TcpState::SynReceived,
+                // SYN-ACK consumes one sequence number
+                snd_nxt: isn.wrapping_add(1),
+                // Set at connection establishment
+                rcv_nxt: 0,
                 // The SYN-ACK we're sending is unacknowledged
                 snd_una: isn,
                 pending: Vec::new(),
@@ -157,109 +159,65 @@ impl TcpConnections {
         );
     }
 
-    pub(super) fn establish(&mut self, key: &ConnKey, rcv_nxt: u32) {
-        if let Some(conn) = self.table.get_mut(key)
-            && let TcpState::SynReceived(isn) = conn.tcp_state
+    /// Transitions an ESTABLISHED connection to LAST-ACK (passive close). The remote peer's FIN has
+    /// been acknowledged with our own FIN, awaiting their final ACK.
+    #[cfg(test)]
+    pub(super) fn start_last_ack(&mut self, key: &ConnKey) {
+        if let Some(conn) = self.get_mut(key)
+            && conn.tcp_state == TcpState::Established
         {
-            // SYN-ACK consumed one sequence number
-            conn.tcp_state = TcpState::Synced(SyncState::Established, isn.wrapping_add(1), rcv_nxt);
+            conn.tcp_state = TcpState::LastAck;
         }
     }
 
     #[cfg(test)]
-    pub(super) fn get_snd_una(&self, key: &ConnKey) -> Option<u32> {
-        self.table.get(key).map(|conn| conn.snd_una)
+    pub(super) fn establish(&mut self, key: &ConnKey, rcv_nxt: u32) {
+        if let Some(conn) = self.table.get_mut(key)
+            && conn.tcp_state == TcpState::SynReceived
+        {
+            conn.tcp_state = TcpState::Established;
+            conn.rcv_nxt = rcv_nxt;
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn advance_snd_nxt(&mut self, key: &ConnKey, n: u32) {
+        if let Some(conn) = self.table.get_mut(key) {
+            conn.snd_nxt = conn.snd_nxt.wrapping_add(n);
+        }
     }
 
     /// Advances SND.UNA to `ack_num` if it is a "new" acknowledgment, i.e. `SND.UNA < ack_num <=
     /// SND.NXT` (RFC 9293, Section 3.10.7.4). Old/duplicate ACKs and ACKs for data not yet sent
     /// leave SND.UNA unchanged.
+    #[cfg(test)]
     pub(super) fn update_snd_una(&mut self, key: &ConnKey, ack_num: u32) {
-        if let Some(conn) = self.table.get_mut(key)
-            && let TcpState::Synced(_, snd_nxt, _) = conn.tcp_state
-            && Self::seq_lt(conn.snd_una, ack_num)
-            && Self::seq_le(ack_num, snd_nxt)
+        if let Some(conn) = self.get_mut(key)
+            && seq_space::lt(conn.snd_una, ack_num)
+            && seq_space::le(ack_num, conn.snd_nxt)
         {
             conn.snd_una = ack_num;
 
             // ACKs are cumulative, so only keep pending segments not fully covered by `ack_num`
-            conn.pending.retain(|p| Self::seq_lt(ack_num, p.end_seq));
+            conn.pending.retain(|p| seq_space::lt(ack_num, p.end_seq));
         }
     }
 
-    /// Returns whether `seq_num` falls within the receive window [RCV.NXT, RCV.NXT + RCV.WND).
-    /// Uses the advertised window size of `u16::MAX` since that is what outgoing segments carry.
-    pub(super) fn seq_in_recv_window(&self, key: &ConnKey, seq_num: u32) -> bool {
-        matches!(
-            self.table.get(key).map(|conn| conn.tcp_state),
-            Some(TcpState::Synced(_, _, rcv_nxt))
-                if Self::seq_le(rcv_nxt, seq_num)
-                    && Self::seq_lt(seq_num, rcv_nxt.wrapping_add(u32::from(u16::MAX)))
-        )
-    }
-
-    /// Returns whether `ack_num` acknowledges data the server has not yet sent (`ack_num > SND.NXT`
-    /// in sequence-number space).
-    pub(super) fn ack_exceeds_snd_nxt(&self, key: &ConnKey, ack_num: u32) -> bool {
-        matches!(
-            self.table.get(key).map(|conn| conn.tcp_state),
-            Some(TcpState::Synced(_, snd_nxt, _)) if Self::seq_lt(snd_nxt, ack_num)
-        )
-    }
-
-    pub(super) fn advance_snd_nxt(&mut self, key: &ConnKey, n: u32) {
-        if let Some(conn) = self.table.get_mut(key)
-            && let TcpState::Synced(_, snd_nxt, _) = &mut conn.tcp_state
-        {
-            *snd_nxt = snd_nxt.wrapping_add(n);
-        }
-    }
-
-    pub(super) fn advance_rcv_nxt(&mut self, key: &ConnKey, n: u32) {
-        if let Some(conn) = self.table.get_mut(key)
-            && let TcpState::Synced(_, _, rcv_nxt) = &mut conn.tcp_state
-        {
-            *rcv_nxt = rcv_nxt.wrapping_add(n);
-        }
-    }
-
-    /// Records `seq_num..seq_num + consumed` as an unacked segment eligible for retransmission.
-    pub(super) fn record_pending(&mut self, key: &ConnKey, send_info: SendInfo, consumed: u32) {
-        if let Some(conn) = self.table.get_mut(key) {
-            conn.pending.push(PendingSegment::new(send_info, consumed));
-        }
-    }
-
-    /// Transitions from FIN-WAIT-1 to FIN-WAIT-2 once our FIN has been acknowledged.
-    pub(super) fn start_fin_wait_2(&mut self, key: &ConnKey) {
-        if let Some(conn) = self.table.get_mut(key)
-            && let TcpState::Synced(sync_state @ SyncState::FinWait1, _, _) = &mut conn.tcp_state
-        {
-            *sync_state = SyncState::FinWait2;
-        }
-    }
-
-    /// Transitions from FIN-WAIT-1 to CLOSING (simultaneous close). The remote peer's FIN arrived
-    /// before our own FIN was acknowledged. Consumes one sequence number in RCV.NXT for the peer's
-    /// FIN.
-    pub(super) fn start_simultaneous_closing(&mut self, key: &ConnKey) {
-        if let Some(conn) = self.table.get_mut(key)
-            && let TcpState::Synced(sync_state @ SyncState::FinWait1, _, rcv_nxt) =
-                &mut conn.tcp_state
-        {
-            *sync_state = SyncState::Closing;
-            *rcv_nxt = rcv_nxt.wrapping_add(1);
-        }
-    }
-
-    /// Transitions an ESTABLISHED connection to LAST-ACK (passive close). The remote peer's FIN has
-    /// been acknowledged with our own FIN, awaiting their final ACK.
-    pub(super) fn start_last_ack(&mut self, key: &ConnKey) {
-        if let Some(conn) = self.table.get_mut(key)
-            && let TcpState::Synced(sync_state @ SyncState::Established, _, _) = &mut conn.tcp_state
-        {
-            *sync_state = SyncState::LastAck;
-        }
+    pub(super) fn store_isn(&mut self, key: ConnKey, send_info: SendInfo) {
+        self.table.insert(
+            key,
+            ConnState {
+                // State after initial two-way exchange
+                tcp_state: TcpState::SynReceived,
+                // SYN-ACK consumes one sequence number
+                snd_nxt: send_info.seq_num.wrapping_add(1),
+                // Set at connection establishment
+                rcv_nxt: 0,
+                // The SYN-ACK we're sending is unacknowledged (this is the ISN)
+                snd_una: send_info.seq_num,
+                pending: vec![PendingSegment::new(send_info, 1)],
+            },
+        );
     }
 
     pub(super) fn remove(&mut self, key: &ConnKey) { self.table.remove(key); }
@@ -270,14 +228,7 @@ impl TcpConnections {
         self.table.values().any(|conn| {
             matches!(
                 conn.tcp_state,
-                TcpState::Synced(
-                    SyncState::FinWait1
-                        | SyncState::FinWait2
-                        | SyncState::Closing
-                        | SyncState::LastAck,
-                    _,
-                    _,
-                )
+                TcpState::FinWait1 | TcpState::FinWait2 | TcpState::Closing | TcpState::LastAck,
             )
         })
     }
@@ -346,21 +297,21 @@ impl TcpConnections {
         self.table
             .iter_mut()
             .filter_map(|(key, conn)| {
-                let TcpState::Synced(SyncState::Established, snd_nxt, rcv_nxt) = conn.tcp_state
-                else {
+                if conn.tcp_state != TcpState::Established {
                     return None;
-                };
-
-                // Consume one sequence number in SND.NXT for the FIN about to be sent
-                conn.tcp_state =
-                    TcpState::Synced(SyncState::FinWait1, snd_nxt.wrapping_add(1), rcv_nxt);
+                }
 
                 let send_info = SendInfo {
-                    seq_num: snd_nxt,
-                    ack_num: rcv_nxt,
+                    seq_num: conn.snd_nxt,
+                    ack_num: conn.rcv_nxt,
                     flags: TcpFlags::FinAck,
                     payload: None,
                 };
+
+                conn.tcp_state = TcpState::FinWait1;
+
+                // Consume one sequence number in SND.NXT for the FIN about to be sent
+                conn.snd_nxt = conn.snd_nxt.wrapping_add(1);
 
                 conn.pending.push(PendingSegment::new(send_info.clone(), 1));
 
@@ -373,11 +324,22 @@ impl TcpConnections {
             .collect()
     }
 
+    #[cfg(test)]
+    pub(super) fn try_get(&self) -> Result<&ConnState, String> {
+        use crate::protocol::tcp::tests::KEY;
+
+        self.table
+            .get(&KEY)
+            .ok_or_else(|| String::from("Connection not found"))
+    }
+}
+
+pub(super) mod seq_space {
     /// Returns whether `a` precedes `b` in TCP sequence-number space, accounting for 32-bit
     /// wraparound (RFC 9293, Section 3.4).
-    const fn seq_lt(a: u32, b: u32) -> bool { a.wrapping_sub(b) > u32::MAX / 2 }
+    pub const fn lt(a: u32, b: u32) -> bool { a.wrapping_sub(b) > u32::MAX / 2 }
 
     /// Returns whether `a` precedes or equals `b` in TCP sequence-number space, accounting for
     /// 32-bit wraparound (RFC 9293, Section 3.4).
-    const fn seq_le(a: u32, b: u32) -> bool { a == b || Self::seq_lt(a, b) }
+    pub const fn le(a: u32, b: u32) -> bool { a == b || lt(a, b) }
 }

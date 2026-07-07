@@ -6,9 +6,7 @@ fn syn_ack_is_resent_while_due() -> Result<()> {
 
     client_packet(4096, 0, TcpFlags::Syn, &[]).create_reply(&mut connections)?;
 
-    let TcpState::SynReceived(isn) = connections.tcp_state_of(&KEY) else {
-        return Err("TCP state was not SYN-RECEIVED".into());
-    };
+    let isn = connections.try_get()?.snd_una;
 
     let mut resent = connections.make_retransmissions();
     let reply = resent.pop().ok_or("Expected one retransmitted segment")?;
@@ -26,9 +24,7 @@ fn pending_segment_is_cleared_once_acked() -> Result<()> {
 
     client_packet(4096, 0, TcpFlags::Syn, &[]).create_reply(&mut connections)?;
 
-    let TcpState::SynReceived(isn) = connections.tcp_state_of(&KEY) else {
-        return Err("TCP state was not SYN-RECEIVED".into());
-    };
+    let isn = connections.try_get()?.snd_una;
 
     // Handshake ACK completes the connection and should clear the pending SYN-ACK
     client_packet(4097, isn.wrapping_add(1), TcpFlags::Ack, &[]).create_reply(&mut connections)?;
@@ -43,7 +39,7 @@ fn pending_segment_is_cleared_once_acked() -> Result<()> {
 #[test]
 fn data_echo_is_resent_unchanged() -> Result<()> {
     let mut connections = TcpConnections::new(Duration::ZERO, 5);
-    connections.store_isn(KEY, 0);
+    connections.old_store_isn(KEY, 0);
     connections.establish(&KEY, 4097);
 
     client_packet(4097, 1, TcpFlags::Ack, b"Hello").create_reply(&mut connections)?;
@@ -60,7 +56,7 @@ fn data_echo_is_resent_unchanged() -> Result<()> {
 #[test]
 fn fin_ack_is_resent_unchanged() -> Result<()> {
     let mut connections = TcpConnections::new(Duration::ZERO, 5);
-    connections.store_isn(KEY, 0);
+    connections.old_store_isn(KEY, 0);
     connections.establish(&KEY, 4097);
 
     connections.close_established();
@@ -80,7 +76,7 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result<()> {
     // retransmitting every unacked segment, not just the most recently sent one.
 
     let mut connections = TcpConnections::new(Duration::ZERO, 5);
-    connections.store_isn(KEY, 0);
+    connections.old_store_isn(KEY, 0);
     connections.establish(&KEY, 4097);
 
     // First data packet: "Hello" (5 bytes), ack=1 -> echoed, pending segment seq=1..6
@@ -112,14 +108,14 @@ fn gives_up_after_max_retransmits() -> Result<()> {
         let resent = connections.make_retransmissions();
 
         assert_eq!(resent.len(), 1, "Should still be retried");
-        assert_matches!(connections.tcp_state_of(&KEY), TcpState::SynReceived(_));
+        assert_eq!(connections.try_get()?.tcp_state, TcpState::SynReceived);
     }
 
     // Exceeds MAX_RETRIES -> give up
     let resent = connections.make_retransmissions();
 
     assert!(resent.is_empty(), "Should give up instead of retransmitting again");
-    assert_eq!(connections.tcp_state_of(&KEY), TcpState::Closed, "Connection should be removed");
+    assert_matches!(connections.try_get(), Err(_), "Connection should be removed");
 
     Ok(())
 }
