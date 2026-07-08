@@ -637,6 +637,7 @@ impl fmt::Display for TcpHandler {
 
 #[cfg(test)]
 mod tests {
+    mod echo;
     mod establish;
     mod parse;
     mod reply;
