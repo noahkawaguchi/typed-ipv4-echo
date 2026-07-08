@@ -1,7 +1,7 @@
 use {
     crate::{
         addr_pairs::{Ipv4AddrPair, PortPair},
-        protocol::tcp::{SendInfo, TcpFlags, TcpHandler},
+        protocol::tcp::{AdvanceBy as _, SendInfo, TcpFlags, TcpHandler},
     },
     std::{
         collections::HashMap,
@@ -249,7 +249,7 @@ impl TcpConnections {
                 conn.tcp_state = TcpState::FinWait1;
 
                 // Consume one sequence number in SND.NXT for the FIN about to be sent
-                conn.snd_nxt = conn.snd_nxt.wrapping_add(1);
+                conn.snd_nxt.advance_by(1);
 
                 conn.pending.push(PendingSegment::new(send_info.clone(), 1));
 

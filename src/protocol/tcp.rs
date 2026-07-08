@@ -22,6 +22,16 @@ use {
     std::{fmt, num::TryFromIntError, rc::Rc},
 };
 
+trait AdvanceBy {
+    /// Like `wrapping_add`, but mutates `self` in place to avoid potentially verbose and
+    /// error-prone reassignments.
+    fn advance_by(&mut self, rhs: Self);
+}
+
+impl AdvanceBy for u32 {
+    fn advance_by(&mut self, rhs: Self) { *self = self.wrapping_add(rhs) }
+}
+
 const TCP_HEADER_MIN_LEN: u8 = 20;
 
 /// Manages TCP headers, data, and reply logic. Field definitions below from RFC 9293, Section 3.1.
@@ -260,8 +270,8 @@ impl TcpHandler {
                 };
 
                 self.incoming_ack_update(snd_una, *snd_nxt, pending);
-                *snd_nxt = snd_nxt.wrapping_add(payload_len);
-                *rcv_nxt = rcv_nxt.wrapping_add(payload_len);
+                snd_nxt.advance_by(payload_len);
+                rcv_nxt.advance_by(payload_len);
 
                 pending.push(PendingSegment::new(send_info.clone(), payload_len));
 
@@ -313,8 +323,8 @@ impl TcpHandler {
                 };
 
                 *tcp_state = TcpState::LastAck;
-                *snd_nxt = snd_nxt.wrapping_add(1); // Our FIN consumes one sequence number
-                *rcv_nxt = rcv_nxt.wrapping_add(1); // Peer's FIN consumes one sequence number
+                snd_nxt.advance_by(1); // Our FIN consumes one sequence number
+                rcv_nxt.advance_by(1); // Peer's FIN consumes one sequence number
 
                 pending.push(PendingSegment::new(send_info.clone(), 1));
 
@@ -351,7 +361,7 @@ impl TcpHandler {
                 };
 
                 self.incoming_ack_update(snd_una, *snd_nxt, pending);
-                *rcv_nxt = rcv_nxt.wrapping_add(payload_len);
+                rcv_nxt.advance_by(payload_len);
 
                 Some(send_info)
             }
@@ -400,7 +410,7 @@ impl TcpHandler {
                     connections.remove(&key);
                 } else {
                     // Consume one sequence number in RCV.NXT for the peer's FIN
-                    *rcv_nxt = rcv_nxt.wrapping_add(1);
+                    rcv_nxt.advance_by(1);
                     *tcp_state = TcpState::Closing;
                 }
 
