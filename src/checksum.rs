@@ -60,27 +60,23 @@ mod tests {
         // Should treat odd byte as high byte of 16-bit word
 
         // 3 bytes: 0x1234 + 0x5600 = 0x6834, ~0x6834 = 0x97CB
-        let data1 = [0x12, 0x34, 0x56];
-        assert_eq!(calculate(&data1), 0x97CB);
+        assert_eq!(calculate(&[0x12, 0x34, 0x56]), 0x97CB);
 
         // 5 bytes: 0x1234 + 0x5678 + 0xAB00 = 0x113AC
         // fold: 0x13AC + 0x1 = 0x13AD
         // ~0x13AD = 0xEC52
-        let data2 = [0x12, 0x34, 0x56, 0x78, 0xAB];
-        assert_eq!(calculate(&data2), 0xEC52);
+        assert_eq!(calculate(&[0x12, 0x34, 0x56, 0x78, 0xAB]), 0xEC52);
     }
 
     #[test]
     fn folds_carry_bits() {
         // All 0xFF: 0xFFFF + 0xFFFF = 0x1_FFFE, fold: 0xFFFE + 0x1 = 0xFFFF, ~0xFFFF = 0x0000
-        let data1 = [0xFF, 0xFF, 0xFF, 0xFF];
-        assert_eq!(calculate(&data1), 0x0000);
+        assert_eq!(calculate(&[0xFF; 4]), 0x0000);
 
         // Mixed values requiring folding: 0xAAAA + 0xBBBB = 0x1_6665
         // fold: 0x6665 + 0x1 = 0x6666
         // ~0x6666 = 0x9999
-        let data2 = [0xAA, 0xAA, 0xBB, 0xBB];
-        assert_eq!(calculate(&data2), 0x9999);
+        assert_eq!(calculate(&[0xAA, 0xAA, 0xBB, 0xBB]), 0x9999);
     }
 
     #[test]
@@ -88,7 +84,7 @@ mod tests {
         // IPv4 header with simple values for manual verification
         // Version=4, IHL=5, TOS=0, Total Length=32, ID=1, Flags=0, TTL=64, Protocol=17 (UDP)
         #[rustfmt::skip]
-        let header = [
+        const HEADER: [u8; 20] = [
             0x45, 0x00,  // Version/IHL, TOS           = 0x4500
             0x00, 0x20,  // Total Length               = 0x0020
             0x00, 0x01,  // Identification             = 0x0001
@@ -105,7 +101,7 @@ mod tests {
         //      0x0002 = 0x9935
         // No carry to fold (sum fits in 16 bits)
         // One's complement: ~0x9935 = 0x66CA
-        assert_eq!(calculate(&header), 0x66CA);
+        assert_eq!(calculate(&HEADER), 0x66CA);
     }
 
     #[test]
@@ -113,7 +109,7 @@ mod tests {
         // IPv4 header with values that require carry folding
         // Using large IP addresses to force carries
         #[rustfmt::skip]
-        let header = [
+        const HEADER: [u8; 20] = [
             0x45, 0x00,  // Version/IHL, TOS           = 0x4500
             0x00, 0x54,  // Total Length               = 0x0054
             0xAB, 0xCD,  // Identification             = 0xABCD
@@ -130,14 +126,14 @@ mod tests {
         //      0xFFC8 = 0x4_B1A3
         // Fold carry: 0xB1A3 + 0x4 = 0xB1A7
         // One's complement: ~0xB1A7 = 0x4E58
-        assert_eq!(calculate(&header), 0x4E58);
+        assert_eq!(calculate(&HEADER), 0x4E58);
     }
 
     #[test]
     fn roundtrip_produces_zero() {
         // Checksum of data with its checksum already embedded should be 0
         #[rustfmt::skip]
-        let data = [
+        const DATA: [u8; 20] = [
             0x45, 0x00, 0x00, 0x3C,
             0x1C, 0x46, 0x40, 0x00,
             0x40, 0x06, 0xB1, 0xE6,  // Checksum embedded here (0xB1E6)
@@ -145,19 +141,19 @@ mod tests {
             0xAC, 0x10, 0x0A, 0x0C,
         ];
 
-        assert_eq!(calculate(&data), 0x0000);
+        assert_eq!(calculate(&DATA), 0x0000);
     }
 
     #[test]
     fn commutative_over_16_bit_word_order() {
-        // Checksum is sum of 16-bit words, so reordering words should give same result
-        let data1 = [0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0];
-        let data2 = [0x9A, 0xBC, 0x12, 0x34, 0xDE, 0xF0, 0x56, 0x78];
+        // Checksum is sum of 16-bit words, so reordering words should give the same result
+        const DATA1: [u8; 8] = [0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0];
+        const DATA2: [u8; 8] = [0x9A, 0xBC, 0x12, 0x34, 0xDE, 0xF0, 0x56, 0x78];
 
         // data1: 0x1234 + 0x5678 + 0x9ABC + 0xDEF0
         // data2: 0x9ABC + 0x1234 + 0xDEF0 + 0x5678
         // Should be equal due to commutativity of addition
-        assert_eq!(calculate(&data1), calculate(&data2));
+        assert_eq!(calculate(&DATA1), calculate(&DATA2));
     }
 
     #[test]
