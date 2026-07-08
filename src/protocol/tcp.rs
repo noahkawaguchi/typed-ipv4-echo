@@ -642,6 +642,7 @@ mod tests {
     mod reply;
     mod reply_to_rst;
     mod retransmit;
+    mod terminate;
     mod write;
 
     use {
