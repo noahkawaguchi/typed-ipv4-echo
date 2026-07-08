@@ -64,7 +64,7 @@ pub(super) enum TcpState {
 }
 
 /// A sent segment that consumed sequence numbers and hasn't yet been acknowledged.
-#[cfg_attr(test, derive(Debug))]
+#[cfg_attr(test, derive(Debug, Clone))]
 pub(super) struct PendingSegment {
     /// The values and data the segment was sent with, frozen at send time.
     send_info: SendInfo,
@@ -105,7 +105,7 @@ impl PendingSegment {
 
 /// The state of a connection in the table, including its TCP state and other locally stored data.
 /// Definitions below from RFC 9293, Section 3.4.
-#[cfg_attr(test, derive(Debug))]
+#[cfg_attr(test, derive(Debug, Clone))]
 pub(super) struct ConnState {
     pub(super) tcp_state: TcpState,
 
@@ -120,6 +120,17 @@ pub(super) struct ConnState {
 
     /// Unacked segments sent by the server, kept for retransmission purposes.
     pub(super) pending: Vec<PendingSegment>,
+}
+
+#[cfg(test)]
+impl PartialEq for ConnState {
+    fn eq(&self, other: &Self) -> bool {
+        // All fields except `pending`
+        self.tcp_state == other.tcp_state
+            && self.snd_nxt == other.snd_nxt
+            && self.rcv_nxt == other.rcv_nxt
+            && self.snd_una == other.snd_una
+    }
 }
 
 /// Tracks per-connection state keyed by the 4-tuple.
@@ -285,13 +296,13 @@ impl TcpConnections {
     /// `SERVER_ISN`.
     #[cfg(test)]
     pub(super) fn insert_syn_recv(&mut self) {
-        use crate::protocol::tcp::tests::{CLIENT_ISN, KEY, SERVER_ISN};
+        use crate::protocol::tcp::tests::{CLIENT_ISN, KEY, SERVER_ISN, SYN_BYTE};
 
         self.store_isn(
             KEY,
             SendInfo {
                 seq_num: SERVER_ISN,
-                ack_num: CLIENT_ISN + 1,
+                ack_num: CLIENT_ISN + SYN_BYTE,
                 flags: TcpFlags::SynAck,
                 payload: None,
             },
@@ -302,15 +313,15 @@ impl TcpConnections {
     /// `SERVER_ISN`.
     #[cfg(test)]
     pub(super) fn insert_established(&mut self) {
-        use crate::protocol::tcp::tests::{CLIENT_ISN, KEY, SERVER_ISN};
+        use crate::protocol::tcp::tests::{CLIENT_ISN, KEY, SERVER_ISN, SYN_BYTE};
 
         self.table.insert(
             KEY,
             ConnState {
                 tcp_state: TcpState::Established,
-                snd_nxt: SERVER_ISN + 1,
-                rcv_nxt: CLIENT_ISN + 1,
-                snd_una: SERVER_ISN + 1,
+                snd_nxt: SERVER_ISN + SYN_BYTE,
+                rcv_nxt: CLIENT_ISN + SYN_BYTE,
+                snd_una: SERVER_ISN + SYN_BYTE,
                 pending: Vec::new(),
             },
         );

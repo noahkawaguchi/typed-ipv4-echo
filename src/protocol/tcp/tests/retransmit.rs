@@ -12,7 +12,7 @@ fn syn_ack_is_resent_while_due() -> Result<()> {
     let reply = resent.pop().ok_or("Expected one retransmitted segment")?;
 
     assert!(resent.is_empty(), "Expected exactly one retransmitted segment");
-    assert_eq!(reply, server_reply(isn, CLIENT_ISN + 1, TcpFlags::SynAck, &[]));
+    assert_eq!(reply, server_reply(isn, CLIENT_ISN + SYN_BYTE, TcpFlags::SynAck, &[]));
     assert_eq!(reply.get_ip_pair(), IP_PAIR.swapped());
 
     Ok(())
@@ -27,7 +27,7 @@ fn pending_segment_is_cleared_once_acked() -> Result<()> {
     let isn = connections.try_get()?.snd_una;
 
     // Handshake ACK completes the connection and should clear the pending SYN-ACK
-    client_packet(CLIENT_ISN + 1, isn.wrapping_add(1), TcpFlags::Ack, &[])
+    client_packet(CLIENT_ISN + SYN_BYTE, isn.wrapping_add(SYN_BYTE), TcpFlags::Ack, &[])
         .create_reply(&mut connections)?;
 
     assert!(
@@ -43,14 +43,22 @@ fn data_echo_is_resent_unchanged() -> Result<()> {
     let mut connections = TcpConnections::new(Duration::ZERO, 5);
     connections.insert_established();
 
-    client_packet(CLIENT_ISN + 1, SERVER_ISN + 1, TcpFlags::Ack, b"Hello")
+    client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, b"Hello")
         .create_reply(&mut connections)?;
 
     let mut resent = connections.make_retransmissions();
     let reply = resent.pop().ok_or("Expected one retransmitted segment")?;
 
     assert!(resent.is_empty(), "Expected exactly one retransmitted segment");
-    assert_eq!(reply, server_reply(SERVER_ISN + 1, CLIENT_ISN + 6, TcpFlags::Ack, b"Hello"));
+    assert_eq!(
+        reply,
+        server_reply(
+            SERVER_ISN + SYN_BYTE,
+            CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            TcpFlags::Ack,
+            b"Hello"
+        )
+    );
 
     Ok(())
 }
@@ -65,7 +73,10 @@ fn fin_ack_is_resent_unchanged() -> Result<()> {
     let reply = resent.pop().ok_or("Expected one retransmitted segment")?;
 
     assert!(resent.is_empty(), "Expected exactly one retransmitted segment");
-    assert_eq!(reply, server_reply(SERVER_ISN + 1, CLIENT_ISN + 1, TcpFlags::FinAck, &[]));
+    assert_eq!(
+        reply,
+        server_reply(SERVER_ISN + SYN_BYTE, CLIENT_ISN + SYN_BYTE, TcpFlags::FinAck, &[])
+    );
 
     Ok(())
 }
@@ -80,12 +91,12 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result<()> {
 
     // First data packet: "Hello" (5 bytes), ack=SERVER_ISN+1 -> echoed, pending segment
     // seq=SERVER_ISN+1..SERVER_ISN+6
-    client_packet(CLIENT_ISN + 1, SERVER_ISN + 1, TcpFlags::Ack, b"Hello")
+    client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, b"Hello")
         .create_reply(&mut connections)?;
 
     // Second data packet: "Hi" (2 bytes), still ack=SERVER_ISN+1 (hasn't acked the first echo yet)
     // -> echoed, pending segment seq=SERVER_ISN+6..SERVER_ISN+8
-    client_packet(CLIENT_ISN + 6, SERVER_ISN + 1, TcpFlags::Ack, b"Hi")
+    client_packet(CLIENT_ISN + SYN_BYTE + HELLO_LEN, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, b"Hi")
         .create_reply(&mut connections)?;
 
     let [hello, hi] = connections
@@ -93,8 +104,25 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result<()> {
         .try_into()
         .map_err(|_| "Expected exactly two retransmitted segments")?;
 
-    assert_eq!(hello, server_reply(SERVER_ISN + 1, CLIENT_ISN + 6, TcpFlags::Ack, b"Hello"));
-    assert_eq!(hi, server_reply(SERVER_ISN + 6, CLIENT_ISN + 8, TcpFlags::Ack, b"Hi"));
+    assert_eq!(
+        hello,
+        server_reply(
+            SERVER_ISN + SYN_BYTE,
+            CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            TcpFlags::Ack,
+            b"Hello"
+        )
+    );
+
+    assert_eq!(
+        hi,
+        server_reply(
+            SERVER_ISN + SYN_BYTE + HELLO_LEN,
+            CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
+            TcpFlags::Ack,
+            b"Hi"
+        )
+    );
 
     Ok(())
 }

@@ -9,7 +9,7 @@ fn reply_creates_valid_syn_ack() -> Result<()> {
     // seq_num is the random ISN that was stored in the connection table
     let stored_isn = connections.try_get()?.snd_una;
 
-    assert_eq!(reply, Some(server_reply(stored_isn, CLIENT_ISN + 1, TcpFlags::SynAck, &[])));
+    assert_eq!(reply, Some(server_reply(stored_isn, CLIENT_ISN + SYN_BYTE, TcpFlags::SynAck, &[])));
 
     Ok(())
 }
@@ -20,25 +20,22 @@ fn duplicate_syn_during_syn_received_resends_same_syn_ack() -> Result<()> {
     // the same SYN-ACK (same ISN), not RST the retry, and not generate a new ISN.
 
     let mut connections = TcpConnections::default();
-    connections.insert_syn_recv(); // Simulates having already sent a SYN-ACK with ISN=SERVER_ISN
+    connections.insert_syn_recv(); // Simulate having already sent a SYN-ACK with ISN=SERVER_ISN
+    let initial_state = connections.try_get()?.clone();
 
     let reply = client_packet(CLIENT_ISN, 0, TcpFlags::Syn, &[]).create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
-        Some(server_reply(SERVER_ISN, CLIENT_ISN + 1, TcpFlags::SynAck, &[])),
+        Some(server_reply(SERVER_ISN, CLIENT_ISN + SYN_BYTE, TcpFlags::SynAck, &[])),
         "Retransmitted SYN should get the same SYN-ACK resent, not a RST"
     );
 
-    let conn = connections.try_get()?;
-
     assert_eq!(
-        conn.tcp_state,
-        TcpState::SynReceived,
+        connections.try_get()?,
+        &initial_state,
         "State should remain SYN-RECEIVED, not reset or advance"
     );
-
-    assert_eq!(conn.snd_una, SERVER_ISN);
 
     Ok(())
 }
@@ -51,6 +48,7 @@ fn stray_syn_out_of_window_on_established_gets_challenge_ack() -> Result<()> {
 
     let mut connections = TcpConnections::default();
     connections.insert_established(); // snd_nxt=SERVER_ISN+1, rcv_nxt=CLIENT_ISN+1
+    let initial_state = connections.try_get()?.clone();
 
     // seq=CLIENT_ISN-20 < rcv_nxt=CLIENT_ISN+1, outside the receive window, caught at "First, check
     // sequence number"
@@ -59,20 +57,15 @@ fn stray_syn_out_of_window_on_established_gets_challenge_ack() -> Result<()> {
 
     assert_eq!(
         reply,
-        Some(server_reply(SERVER_ISN + 1, CLIENT_ISN + 1, TcpFlags::Ack, &[])),
+        Some(server_reply(SERVER_ISN + SYN_BYTE, CLIENT_ISN + SYN_BYTE, TcpFlags::Ack, &[])),
         "Out-of-window stray SYN must produce a challenge ACK, not a RST"
     );
 
-    let conn = connections.try_get()?;
-
     assert_eq!(
-        conn.tcp_state,
-        TcpState::Established,
+        connections.try_get()?,
+        &initial_state,
         "Out-of-window stray SYN must not destroy the connection"
     );
-
-    assert_eq!(conn.snd_nxt, SERVER_ISN + 1);
-    assert_eq!(conn.rcv_nxt, CLIENT_ISN + 1);
 
     Ok(())
 }
@@ -85,27 +78,23 @@ fn stray_syn_in_window_on_established_gets_challenge_ack() -> Result<()> {
 
     let mut connections = TcpConnections::default();
     connections.insert_established(); // snd_nxt=SERVER_ISN+1, rcv_nxt=CLIENT_ISN+1
+    let initial_state = connections.try_get()?.clone();
 
     // seq=CLIENT_ISN+1 == rcv_nxt, inside the receive window, reaches "Fourth, check the SYN bit"
-    let reply =
-        client_packet(CLIENT_ISN + 1, 0, TcpFlags::Syn, &[]).create_reply(&mut connections)?;
+    let reply = client_packet(CLIENT_ISN + SYN_BYTE, 0, TcpFlags::Syn, &[])
+        .create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
-        Some(server_reply(SERVER_ISN + 1, CLIENT_ISN + 1, TcpFlags::Ack, &[])),
+        Some(server_reply(SERVER_ISN + SYN_BYTE, CLIENT_ISN + SYN_BYTE, TcpFlags::Ack, &[])),
         "In-window stray SYN must produce a challenge ACK, not a RST"
     );
 
-    let conn = connections.try_get()?;
-
     assert_eq!(
-        conn.tcp_state,
-        TcpState::Established,
+        connections.try_get()?,
+        &initial_state,
         "In-window stray SYN must not destroy the connection"
     );
-
-    assert_eq!(conn.snd_nxt, SERVER_ISN + 1);
-    assert_eq!(conn.rcv_nxt, CLIENT_ISN + 1);
 
     Ok(())
 }
@@ -119,25 +108,28 @@ fn stray_syn_in_window_on_fin_wait_1_gets_challenge_ack() -> Result<()> {
     connections.insert_established(); // rcv_nxt=CLIENT_ISN+1
     connections.close_established(); // -> FIN-WAIT-1, snd_nxt=SERVER_ISN+2
 
-    let reply =
-        client_packet(CLIENT_ISN + 1, 0, TcpFlags::Syn, &[]).create_reply(&mut connections)?;
+    let initial_state = connections.try_get()?.clone();
+    assert_eq!(initial_state.tcp_state, TcpState::FinWait1);
+
+    let reply = client_packet(CLIENT_ISN + SYN_BYTE, 0, TcpFlags::Syn, &[])
+        .create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
-        Some(server_reply(SERVER_ISN + 2, CLIENT_ISN + 1, TcpFlags::Ack, &[])),
+        Some(server_reply(
+            SERVER_ISN + SYN_BYTE + FIN_BYTE,
+            CLIENT_ISN + SYN_BYTE,
+            TcpFlags::Ack,
+            &[]
+        )),
         "Stray SYN in FIN-WAIT-1 must produce a challenge ACK using snd_nxt=SERVER_ISN+2"
     );
 
-    let conn = connections.try_get()?;
-
     assert_eq!(
-        conn.tcp_state,
-        TcpState::FinWait1,
+        connections.try_get()?,
+        &initial_state,
         "In-window stray SYN must not destroy the connection"
     );
-
-    assert_eq!(conn.snd_nxt, SERVER_ISN + 2);
-    assert_eq!(conn.rcv_nxt, CLIENT_ISN + 1);
 
     Ok(())
 }
@@ -147,10 +139,11 @@ fn data_packet_before_complete_handshake_gets_rst() -> Result<()> {
     let mut connections = TcpConnections::default();
     connections.insert_syn_recv(); // SYN-ACK sent, but handshake not yet completed
 
-    let reply = client_packet(CLIENT_ISN + 1, SERVER_ISN + 1, TcpFlags::Ack, b"Hello")
-        .create_reply(&mut connections)?;
+    let reply =
+        client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, b"Hello")
+            .create_reply(&mut connections)?;
 
-    assert_eq!(reply, Some(server_reply(SERVER_ISN + 1, 0, TcpFlags::Rst, &[])));
+    assert_eq!(reply, Some(server_reply(SERVER_ISN + SYN_BYTE, 0, TcpFlags::Rst, &[])));
 
     Ok(())
 }
@@ -158,21 +151,23 @@ fn data_packet_before_complete_handshake_gets_rst() -> Result<()> {
 #[test]
 fn handshake_ack_establishes_connection_and_returns_none() -> Result<()> {
     let mut connections = TcpConnections::default();
-
     // Simulate having sent a SYN-ACK with ISN=SERVER_ISN so ack_num=SERVER_ISN+1 is the correct
     // completion
     connections.insert_syn_recv();
+    let mut cloned_state = connections.try_get()?.clone();
 
     assert_eq!(
-        client_packet(CLIENT_ISN + 1, SERVER_ISN + 1, TcpFlags::Ack, &[])
+        client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, &[])
             .create_reply(&mut connections)?,
         None
     );
 
-    let conn = connections.try_get()?;
-    assert_eq!(conn.tcp_state, TcpState::Established);
-    assert_eq!(conn.snd_nxt, SERVER_ISN + 1);
-    assert_eq!(conn.rcv_nxt, CLIENT_ISN + 1);
+    // Reproduce the state changes that should happen at connection establishment
+    cloned_state.tcp_state = TcpState::Established;
+    cloned_state.rcv_nxt = CLIENT_ISN + SYN_BYTE;
+    cloned_state.snd_una.advance_by(SYN_BYTE);
+
+    assert_eq!(connections.try_get()?, &cloned_state);
 
     Ok(())
 }
@@ -182,10 +177,19 @@ fn reply_creates_valid_data_echo() -> Result<()> {
     let mut connections = TcpConnections::default();
     connections.insert_established(); // rcv_nxt = client's seq at handshake ACK time
 
-    let reply = client_packet(CLIENT_ISN + 1, SERVER_ISN + 1, TcpFlags::Ack, b"Hello")
-        .create_reply(&mut connections)?;
+    let reply =
+        client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, b"Hello")
+            .create_reply(&mut connections)?;
 
-    assert_eq!(reply, Some(server_reply(SERVER_ISN + 1, CLIENT_ISN + 6, TcpFlags::Ack, b"Hello")));
+    assert_eq!(
+        reply,
+        Some(server_reply(
+            SERVER_ISN + SYN_BYTE,
+            CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            TcpFlags::Ack,
+            b"Hello"
+        ))
+    );
 
     Ok(())
 }
@@ -195,17 +199,27 @@ fn reply_creates_valid_fin_ack() -> Result<()> {
     // Simulate an established connection
     let mut connections = TcpConnections::default();
     connections.insert_established(); // FIN-ACK arrives at seq=CLIENT_ISN+1
+    let mut cloned_state = connections.try_get()?.clone();
 
-    let reply = client_packet(CLIENT_ISN + 1, SERVER_ISN + 1, TcpFlags::FinAck, &[])
+    let reply = client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::FinAck, &[])
         .create_reply(&mut connections)?;
 
-    assert_eq!(reply, Some(server_reply(SERVER_ISN + 1, CLIENT_ISN + 2, TcpFlags::FinAck, &[])));
+    assert_eq!(
+        reply,
+        Some(server_reply(
+            SERVER_ISN + SYN_BYTE,
+            CLIENT_ISN + SYN_BYTE + FIN_BYTE,
+            TcpFlags::FinAck,
+            &[]
+        ))
+    );
 
     // Connection is now in LAST-ACK state (waiting for client's final ACK), not yet removed
-    let conn = connections.try_get()?;
-    assert_eq!(conn.tcp_state, TcpState::LastAck);
-    assert_eq!(conn.snd_nxt, SERVER_ISN + 2);
-    assert_eq!(conn.rcv_nxt, CLIENT_ISN + 2);
+    cloned_state.tcp_state = TcpState::LastAck;
+    cloned_state.snd_nxt.advance_by(FIN_BYTE);
+    cloned_state.rcv_nxt.advance_by(FIN_BYTE);
+
+    assert_eq!(connections.try_get()?, &cloned_state);
 
     Ok(())
 }
@@ -218,16 +232,21 @@ fn final_ack_after_fin_ack_removes_connection_and_returns_none() -> Result<()> {
     let mut connections = TcpConnections::default();
     connections.insert(ConnState {
         tcp_state: TcpState::LastAck,
-        snd_nxt: SERVER_ISN + 1,
-        rcv_nxt: CLIENT_ISN + 1,
-        snd_una: SERVER_ISN + 1,
+        snd_nxt: SERVER_ISN + SYN_BYTE,
+        rcv_nxt: CLIENT_ISN + SYN_BYTE,
+        snd_una: SERVER_ISN + SYN_BYTE,
         pending: Vec::new(),
     });
 
     // ack=SERVER_ISN+2 (our FIN-ACK seq + 1)
     assert_eq!(
-        client_packet(CLIENT_ISN + 2, SERVER_ISN + 2, TcpFlags::Ack, &[])
-            .create_reply(&mut connections)?,
+        client_packet(
+            CLIENT_ISN + SYN_BYTE + FIN_BYTE,
+            SERVER_ISN + SYN_BYTE + FIN_BYTE,
+            TcpFlags::Ack,
+            &[]
+        )
+        .create_reply(&mut connections)?,
         None
     );
 
@@ -242,31 +261,36 @@ fn pure_ack_on_established_connection_returns_none() -> Result<()> {
     // the connection stays open for more data.
 
     let mut connections = TcpConnections::default();
+    // State after receiving and echoing "Hello"
     connections.insert(ConnState {
         tcp_state: TcpState::Established,
-        snd_nxt: SERVER_ISN + 6, // snd_nxt after having sent the 5-byte "Hello" echo
-        rcv_nxt: CLIENT_ISN + 6, // rcv_nxt after having received "Hello"
-        snd_una: SERVER_ISN + 1,
+        snd_nxt: SERVER_ISN + SYN_BYTE + HELLO_LEN,
+        rcv_nxt: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+        snd_una: SERVER_ISN + SYN_BYTE,
         pending: Vec::new(),
     });
 
+    let mut cloned_state = connections.try_get()?.clone();
+
     // ack=SERVER_ISN + 5 bytes echoed + 1
     assert_eq!(
-        client_packet(CLIENT_ISN + 6, SERVER_ISN + 6, TcpFlags::Ack, &[])
-            .create_reply(&mut connections)?,
+        client_packet(
+            CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            SERVER_ISN + SYN_BYTE + HELLO_LEN,
+            TcpFlags::Ack,
+            &[]
+        )
+        .create_reply(&mut connections)?,
         None
     );
 
-    let conn = connections.try_get()?;
+    cloned_state.snd_una.advance_by(HELLO_LEN);
 
     assert_eq!(
-        conn.tcp_state,
-        TcpState::Established,
+        connections.try_get()?,
+        &cloned_state,
         "Connection should remain open after pure ACK"
     );
-
-    assert_eq!(conn.snd_nxt, SERVER_ISN + 6);
-    assert_eq!(conn.rcv_nxt, CLIENT_ISN + 6);
 
     Ok(())
 }
@@ -280,34 +304,50 @@ fn consecutive_replies_use_snd_nxt_for_seq_num() -> Result<()> {
 
     let mut connections = TcpConnections::default();
     connections.insert_established();
+    let mut cloned_state = connections.try_get()?.clone();
 
     // First data packet: "Hello" (5 bytes), ack=SERVER_ISN+1 (acknowledges our ISN+1)
-    let reply1 = client_packet(CLIENT_ISN + 1, SERVER_ISN + 1, TcpFlags::Ack, b"Hello")
-        .create_reply(&mut connections)?;
+    let reply1 =
+        client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, b"Hello")
+            .create_reply(&mut connections)?;
 
     assert_eq!(
         reply1,
-        Some(server_reply(SERVER_ISN + 1, CLIENT_ISN + 6, TcpFlags::Ack, b"Hello")),
+        Some(server_reply(
+            SERVER_ISN + SYN_BYTE,
+            CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            TcpFlags::Ack,
+            b"Hello"
+        )),
         "Standard reply to the first data packet"
     );
 
-    let conn = connections.try_get()?;
-    assert_eq!(conn.tcp_state, TcpState::Established);
+    cloned_state.snd_nxt.advance_by(HELLO_LEN);
+    cloned_state.rcv_nxt.advance_by(HELLO_LEN);
     assert_eq!(
-        conn.snd_nxt,
-        SERVER_ISN + 6,
+        connections.try_get()?,
+        &cloned_state,
         "Stored snd_nxt should be SERVER_ISN + 1 + 5 bytes echoed between replies"
     );
-    assert_eq!(conn.rcv_nxt, CLIENT_ISN + 6);
 
     // Second data packet: "Hi" (2 bytes), but with stale ack=SERVER_ISN+1 (hasn't ACKed our "Hello"
     // echo)
-    let reply2 = client_packet(CLIENT_ISN + 6, SERVER_ISN + 1, TcpFlags::Ack, b"Hi")
-        .create_reply(&mut connections)?;
+    let reply2 = client_packet(
+        CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+        SERVER_ISN + SYN_BYTE,
+        TcpFlags::Ack,
+        b"Hi",
+    )
+    .create_reply(&mut connections)?;
 
     assert_eq!(
         reply2,
-        Some(server_reply(SERVER_ISN + 6, CLIENT_ISN + 8, TcpFlags::Ack, b"Hi")),
+        Some(server_reply(
+            SERVER_ISN + SYN_BYTE + HELLO_LEN,
+            CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
+            TcpFlags::Ack,
+            b"Hi"
+        )),
         "Server's seq_num should be snd_nxt=SERVER_ISN+6, not client's stale ack_num=SERVER_ISN+1"
     );
 
@@ -323,48 +363,91 @@ fn old_ack_num_does_not_regress_snd_una() -> Result<()> {
 
     let mut connections = TcpConnections::default();
     connections.insert_established(); // SND.UNA=SND.NXT=SERVER_ISN+1, RCV.NXT=CLIENT_ISN+1
+    let mut cloned_state = connections.try_get()?.clone();
+    assert_eq!(cloned_state.snd_una, SERVER_ISN + SYN_BYTE);
 
-    // First packet: "Hello" (5 bytes), ack=SERVER_ISN+1 -> SND.UNA advances to SERVER_ISN+1,
-    // SND.NXT becomes SERVER_ISN+6
-    let reply1 = client_packet(CLIENT_ISN + 1, SERVER_ISN + 1, TcpFlags::Ack, b"Hello")
-        .create_reply(&mut connections)?;
+    // First packet: "Hello" (5 bytes), ack=SERVER_ISN+1 -> SND.UNA is SERVER_ISN+1, SND.NXT becomes
+    // SERVER_ISN+6
+    let reply1 =
+        client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, b"Hello")
+            .create_reply(&mut connections)?;
 
     assert_eq!(
         reply1,
-        Some(server_reply(SERVER_ISN + 1, CLIENT_ISN + 6, TcpFlags::Ack, b"Hello")),
+        Some(server_reply(
+            SERVER_ISN + SYN_BYTE,
+            CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            TcpFlags::Ack,
+            b"Hello"
+        )),
         "Standard reply to the first data packet"
     );
 
-    assert_eq!(connections.try_get()?.snd_una, SERVER_ISN + 1);
+    cloned_state.snd_nxt.advance_by(HELLO_LEN);
+    cloned_state.rcv_nxt.advance_by(HELLO_LEN);
+    assert_eq!(
+        connections.try_get()?,
+        &cloned_state,
+        "SND.UNA should still be SERVER_ISN+1 after the first data packet"
+    );
 
     // Second packet: "Hi" (2 bytes), ack=SERVER_ISN+6 -> SND.UNA advances to SERVER_ISN+6, SND.NXT
     // becomes SERVER_ISN+8
-    let reply2 = client_packet(CLIENT_ISN + 6, SERVER_ISN + 6, TcpFlags::Ack, b"Hi")
-        .create_reply(&mut connections)?;
+    let reply2 = client_packet(
+        CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+        SERVER_ISN + SYN_BYTE + HELLO_LEN,
+        TcpFlags::Ack,
+        b"Hi",
+    )
+    .create_reply(&mut connections)?;
 
     assert_eq!(
         reply2,
-        Some(server_reply(SERVER_ISN + 6, CLIENT_ISN + 8, TcpFlags::Ack, b"Hi")),
+        Some(server_reply(
+            SERVER_ISN + SYN_BYTE + HELLO_LEN,
+            CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
+            TcpFlags::Ack,
+            b"Hi"
+        )),
         "Standard reply to the second data packet"
     );
 
-    assert_eq!(connections.try_get()?.snd_una, SERVER_ISN + 6);
+    cloned_state.snd_nxt.advance_by(HI_LEN);
+    cloned_state.rcv_nxt.advance_by(HI_LEN);
+    cloned_state.snd_una.advance_by(HELLO_LEN);
+    assert_eq!(
+        connections.try_get()?,
+        &cloned_state,
+        "SND.UNA should be SERVER_ISN+6 after the second data packet"
+    );
 
-    // Third packet: "Yo" (2 bytes), ack=SERVER_ISN+1 (now stale, older than SND.UNA=SERVER_ISN+6)
-    let reply3 = client_packet(CLIENT_ISN + 8, SERVER_ISN + 1, TcpFlags::Ack, b"Yo")
-        .create_reply(&mut connections)?;
+    // Third packet: "Hey" (3 bytes), ack=SERVER_ISN+1 (now stale, older than SND.UNA=SERVER_ISN+6)
+    let reply3 = client_packet(
+        CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
+        SERVER_ISN + SYN_BYTE,
+        TcpFlags::Ack,
+        b"Hey",
+    )
+    .create_reply(&mut connections)?;
 
     // The stale ack_num doesn't make the segment unacceptable (SERVER_ISN+1 <=
-    // SND.NXT=SERVER_ISN+8), so it's still processed normally and "Yo" is echoed
+    // SND.NXT=SERVER_ISN+8), so it's still processed normally and "Hey" is echoed
     assert_eq!(
         reply3,
-        Some(server_reply(SERVER_ISN + 8, CLIENT_ISN + 10, TcpFlags::Ack, b"Yo")),
+        Some(server_reply(
+            SERVER_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
+            CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN + HEY_LEN,
+            TcpFlags::Ack,
+            b"Hey"
+        )),
         "Stale ack_num shouldn't prevent normal processing"
     );
 
+    cloned_state.snd_nxt.advance_by(HEY_LEN);
+    cloned_state.rcv_nxt.advance_by(HEY_LEN);
     assert_eq!(
-        connections.try_get()?.snd_una,
-        SERVER_ISN + 6,
+        connections.try_get()?,
+        &cloned_state,
         "Stale ack_num=SERVER_ISN+1 must not move SND.UNA backward from SERVER_ISN+6"
     );
 
@@ -379,7 +462,7 @@ fn rst_exactly_at_rcv_nxt_cleans_up_connection_and_returns_none() -> Result<()> 
     connections.insert_established();
 
     assert_eq!(
-        client_packet(CLIENT_ISN + 1, SERVER_ISN + 1, TcpFlags::Rst, &[])
+        client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::Rst, &[])
             .create_reply(&mut connections)?,
         None
     );
@@ -396,28 +479,24 @@ fn rst_within_window_but_not_at_rcv_nxt_gets_challenge_ack() -> Result<()> {
 
     let mut connections = TcpConnections::default();
     connections.insert_established(); // rcv_nxt=CLIENT_ISN+1, snd_nxt=SERVER_ISN+1
+    let initial_state = connections.try_get()?.clone();
 
     // seq_num=CLIENT_ISN+4 is inside the receive window [CLIENT_ISN+1, CLIENT_ISN+1+RCV.WND), but
     // seq_num=CLIENT_ISN+4 != rcv_nxt=CLIENT_ISN+1
-    let reply = client_packet(CLIENT_ISN + 4, SERVER_ISN + 1, TcpFlags::Rst, &[])
+    let reply = client_packet(CLIENT_ISN + 4, SERVER_ISN + SYN_BYTE, TcpFlags::Rst, &[])
         .create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
-        Some(server_reply(SERVER_ISN + 1, CLIENT_ISN + 1, TcpFlags::Ack, &[])),
+        Some(server_reply(SERVER_ISN + SYN_BYTE, CLIENT_ISN + SYN_BYTE, TcpFlags::Ack, &[])),
         "In-window non-exact RST should get a challenge ACK, not a silent drop or reset"
     );
 
-    let conn = connections.try_get()?;
-
     assert_eq!(
-        conn.tcp_state,
-        TcpState::Established,
+        connections.try_get()?,
+        &initial_state,
         "Connection must not be torn down by a non-exact in-window RST"
     );
-
-    assert_eq!(conn.snd_nxt, SERVER_ISN + 1);
-    assert_eq!(conn.rcv_nxt, CLIENT_ISN + 1);
 
     Ok(())
 }
@@ -430,23 +509,19 @@ fn rst_with_out_of_window_seq_is_silently_dropped() -> Result<()> {
 
     let mut connections = TcpConnections::default();
     connections.insert_established(); // rcv_nxt=CLIENT_ISN+1
+    let initial_state = connections.try_get()?.clone();
 
     // seq_num=CLIENT_ISN-10 is just below rcv_nxt=CLIENT_ISN+1, so this RST is outside the receive
     // window
-    let reply = client_packet(CLIENT_ISN - 10, SERVER_ISN + 1, TcpFlags::Rst, &[])
+    let reply = client_packet(CLIENT_ISN - 10, SERVER_ISN + SYN_BYTE, TcpFlags::Rst, &[])
         .create_reply(&mut connections)?;
     assert_eq!(reply, None, "Out-of-window RST should be silently dropped");
 
-    let conn = connections.try_get()?;
-
     assert_eq!(
-        conn.tcp_state,
-        TcpState::Established,
+        connections.try_get()?,
+        &initial_state,
         "Connection must not be torn down by an out-of-window RST"
     );
-
-    assert_eq!(conn.snd_nxt, SERVER_ISN + 1);
-    assert_eq!(conn.rcv_nxt, CLIENT_ISN + 1);
 
     Ok(())
 }
@@ -461,15 +536,26 @@ fn duplicate_data_packet_gets_duplicate_ack_without_echo() -> Result<()> {
     let mut connections = TcpConnections::default();
     connections.insert_established();
 
-    let hello = client_packet(CLIENT_ISN + 1, SERVER_ISN + 1, TcpFlags::Ack, b"Hello");
-    let hi = client_packet(CLIENT_ISN + 6, SERVER_ISN + 6, TcpFlags::Ack, b"Hi");
+    let hello =
+        client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, b"Hello");
+    let hi = client_packet(
+        CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+        SERVER_ISN + SYN_BYTE + HELLO_LEN,
+        TcpFlags::Ack,
+        b"Hi",
+    );
 
     // First packet: "Hello" (seq=CLIENT_ISN+1) -> rcv_nxt advances to CLIENT_ISN+6, snd_nxt
     // advances to SERVER_ISN+6
     let reply1 = hello.clone().create_reply(&mut connections)?;
     assert_eq!(
         reply1,
-        Some(server_reply(SERVER_ISN + 1, CLIENT_ISN + 6, TcpFlags::Ack, b"Hello")),
+        Some(server_reply(
+            SERVER_ISN + SYN_BYTE,
+            CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            TcpFlags::Ack,
+            b"Hello"
+        )),
         "Standard reply to the first data packet"
     );
 
@@ -478,7 +564,12 @@ fn duplicate_data_packet_gets_duplicate_ack_without_echo() -> Result<()> {
     let reply2 = hi.create_reply(&mut connections)?;
     assert_eq!(
         reply2,
-        Some(server_reply(SERVER_ISN + 6, CLIENT_ISN + 8, TcpFlags::Ack, b"Hi")),
+        Some(server_reply(
+            SERVER_ISN + SYN_BYTE + HELLO_LEN,
+            CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
+            TcpFlags::Ack,
+            b"Hi"
+        )),
         "Standard reply to the second data packet"
     );
 
@@ -487,7 +578,12 @@ fn duplicate_data_packet_gets_duplicate_ack_without_echo() -> Result<()> {
 
     assert_eq!(
         reply3,
-        Some(server_reply(SERVER_ISN + 8, CLIENT_ISN + 8, TcpFlags::Ack, &[])),
+        Some(server_reply(
+            SERVER_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
+            CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
+            TcpFlags::Ack,
+            &[]
+        )),
         "Duplicate ACK should ack rcv_nxt=CLIENT_ISN+8 with no payload, not echo \
          seq+len=CLIENT_ISN+6"
     );
@@ -504,28 +600,29 @@ fn out_of_order_fin_ack_gets_duplicate_ack_without_closing() -> Result<()> {
 
     let mut connections = TcpConnections::default();
     connections.insert_established(); // rcv_nxt = CLIENT_ISN+1
+    let initial_state = connections.try_get()?.clone();
 
     // FIN-ACK arrives at seq=CLIENT_ISN+6, but rcv_nxt is still CLIENT_ISN+1 (a 5-byte gap)
-    let reply = client_packet(CLIENT_ISN + 6, SERVER_ISN + 1, TcpFlags::FinAck, &[])
-        .create_reply(&mut connections)?;
+    let reply = client_packet(
+        CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+        SERVER_ISN + SYN_BYTE,
+        TcpFlags::FinAck,
+        &[],
+    )
+    .create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
-        Some(server_reply(SERVER_ISN + 1, CLIENT_ISN + 1, TcpFlags::Ack, &[])),
+        Some(server_reply(SERVER_ISN + SYN_BYTE, CLIENT_ISN + SYN_BYTE, TcpFlags::Ack, &[])),
         "Out-of-order FIN-ACK should get a duplicate ACK reflecting rcv_nxt=CLIENT_ISN+1, not a \
          FIN-ACK in response"
     );
 
-    let conn = connections.try_get()?;
-
     assert_eq!(
-        conn.tcp_state,
-        TcpState::Established,
+        connections.try_get()?,
+        &initial_state,
         "Connection must remain established, out-of-order FIN-ACK must not start closing"
     );
-
-    assert_eq!(conn.snd_nxt, SERVER_ISN + 1);
-    assert_eq!(conn.rcv_nxt, CLIENT_ISN + 1);
 
     Ok(())
 }
@@ -536,10 +633,11 @@ fn unrecognized_packet_for_unknown_connection_gets_rst() -> Result<()> {
 
     let mut connections = TcpConnections::default(); // Empty, no known connections
 
-    let reply = client_packet(CLIENT_ISN + 1, SERVER_ISN + 1, TcpFlags::Ack, b"Hello")
-        .create_reply(&mut connections)?;
+    let reply =
+        client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, b"Hello")
+            .create_reply(&mut connections)?;
 
-    assert_eq!(reply, Some(server_reply(SERVER_ISN + 1, 0, TcpFlags::Rst, &[])));
+    assert_eq!(reply, Some(server_reply(SERVER_ISN + SYN_BYTE, 0, TcpFlags::Rst, &[])));
 
     Ok(())
 }
@@ -553,19 +651,18 @@ fn ack_for_unsent_data_is_dropped_and_gets_current_state_reply() -> Result<()> {
 
     let mut connections = TcpConnections::default();
     connections.insert_established(); // SND.NXT=SERVER_ISN+1, RCV.NXT=CLIENT_ISN+1
+    let initial_state = connections.try_get()?.clone();
 
     // seq_num == RCV.NXT, but ack_num=SERVER_ISN+20 is past SND.NXT=SERVER_ISN+1
-    let reply = client_packet(CLIENT_ISN + 1, SERVER_ISN + 20, TcpFlags::Ack, b"Hello")
+    let reply = client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + 20, TcpFlags::Ack, b"Hello")
         .create_reply(&mut connections)?;
 
-    assert_eq!(reply, Some(server_reply(SERVER_ISN + 1, CLIENT_ISN + 1, TcpFlags::Ack, &[])));
+    assert_eq!(
+        reply,
+        Some(server_reply(SERVER_ISN + SYN_BYTE, CLIENT_ISN + SYN_BYTE, TcpFlags::Ack, &[]))
+    );
 
-    // State must be untouched
-    let conn = connections.try_get()?;
-    assert_eq!(conn.tcp_state, TcpState::Established);
-    assert_eq!(conn.snd_nxt, SERVER_ISN + 1);
-    assert_eq!(conn.rcv_nxt, CLIENT_ISN + 1);
-    assert_eq!(conn.snd_una, SERVER_ISN + 1);
+    assert_eq!(connections.try_get()?, &initial_state, "State must be untouched");
 
     Ok(())
 }
@@ -578,26 +675,22 @@ fn wraparound_ack_for_unsent_data_is_still_rejected() -> Result<()> {
     // `u32::MAX` is false and let it through.
 
     let mut connections = TcpConnections::default();
-    connections.insert(ConnState {
+    let initial_state = ConnState {
         tcp_state: TcpState::Established,
         snd_nxt: u32::MAX,
-        rcv_nxt: CLIENT_ISN + 1,
+        rcv_nxt: CLIENT_ISN + SYN_BYTE,
         snd_una: u32::MAX,
         pending: Vec::new(),
-    });
+    };
+    connections.insert(initial_state.clone());
 
     // ack=0 wraps 1 past SND.NXT=`u32::MAX`
-    let reply =
-        client_packet(CLIENT_ISN + 1, 0, TcpFlags::Ack, &[]).create_reply(&mut connections)?;
+    let reply = client_packet(CLIENT_ISN + SYN_BYTE, 0, TcpFlags::Ack, &[])
+        .create_reply(&mut connections)?;
 
-    assert_eq!(reply, Some(server_reply(u32::MAX, CLIENT_ISN + 1, TcpFlags::Ack, &[])));
+    assert_eq!(reply, Some(server_reply(u32::MAX, CLIENT_ISN + SYN_BYTE, TcpFlags::Ack, &[])));
 
-    // State must be untouched
-    let conn = connections.try_get()?;
-    assert_eq!(conn.tcp_state, TcpState::Established);
-    assert_eq!(conn.snd_nxt, u32::MAX);
-    assert_eq!(conn.rcv_nxt, CLIENT_ISN + 1);
-    assert_eq!(conn.snd_una, u32::MAX);
+    assert_eq!(connections.try_get()?, &initial_state, "State must be untouched");
 
     Ok(())
 }
@@ -606,20 +699,23 @@ fn wraparound_ack_for_unsent_data_is_still_rejected() -> Result<()> {
 fn close_established_sends_fin_ack_and_transitions_to_fin_wait_1() -> Result<()> {
     let mut connections = TcpConnections::default();
     connections.insert_established(); // snd_nxt=SERVER_ISN+1, rcv_nxt=CLIENT_ISN+1
+    let mut cloned_state = connections.try_get()?.clone();
 
     let mut replies = connections.close_established();
     let reply = replies.pop().ok_or("Expected one reply")?;
 
     assert!(replies.is_empty(), "Expected exactly one reply");
-    assert_eq!(reply, server_reply(SERVER_ISN + 1, CLIENT_ISN + 1, TcpFlags::FinAck, &[]));
+    assert_eq!(
+        reply,
+        server_reply(SERVER_ISN + SYN_BYTE, CLIENT_ISN + SYN_BYTE, TcpFlags::FinAck, &[])
+    );
 
     // IP addresses are swapped: server -> client
     assert_eq!(reply.get_ip_pair(), IP_PAIR.swapped());
 
-    let conn = connections.try_get()?;
-    assert_eq!(conn.tcp_state, TcpState::FinWait1);
-    assert_eq!(conn.snd_nxt, SERVER_ISN + 2, "FIN consumes one sequence number");
-    assert_eq!(conn.rcv_nxt, CLIENT_ISN + 1);
+    cloned_state.tcp_state = TcpState::FinWait1;
+    cloned_state.snd_nxt.advance_by(FIN_BYTE);
+    assert_eq!(connections.try_get()?, &cloned_state, "FIN consumes one sequence number");
 
     Ok(())
 }
@@ -629,19 +725,18 @@ fn fin_wait_1_to_fin_wait_2_on_ack_of_our_fin() -> Result<()> {
     let mut connections = TcpConnections::default();
     connections.insert_established();
     connections.close_established(); // -> FIN-WAIT-1, snd_nxt=SERVER_ISN+2
+    let mut cloned_state = connections.try_get()?.clone();
 
     // Client acknowledges our FIN (ack=SERVER_ISN+2), no FIN of its own yet
     assert_eq!(
-        client_packet(CLIENT_ISN + 1, SERVER_ISN + 2, TcpFlags::Ack, &[])
+        client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE + FIN_BYTE, TcpFlags::Ack, &[])
             .create_reply(&mut connections)?,
         None
     );
 
-    let conn = connections.try_get()?;
-    assert_eq!(conn.tcp_state, TcpState::FinWait2);
-    assert_eq!(conn.snd_nxt, SERVER_ISN + 2);
-    assert_eq!(conn.rcv_nxt, CLIENT_ISN + 1);
-    assert_eq!(conn.snd_una, SERVER_ISN + 2);
+    cloned_state.tcp_state = TcpState::FinWait2;
+    cloned_state.snd_una.advance_by(FIN_BYTE);
+    assert_eq!(connections.try_get()?, &cloned_state);
 
     Ok(())
 }
@@ -651,21 +746,36 @@ fn fin_wait_2_closes_on_fin_ack_from_peer() -> Result<()> {
     let mut connections = TcpConnections::default();
     connections.insert_established();
     connections.close_established(); // -> FIN-WAIT-1, snd_nxt=SERVER_ISN+2
+    let mut cloned_state = connections.try_get()?.clone();
 
     // Our FIN is acknowledged -> FIN-WAIT-2
-    let ack_reply = client_packet(CLIENT_ISN + 1, SERVER_ISN + 2, TcpFlags::Ack, &[])
-        .create_reply(&mut connections)?;
+    let ack_reply =
+        client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE + FIN_BYTE, TcpFlags::Ack, &[])
+            .create_reply(&mut connections)?;
     assert_eq!(ack_reply, None);
 
-    let conn = connections.try_get()?;
-    assert_eq!(conn.tcp_state, TcpState::FinWait2);
-    assert_eq!(conn.snd_nxt, SERVER_ISN + 2);
-    assert_eq!(conn.rcv_nxt, CLIENT_ISN + 1);
+    cloned_state.tcp_state = TcpState::FinWait2;
+    cloned_state.snd_una.advance_by(FIN_BYTE);
+    assert_eq!(connections.try_get()?, &cloned_state);
 
     // Client's FIN arrives in order
-    let fin_reply = client_packet(CLIENT_ISN + 1, SERVER_ISN + 2, TcpFlags::FinAck, &[])
-        .create_reply(&mut connections)?;
-    assert_eq!(fin_reply, Some(server_reply(SERVER_ISN + 2, CLIENT_ISN + 2, TcpFlags::Ack, &[])));
+    let fin_reply = client_packet(
+        CLIENT_ISN + SYN_BYTE,
+        SERVER_ISN + SYN_BYTE + FIN_BYTE,
+        TcpFlags::FinAck,
+        &[],
+    )
+    .create_reply(&mut connections)?;
+
+    assert_eq!(
+        fin_reply,
+        Some(server_reply(
+            SERVER_ISN + SYN_BYTE + FIN_BYTE,
+            CLIENT_ISN + SYN_BYTE + FIN_BYTE,
+            TcpFlags::Ack,
+            &[]
+        ))
+    );
 
     assert_matches!(connections.try_get(), Err(_), "Connection should be removed");
 
@@ -682,10 +792,24 @@ fn fin_wait_1_closes_immediately_if_peers_fin_also_acks_ours() -> Result<()> {
     connections.close_established(); // -> FIN-WAIT-1, snd_nxt=SERVER_ISN+2
 
     // Client's FIN arrives in order and also acknowledges our FIN (ack=SERVER_ISN+2)
-    let reply = client_packet(CLIENT_ISN + 1, SERVER_ISN + 2, TcpFlags::FinAck, &[])
-        .create_reply(&mut connections)?;
+    let reply = client_packet(
+        CLIENT_ISN + SYN_BYTE,
+        SERVER_ISN + SYN_BYTE + FIN_BYTE,
+        TcpFlags::FinAck,
+        &[],
+    )
+    .create_reply(&mut connections)?;
 
-    assert_eq!(reply, Some(server_reply(SERVER_ISN + 2, CLIENT_ISN + 2, TcpFlags::Ack, &[])));
+    assert_eq!(
+        reply,
+        Some(server_reply(
+            SERVER_ISN + SYN_BYTE + FIN_BYTE,
+            CLIENT_ISN + SYN_BYTE + FIN_BYTE,
+            TcpFlags::Ack,
+            &[]
+        ))
+    );
+
     assert_matches!(connections.try_get(), Err(_), "Connection should be removed");
 
     Ok(())
@@ -700,20 +824,25 @@ fn data_after_our_fin_in_fin_wait_1_is_acked_without_echo() -> Result<()> {
     let mut connections = TcpConnections::default();
     connections.insert_established(); // rcv_nxt=CLIENT_ISN+1
     connections.close_established(); // -> FIN-WAIT-1, snd_nxt=SERVER_ISN+2
+    let mut cloned_state = connections.try_get()?.clone();
 
-    let reply = client_packet(CLIENT_ISN + 1, SERVER_ISN + 1, TcpFlags::Ack, b"Hello")
-        .create_reply(&mut connections)?;
+    let reply =
+        client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, b"Hello")
+            .create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
-        Some(server_reply(SERVER_ISN + 2, CLIENT_ISN + 6, TcpFlags::Ack, &[])),
+        Some(server_reply(
+            SERVER_ISN + SYN_BYTE + FIN_BYTE,
+            CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            TcpFlags::Ack,
+            &[]
+        )),
         "Data arriving after our FIN should be ACKed without being echoed, not RST"
     );
 
-    let conn = connections.try_get()?;
-    assert_eq!(conn.tcp_state, TcpState::FinWait1, "State should remain FIN-WAIT-1");
-    assert_eq!(conn.snd_nxt, SERVER_ISN + 2);
-    assert_eq!(conn.rcv_nxt, CLIENT_ISN + 6);
+    cloned_state.rcv_nxt.advance_by(HELLO_LEN);
+    assert_eq!(connections.try_get()?, &cloned_state, "State should remain FIN-WAIT-1");
 
     Ok(())
 }
@@ -723,29 +852,37 @@ fn data_after_our_fin_in_fin_wait_2_is_acked_without_echo() -> Result<()> {
     let mut connections = TcpConnections::default();
     connections.insert_established();
     connections.close_established(); // -> FIN-WAIT-1, snd_nxt=SERVER_ISN+2
+    let mut cloned_state = connections.try_get()?.clone();
 
     // Our FIN is acknowledged -> FIN-WAIT-2
-    client_packet(CLIENT_ISN + 1, SERVER_ISN + 2, TcpFlags::Ack, &[])
+    client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE + FIN_BYTE, TcpFlags::Ack, &[])
         .create_reply(&mut connections)?;
 
-    let conn_first = connections.try_get()?;
-    assert_eq!(conn_first.tcp_state, TcpState::FinWait2);
-    assert_eq!(conn_first.snd_nxt, SERVER_ISN + 2);
-    assert_eq!(conn_first.rcv_nxt, CLIENT_ISN + 1);
+    cloned_state.tcp_state = TcpState::FinWait2;
+    cloned_state.snd_una.advance_by(FIN_BYTE);
+    assert_eq!(connections.try_get()?, &cloned_state);
 
-    let reply = client_packet(CLIENT_ISN + 1, SERVER_ISN + 2, TcpFlags::Ack, b"Hello")
-        .create_reply(&mut connections)?;
+    let reply = client_packet(
+        CLIENT_ISN + SYN_BYTE,
+        SERVER_ISN + SYN_BYTE + FIN_BYTE,
+        TcpFlags::Ack,
+        b"Hello",
+    )
+    .create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
-        Some(server_reply(SERVER_ISN + 2, CLIENT_ISN + 6, TcpFlags::Ack, &[])),
+        Some(server_reply(
+            SERVER_ISN + SYN_BYTE + FIN_BYTE,
+            CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            TcpFlags::Ack,
+            &[]
+        )),
         "Data arriving after our FIN should be ACKed without being echoed, not RST"
     );
 
-    let conn_second = connections.try_get()?;
-    assert_eq!(conn_second.tcp_state, TcpState::FinWait2, "State should remain FIN-WAIT-2");
-    assert_eq!(conn_second.snd_nxt, SERVER_ISN + 2);
-    assert_eq!(conn_second.rcv_nxt, CLIENT_ISN + 6);
+    cloned_state.rcv_nxt.advance_by(HELLO_LEN);
+    assert_eq!(connections.try_get()?, &cloned_state, "State should remain FIN-WAIT-2");
 
     Ok(())
 }
@@ -755,22 +892,38 @@ fn simultaneous_close_transitions_through_closing_to_closed() -> Result<()> {
     let mut connections = TcpConnections::default();
     connections.insert_established();
     connections.close_established(); // -> FIN-WAIT-1, snd_nxt=SERVER_ISN+2
+    let mut cloned_state = connections.try_get()?.clone();
 
     // Client's FIN arrives in order, but doesn't yet acknowledge our FIN (ack=SERVER_ISN+1,
     // simultaneous close) -> CLOSING
-    let fin_reply = client_packet(CLIENT_ISN + 1, SERVER_ISN + 1, TcpFlags::FinAck, &[])
+    let reply = client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::FinAck, &[])
         .create_reply(&mut connections)?;
-    assert_eq!(fin_reply, Some(server_reply(SERVER_ISN + 2, CLIENT_ISN + 2, TcpFlags::Ack, &[])));
 
-    let conn = connections.try_get()?;
-    assert_eq!(conn.tcp_state, TcpState::Closing);
-    assert_eq!(conn.snd_nxt, SERVER_ISN + 2);
-    assert_eq!(conn.rcv_nxt, CLIENT_ISN + 2);
+    assert_eq!(
+        reply,
+        Some(server_reply(
+            SERVER_ISN + SYN_BYTE + FIN_BYTE,
+            CLIENT_ISN + SYN_BYTE + FIN_BYTE,
+            TcpFlags::Ack,
+            &[]
+        ))
+    );
+
+    cloned_state.tcp_state = TcpState::Closing;
+    cloned_state.rcv_nxt.advance_by(FIN_BYTE);
+    assert_eq!(connections.try_get()?, &cloned_state);
 
     // Client's ACK of our FIN finally arrives -> fully closed
-    let ack_reply = client_packet(CLIENT_ISN + 2, SERVER_ISN + 2, TcpFlags::Ack, &[])
-        .create_reply(&mut connections)?;
-    assert_eq!(ack_reply, None);
+    assert_eq!(
+        client_packet(
+            CLIENT_ISN + SYN_BYTE + FIN_BYTE,
+            SERVER_ISN + SYN_BYTE + FIN_BYTE,
+            TcpFlags::Ack,
+            &[]
+        )
+        .create_reply(&mut connections)?,
+        None
+    );
 
     assert_matches!(connections.try_get(), Err(_), "Connection should be removed");
 

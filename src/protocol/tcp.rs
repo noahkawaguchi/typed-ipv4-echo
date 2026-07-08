@@ -637,6 +637,21 @@ mod tests {
     /// other so they cannot be mixed up in tests.
     const _: () = assert!(CLIENT_ISN.abs_diff(SERVER_ISN) >= 100);
 
+    /// The single phantom byte consumed by SYN.
+    pub(super) const SYN_BYTE: u32 = 1;
+
+    /// The single phantom byte consumed by FIN.
+    const FIN_BYTE: u32 = 1;
+
+    /// The number of bytes in the payload `"Hello"`.
+    const HELLO_LEN: u32 = 5;
+
+    /// The number of bytes in the payload `"Hi"`.
+    const HI_LEN: u32 = 2;
+
+    /// The number of bytes in the payload `"Hey"`.
+    const HEY_LEN: u32 = 3;
+
     /// Connection key shared by test modules.
     pub(super) const KEY: ConnKey =
         ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
