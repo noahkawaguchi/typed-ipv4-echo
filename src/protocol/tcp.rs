@@ -641,8 +641,8 @@ mod tests {
     mod echo;
     mod establish;
     mod parse;
-    mod reply;
     mod retransmit;
+    mod stray_syn;
     mod terminate;
     mod write;
 
