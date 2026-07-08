@@ -637,11 +637,11 @@ impl fmt::Display for TcpHandler {
 
 #[cfg(test)]
 mod tests {
+    mod abort;
     mod echo;
     mod establish;
     mod parse;
     mod reply;
-    mod reply_to_rst;
     mod retransmit;
     mod terminate;
     mod write;
