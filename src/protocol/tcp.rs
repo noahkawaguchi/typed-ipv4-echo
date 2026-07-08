@@ -2,6 +2,7 @@ pub use connections::TcpConnections;
 
 mod connections;
 mod flags;
+mod state;
 
 use {
     crate::{
@@ -12,8 +13,9 @@ use {
             handler::Encode,
             payload_to_string, pseudo_header_checksum,
             tcp::{
-                connections::{ConnKey, ConnState, PendingSegment, TcpState, seq_space},
+                connections::{ConnKey, seq_space},
                 flags::TcpFlags,
+                state::{ConnState, PendingSegment, TcpState},
             },
         },
         sys,
@@ -527,7 +529,7 @@ impl TcpHandler {
             *snd_una = self.ack_num;
 
             // ACKs are cumulative, so only keep pending segments not fully covered by SEG.ACK
-            pending.retain(|seg| !seg.is_covered_by(self.ack_num));
+            pending.retain(|pending_seg| seq_space::lt(self.ack_num, pending_seg.end_seq));
         }
     }
 
