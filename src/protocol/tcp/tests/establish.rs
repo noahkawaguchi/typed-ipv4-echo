@@ -1,0 +1,79 @@
+use super::*;
+
+#[test]
+fn creates_valid_syn_ack() -> Result<()> {
+    let mut connections = TcpConnections::default();
+
+    let reply = client_packet(CLIENT_ISN, 0, TcpFlags::Syn, &[]).create_reply(&mut connections)?;
+
+    // seq_num is the random ISN that was stored in the connection table
+    let stored_isn = connections.try_get()?.snd_una;
+
+    assert_eq!(reply, Some(server_reply(stored_isn, CLIENT_ISN + SYN_BYTE, TcpFlags::SynAck, &[])));
+
+    Ok(())
+}
+
+#[test]
+fn duplicate_syn_during_syn_received_resends_same_syn_ack() -> Result<()> {
+    // If our SYN-ACK is lost, the client's retransmission timer will resend its SYN. We must resend
+    // the same SYN-ACK (same ISN), not RST the retry, and not generate a new ISN.
+
+    let mut connections = TcpConnections::default();
+    connections.insert_syn_recv(); // Simulate having already sent a SYN-ACK with ISN=SERVER_ISN
+    let initial_state = connections.try_get()?.clone();
+
+    let reply = client_packet(CLIENT_ISN, 0, TcpFlags::Syn, &[]).create_reply(&mut connections)?;
+
+    assert_eq!(
+        reply,
+        Some(server_reply(SERVER_ISN, CLIENT_ISN + SYN_BYTE, TcpFlags::SynAck, &[])),
+        "Retransmitted SYN should get the same SYN-ACK resent, not a RST"
+    );
+
+    assert_eq!(
+        connections.try_get()?,
+        &initial_state,
+        "State should remain SYN-RECEIVED, not reset or advance"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn data_packet_before_complete_handshake_gets_rst() -> Result<()> {
+    let mut connections = TcpConnections::default();
+    connections.insert_syn_recv(); // SYN-ACK sent, but handshake not yet completed
+
+    let reply =
+        client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, b"Hello")
+            .create_reply(&mut connections)?;
+
+    assert_eq!(reply, Some(server_reply(SERVER_ISN + SYN_BYTE, 0, TcpFlags::Rst, &[])));
+
+    Ok(())
+}
+
+#[test]
+fn handshake_ack_establishes_connection_and_returns_none() -> Result<()> {
+    let mut connections = TcpConnections::default();
+    // Simulate having sent a SYN-ACK with ISN=SERVER_ISN so ack_num=SERVER_ISN+1 is the correct
+    // completion
+    connections.insert_syn_recv();
+    let mut cloned_state = connections.try_get()?.clone();
+
+    assert_eq!(
+        client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, &[])
+            .create_reply(&mut connections)?,
+        None
+    );
+
+    // Reproduce the state changes that should happen at connection establishment
+    cloned_state.tcp_state = TcpState::Established;
+    cloned_state.rcv_nxt = CLIENT_ISN + SYN_BYTE;
+    cloned_state.snd_una.advance_by(SYN_BYTE);
+
+    assert_eq!(connections.try_get()?, &cloned_state);
+
+    Ok(())
+}
