@@ -216,13 +216,3 @@ impl TcpConnections {
         );
     }
 }
-
-pub(super) mod seq_space {
-    /// Returns whether `a` precedes `b` in TCP sequence-number space, accounting for 32-bit
-    /// wraparound (RFC 9293, Section 3.4).
-    pub const fn lt(a: u32, b: u32) -> bool { a.wrapping_sub(b) > u32::MAX / 2 }
-
-    /// Returns whether `a` precedes or equals `b` in TCP sequence-number space, accounting for
-    /// 32-bit wraparound (RFC 9293, Section 3.4).
-    pub const fn le(a: u32, b: u32) -> bool { a == b || lt(a, b) }
-}

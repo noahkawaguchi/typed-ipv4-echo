@@ -13,7 +13,7 @@ use {
             handler::Encode,
             payload_to_string, pseudo_header_checksum,
             tcp::{
-                connections::{ConnKey, seq_space},
+                connections::ConnKey,
                 flags::TcpFlags,
                 state::{ConnState, PendingSegment, TcpState},
             },
@@ -23,6 +23,26 @@ use {
     },
     std::{fmt, num::TryFromIntError, rc::Rc},
 };
+
+trait SeqLt {
+    /// Returns whether `self` precedes `rhs` in TCP sequence-number space, accounting for
+    /// wraparound (RFC 9293, Section 3.4).
+    fn seq_lt(self, rhs: Self) -> bool;
+}
+
+impl SeqLt for u32 {
+    fn seq_lt(self, rhs: Self) -> bool { self.wrapping_sub(rhs) > Self::MAX / 2 }
+}
+
+trait SeqLe {
+    /// Returns whether `self` precedes or equals `rhs` in TCP sequence-number space, accounting for
+    /// wraparound (RFC 9293, Section 3.4).
+    fn seq_le(self, rhs: Self) -> bool;
+}
+
+impl SeqLe for u32 {
+    fn seq_le(self, rhs: Self) -> bool { self == rhs || self.seq_lt(rhs) }
+}
 
 trait AdvanceBy {
     /// Like `wrapping_add`, but mutates `self` in place to avoid potentially verbose and
@@ -228,7 +248,7 @@ impl TcpHandler {
                 Some(&mut ConnState { tcp_state: TcpState::Established, snd_nxt, rcv_nxt, .. }),
                 TcpFlags::Ack,
                 _,
-            ) if seq_space::lt(snd_nxt, self.ack_num) => Some(SendInfo {
+            ) if snd_nxt.seq_lt(self.ack_num) => Some(SendInfo {
                 seq_num: snd_nxt,
                 ack_num: rcv_nxt,
                 flags: TcpFlags::Ack,
@@ -465,11 +485,10 @@ impl TcpHandler {
                 } else {
                     // Check whether `seq_num` falls within the receive window [RCV.NXT, RCV.NXT +
                     // RCV.WND). true -> Case 3, false -> Case 1.
-                    (seq_space::le(rcv_nxt, self.seq_num)
-                        && seq_space::lt(
-                            self.seq_num,
-                            rcv_nxt.wrapping_add(u32::from(Self::RCV_WND)),
-                        ))
+                    (rcv_nxt.seq_le(self.seq_num)
+                        && self
+                            .seq_num
+                            .seq_lt(rcv_nxt.wrapping_add(u32::from(Self::RCV_WND))))
                     .then_some(SendInfo {
                         seq_num: snd_nxt,
                         ack_num: rcv_nxt,
@@ -525,11 +544,11 @@ impl TcpHandler {
         snd_nxt: u32,
         pending: &mut Vec<PendingSegment>,
     ) {
-        if seq_space::lt(*snd_una, self.ack_num) && seq_space::le(self.ack_num, snd_nxt) {
+        if snd_una.seq_lt(self.ack_num) && self.ack_num.seq_le(snd_nxt) {
             *snd_una = self.ack_num;
 
             // ACKs are cumulative, so only keep pending segments not fully covered by SEG.ACK
-            pending.retain(|pending_seg| seq_space::lt(self.ack_num, pending_seg.end_seq));
+            pending.retain(|pending_seg| self.ack_num.seq_lt(pending_seg.end_seq));
         }
     }
 
