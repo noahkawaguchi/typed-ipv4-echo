@@ -1,0 +1,107 @@
+use super::*;
+
+#[test]
+fn rst_exactly_at_rcv_nxt_cleans_up_connection_and_returns_none() -> Result<()> {
+    // RFC 9293, Section 3.10.7.4, RST bit set, SEG.SEQ == RCV.NXT -> reset connection
+
+    let mut connections = TcpConnections::default();
+    connections.insert_established();
+
+    assert_eq!(
+        client_packet(CLIENT_ISN + SYN_BYTE, 0, TcpFlags::Rst, &[])
+            .create_reply(&mut connections)?,
+        None
+    );
+
+    assert_matches!(connections.try_get(), Err(_), "Connection should be removed after RST");
+
+    Ok(())
+}
+
+#[test]
+fn rst_within_window_but_not_at_rcv_nxt_gets_challenge_ack() -> Result<()> {
+    // RFC 9293, Section 3.10.7.4, RST bit set, SEG.SEQ in receive window but SEG.SEQ != RCV.NXT ->
+    // send challenge ACK, don't reset connection
+
+    let mut connections = TcpConnections::default();
+    connections.insert_established(); // rcv_nxt=CLIENT_ISN+1, snd_nxt=SERVER_ISN+1
+    let initial_state = connections.try_get()?.clone();
+
+    // seq_num=CLIENT_ISN+4 is inside the receive window [CLIENT_ISN+1, CLIENT_ISN+1+RCV.WND), but
+    // seq_num=CLIENT_ISN+4 != rcv_nxt=CLIENT_ISN+1
+    let reply =
+        client_packet(CLIENT_ISN + 4, 0, TcpFlags::Rst, &[]).create_reply(&mut connections)?;
+
+    assert_eq!(
+        reply,
+        Some(server_reply(SERVER_ISN + SYN_BYTE, CLIENT_ISN + SYN_BYTE, TcpFlags::Ack, &[])),
+        "In-window non-exact RST should get a challenge ACK, not a silent drop or reset"
+    );
+
+    assert_eq!(
+        connections.try_get()?,
+        &initial_state,
+        "Connection must not be torn down by a non-exact in-window RST"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn rst_with_out_of_window_seq_is_silently_dropped() -> Result<()> {
+    // RFC 9293, Section 3.10.7.4, RST bit set, SEG.SEQ outside the current receive window -> must
+    // be silently ignored. (This is protection against blind RST-spoofing where an attacker knows
+    // the 4-tuple but not the current sequence numbers.)
+
+    let mut connections = TcpConnections::default();
+    connections.insert_established(); // rcv_nxt=CLIENT_ISN+1
+    let initial_state = connections.try_get()?.clone();
+
+    // seq_num=CLIENT_ISN-10 is just below rcv_nxt=CLIENT_ISN+1, so this RST is outside the receive
+    // window
+    assert_eq!(
+        client_packet(CLIENT_ISN - 10, 0, TcpFlags::Rst, &[]).create_reply(&mut connections)?,
+        None,
+        "Out-of-window RST should be silently dropped"
+    );
+
+    assert_eq!(
+        connections.try_get()?,
+        &initial_state,
+        "Connection must not be torn down by an out-of-window RST"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn rst_in_syn_received_cleans_up_connection_and_returns_none() -> Result<()> {
+    let mut connections = TcpConnections::default();
+    connections.insert_syn_recv();
+
+    assert_eq!(
+        client_packet(CLIENT_ISN + SYN_BYTE, 0, TcpFlags::Rst, &[])
+            .create_reply(&mut connections)?,
+        None
+    );
+
+    assert_matches!(connections.try_get(), Err(_), "Connection should be removed after RST");
+
+    Ok(())
+}
+
+#[test]
+fn rst_for_unknown_connection_is_silently_dropped() -> Result<()> {
+    let mut connections = TcpConnections::default();
+
+    assert_eq!(
+        client_packet(CLIENT_ISN + SYN_BYTE, 0, TcpFlags::Rst, &[])
+            .create_reply(&mut connections)?,
+        None,
+        "Unknown RST should be silently dropped"
+    );
+
+    assert_matches!(connections.try_get(), Err(_), "Connection should still not exist after RST");
+
+    Ok(())
+}

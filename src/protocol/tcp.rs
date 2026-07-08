@@ -639,6 +639,7 @@ impl fmt::Display for TcpHandler {
 mod tests {
     mod parse;
     mod reply;
+    mod reply_to_rst;
     mod retransmit;
     mod write;
 
