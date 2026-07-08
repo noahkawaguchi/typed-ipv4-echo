@@ -2,6 +2,7 @@ pub use connections::TcpConnections;
 
 mod connections;
 mod flags;
+mod state;
 
 use {
     crate::{
@@ -12,8 +13,9 @@ use {
             handler::Encode,
             payload_to_string, pseudo_header_checksum,
             tcp::{
-                connections::{ConnKey, TcpState},
+                connections::ConnKey,
                 flags::TcpFlags,
+                state::{ConnState, PendingSegment, TcpState},
             },
         },
         sys,
@@ -21,6 +23,36 @@ use {
     },
     std::{fmt, num::TryFromIntError, rc::Rc},
 };
+
+trait SeqLt {
+    /// Returns whether `self` precedes `rhs` in TCP sequence-number space, accounting for
+    /// wraparound (RFC 9293, Section 3.4).
+    fn seq_lt(self, rhs: Self) -> bool;
+}
+
+impl SeqLt for u32 {
+    fn seq_lt(self, rhs: Self) -> bool { self.wrapping_sub(rhs) > Self::MAX / 2 }
+}
+
+trait SeqLe {
+    /// Returns whether `self` precedes or equals `rhs` in TCP sequence-number space, accounting for
+    /// wraparound (RFC 9293, Section 3.4).
+    fn seq_le(self, rhs: Self) -> bool;
+}
+
+impl SeqLe for u32 {
+    fn seq_le(self, rhs: Self) -> bool { self == rhs || self.seq_lt(rhs) }
+}
+
+trait AdvanceBy {
+    /// Like `wrapping_add`, but mutates `self` in place to avoid potentially verbose and
+    /// error-prone reassignments.
+    fn advance_by(&mut self, rhs: Self);
+}
+
+impl AdvanceBy for u32 {
+    fn advance_by(&mut self, rhs: Self) { *self = self.wrapping_add(rhs) }
+}
 
 const TCP_HEADER_MIN_LEN: u8 = 20;
 
@@ -54,6 +86,7 @@ pub struct TcpHandler {
 
 /// Fields that differ when determining a segment to send.
 #[derive(Clone)]
+#[cfg_attr(test, derive(Debug))]
 struct SendInfo {
     seq_num: u32,
     ack_num: u32,
@@ -62,6 +95,13 @@ struct SendInfo {
 }
 
 impl TcpHandler {
+    /// "This represents the sequence numbers the local (receiving) TCP endpoint is willing to
+    /// receive... segments overlapping the range RCV.NXT to RCV.NXT + RCV.WND - 1 carry acceptable
+    /// data or control" (RFC 9293, Section 4).
+    ///
+    /// Currently left at max for simplicity.
+    const RCV_WND: u16 = u16::MAX;
+
     /// Parses `data` as a TCP header and payload.
     pub(super) fn parse(data: &[u8], ip_pair: Ipv4AddrPair) -> Result<Self> {
         let Some(tcp_header) = data.first_chunk::<{ TCP_HEADER_MIN_LEN as usize }>() else {
@@ -123,22 +163,19 @@ impl TcpHandler {
             server_port: self.ports.dst,
         };
 
-        Ok(match (connections.tcp_state_of(&key), self.flags, self.payload.as_ref()) {
+        Ok(match (connections.get_mut(&key), self.flags, self.payload.as_ref()) {
             // SYN packet (step 1 of handshake)
             // Reply with SYN-ACK (step 2), no payload echo
-            (TcpState::Closed, TcpFlags::Syn, _) => {
+            (None, TcpFlags::Syn, _) => {
                 // seq num = random ISN, local ack num = remote seq num + 1
-                let isn = sys::random_u32()?;
-                connections.store_isn(key, isn);
-
                 let send_info = SendInfo {
-                    seq_num: isn,
+                    seq_num: sys::random_u32()?,
                     ack_num: self.seq_num.wrapping_add(1),
                     flags: TcpFlags::SynAck,
                     payload: None,
                 };
 
-                connections.record_pending(&key, send_info.clone(), 1);
+                connections.store_isn(key, send_info.clone());
 
                 Some(send_info)
             }
@@ -146,17 +183,19 @@ impl TcpHandler {
             // Duplicate SYN while awaiting the handshake ACK (client's retransmission timer resent
             // the SYN) -> resend the same SYN-ACK (which was likely lost) using the already-stored
             // ISN
-            (TcpState::SynReceived, TcpFlags::Syn, _)
-                if let Some(isn) = connections.pending_isn(&key) =>
-            {
+            (
+                Some(ConnState { tcp_state: TcpState::SynReceived, snd_una, pending, .. }),
+                TcpFlags::Syn,
+                _,
+            ) => {
                 let send_info = SendInfo {
-                    seq_num: isn,
+                    seq_num: *snd_una, // ISN
                     ack_num: self.seq_num.wrapping_add(1),
                     flags: TcpFlags::SynAck,
                     payload: None,
                 };
 
-                connections.record_pending(&key, send_info.clone(), 1);
+                pending.push(PendingSegment::new(send_info.clone(), 1));
 
                 Some(send_info)
             }
@@ -167,8 +206,8 @@ impl TcpHandler {
             // Out-of-window SYN is caught at the general "First, check sequence number," while
             // in-window SYN is caught at "Fourth, check the SYN bit," but both have the same
             // result.
-            (_, TcpFlags::Syn, _)
-                if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key) =>
+            (Some(&mut ConnState { tcp_state, snd_nxt, rcv_nxt, .. }), TcpFlags::Syn, _)
+                if tcp_state != TcpState::SynReceived =>
             {
                 Some(SendInfo {
                     seq_num: snd_nxt,
@@ -180,60 +219,83 @@ impl TcpHandler {
 
             // Handshake ACK (step 3) -> transition to ESTABLISHED, no reply needed
             // Remote ack num should be the previous local ISN + 1, which also becomes snd_una
-            (TcpState::SynReceived, TcpFlags::Ack, None)
-                if connections
-                    .pending_isn(&key)
-                    .is_some_and(|isn| isn.wrapping_add(1) == self.ack_num) =>
-            {
+            (
+                Some(ConnState {
+                    tcp_state: tcp_state @ TcpState::SynReceived,
+                    snd_nxt,
+                    rcv_nxt,
+                    snd_una,
+                    pending,
+                }),
+                TcpFlags::Ack,
+                None,
+            ) if snd_una.wrapping_add(1) == self.ack_num => {
                 // Set local rcv_nxt to remote seq_num
-                connections.establish(&key, self.seq_num);
-                connections.update_snd_una(&key, self.ack_num);
+                // SYN-ACK consumed one sequence number
+                *tcp_state = TcpState::Established;
+                *snd_nxt = self.ack_num;
+                *rcv_nxt = self.seq_num;
+                *snd_una = self.ack_num;
+                pending.clear();
+
                 None
             }
 
-            // ACK acknowledging data the server has not yet sent (ack_num is past snd_nxt) -> per
-            // RFC 9293, Section 3.10.7.4, drop the segment and reply with an ACK reflecting current
-            // state.
-            (TcpState::Established, TcpFlags::Ack, _)
-                if connections.ack_exceeds_snd_nxt(&key, self.ack_num)
-                    && let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key) =>
-            {
-                Some(SendInfo {
-                    seq_num: snd_nxt,
-                    ack_num: rcv_nxt,
-                    flags: TcpFlags::Ack,
-                    payload: None,
-                })
-            }
+            // ACK acknowledging data the server has not yet sent (ack_num is past snd_nxt) ->
+            // per RFC 9293, Section 3.10.7.4, drop the segment and reply with an ACK reflecting
+            // current state.
+            (
+                Some(&mut ConnState { tcp_state: TcpState::Established, snd_nxt, rcv_nxt, .. }),
+                TcpFlags::Ack,
+                _,
+            ) if snd_nxt.seq_lt(self.ack_num) => Some(SendInfo {
+                seq_num: snd_nxt,
+                ack_num: rcv_nxt,
+                flags: TcpFlags::Ack,
+                payload: None,
+            }),
 
             // Pure ACK (no payload) on an established connection (acknowledgment of data sent by
             // the server) -> advance snd_una, no reply
-            (TcpState::Established, TcpFlags::Ack, None) => {
-                connections.update_snd_una(&key, self.ack_num);
+            (
+                Some(ConnState {
+                    tcp_state: TcpState::Established, snd_nxt, snd_una, pending, ..
+                }),
+                TcpFlags::Ack,
+                None,
+            ) => {
+                self.incoming_ack_update(snd_una, *snd_nxt, pending);
                 None
             }
 
             // In-order data packet on an established connection -> send ACK, echo payload. Use
             // snd_nxt as seq_num and rcv_nxt + bytes received as ack_num, then advance both locally
             // by bytes received.
-            (TcpState::Established, TcpFlags::Ack, Some(payload))
-                if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key)
-                    && self.seq_num == rcv_nxt =>
-            {
+            (
+                Some(ConnState {
+                    tcp_state: TcpState::Established,
+                    snd_nxt,
+                    rcv_nxt,
+                    snd_una,
+                    pending,
+                }),
+                TcpFlags::Ack,
+                Some(payload),
+            ) if self.seq_num == *rcv_nxt => {
                 let payload_len = u32::from(self.payload_len()?);
 
-                connections.update_snd_una(&key, self.ack_num);
-                connections.advance_snd_nxt(&key, payload_len);
-                connections.advance_rcv_nxt(&key, payload_len);
-
                 let send_info = SendInfo {
-                    seq_num: snd_nxt,
+                    seq_num: *snd_nxt,
                     ack_num: rcv_nxt.wrapping_add(payload_len),
                     flags: TcpFlags::Ack,
                     payload: Some(Rc::clone(payload)),
                 };
 
-                connections.record_pending(&key, send_info.clone(), payload_len);
+                self.incoming_ack_update(snd_una, *snd_nxt, pending);
+                snd_nxt.advance_by(payload_len);
+                rcv_nxt.advance_by(payload_len);
+
+                pending.push(PendingSegment::new(send_info.clone(), payload_len));
 
                 Some(send_info)
             }
@@ -241,15 +303,22 @@ impl TcpHandler {
             // Out-of-order/duplicate data or out-of-order FIN-ACK on an established connection
             // -> duplicate ACK. ACK rcv_nxt so the client knows what the server expects next, but
             // don't echo data, start closing, or advance snd_nxt/rcv_nxt.
-            (TcpState::Established, TcpFlags::Ack | TcpFlags::FinAck, _)
-                if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key)
-                    && self.seq_num != rcv_nxt =>
-            {
-                connections.update_snd_una(&key, self.ack_num);
+            (
+                Some(ConnState {
+                    tcp_state: TcpState::Established,
+                    snd_nxt,
+                    rcv_nxt,
+                    snd_una,
+                    pending,
+                }),
+                TcpFlags::Ack | TcpFlags::FinAck,
+                _,
+            ) if self.seq_num != *rcv_nxt => {
+                self.incoming_ack_update(snd_una, *snd_nxt, pending);
 
                 Some(SendInfo {
-                    seq_num: snd_nxt,
-                    ack_num: rcv_nxt,
+                    seq_num: *snd_nxt,
+                    ack_num: *rcv_nxt,
                     flags: TcpFlags::Ack,
                     payload: None,
                 })
@@ -257,27 +326,35 @@ impl TcpHandler {
 
             // FIN-ACK (connection teardown) on an established connection, arriving in order ->
             // start closing to wait for client's final ACK, reply with FIN-ACK.
-            (TcpState::Established, TcpFlags::FinAck, _)
-                if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key)
-                    && self.seq_num == rcv_nxt =>
-            {
-                connections.start_last_ack(&key);
-                connections.advance_snd_nxt(&key, 1); // FIN consumes one sequence number
-
+            (
+                Some(ConnState {
+                    tcp_state: tcp_state @ TcpState::Established,
+                    snd_nxt,
+                    rcv_nxt,
+                    pending,
+                    ..
+                }),
+                TcpFlags::FinAck,
+                _,
+            ) if self.seq_num == *rcv_nxt => {
                 let send_info = SendInfo {
-                    seq_num: snd_nxt,
+                    seq_num: *snd_nxt,
                     ack_num: rcv_nxt.wrapping_add(1),
                     flags: TcpFlags::FinAck,
                     payload: None,
                 };
 
-                connections.record_pending(&key, send_info.clone(), 1);
+                *tcp_state = TcpState::LastAck;
+                snd_nxt.advance_by(1); // Our FIN consumes one sequence number
+                rcv_nxt.advance_by(1); // Peer's FIN consumes one sequence number
+
+                pending.push(PendingSegment::new(send_info.clone(), 1));
 
                 Some(send_info)
             }
 
             // Final ACK completing passive close (LAST-ACK) -> remove connection, no reply
-            (TcpState::LastAck, TcpFlags::Ack, None) => {
+            (Some(ConnState { tcp_state: TcpState::LastAck, .. }), TcpFlags::Ack, None) => {
                 connections.remove(&key);
                 None
             }
@@ -285,62 +362,90 @@ impl TcpHandler {
             // In-order data arriving in FIN-WAIT-1/FIN-WAIT-2, i.e. after we've sent our own FIN
             // but before the peer's FIN has arrived (half closed) -> ACK it, don't echo because we
             // have no send side left, and advance rcv_nxt
-            (TcpState::FinWait1 | TcpState::FinWait2, TcpFlags::Ack, Some(_))
-                if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key)
-                    && self.seq_num == rcv_nxt =>
-            {
+            (
+                Some(ConnState {
+                    tcp_state: TcpState::FinWait1 | TcpState::FinWait2,
+                    snd_nxt,
+                    rcv_nxt,
+                    snd_una,
+                    pending,
+                }),
+                TcpFlags::Ack,
+                Some(_),
+            ) if self.seq_num == *rcv_nxt => {
                 let payload_len = u32::from(self.payload_len()?);
 
-                connections.update_snd_una(&key, self.ack_num);
-                connections.advance_rcv_nxt(&key, payload_len);
-
-                Some(SendInfo {
-                    seq_num: snd_nxt,
+                let send_info = SendInfo {
+                    seq_num: *snd_nxt,
                     ack_num: rcv_nxt.wrapping_add(payload_len),
                     flags: TcpFlags::Ack,
                     payload: None,
-                })
+                };
+
+                self.incoming_ack_update(snd_una, *snd_nxt, pending);
+                rcv_nxt.advance_by(payload_len);
+
+                Some(send_info)
             }
 
             // FIN-WAIT-1, our FIN has been acknowledged (and nothing else) -> FIN-WAIT-2, no reply
-            (TcpState::FinWait1, TcpFlags::Ack, None)
-                if let Some((snd_nxt, _)) = connections.get_snd_rcv_nxt(&key)
-                    && self.ack_num == snd_nxt =>
-            {
-                connections.update_snd_una(&key, self.ack_num);
-                connections.start_fin_wait_2(&key);
+            (
+                Some(ConnState {
+                    tcp_state: tcp_state @ TcpState::FinWait1,
+                    snd_nxt,
+                    snd_una,
+                    pending,
+                    ..
+                }),
+                TcpFlags::Ack,
+                None,
+            ) if self.ack_num == *snd_nxt => {
+                self.incoming_ack_update(snd_una, *snd_nxt, pending);
+                *tcp_state = TcpState::FinWait2;
                 None
             }
 
             // FIN-WAIT-1, the remote peer's FIN arrives before ours is acknowledged (simultaneous
             // close) -> ACK it. If it also acknowledges our FIN, the connection is fully closed
             // (skipping FIN-WAIT-2/TIME-WAIT), otherwise move to CLOSING to await that ACK.
-            (TcpState::FinWait1, TcpFlags::FinAck, None)
-                if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key)
-                    && self.seq_num == rcv_nxt =>
-            {
-                connections.update_snd_una(&key, self.ack_num);
-
-                if self.ack_num == snd_nxt {
-                    connections.remove(&key);
-                } else {
-                    connections.start_simultaneous_closing(&key);
-                }
-
-                Some(SendInfo {
-                    seq_num: snd_nxt,
+            (
+                Some(ConnState {
+                    tcp_state: tcp_state @ TcpState::FinWait1,
+                    snd_nxt,
+                    rcv_nxt,
+                    snd_una,
+                    pending,
+                }),
+                TcpFlags::FinAck,
+                None,
+            ) if self.seq_num == *rcv_nxt => {
+                let send_info = SendInfo {
+                    seq_num: *snd_nxt,
                     ack_num: rcv_nxt.wrapping_add(1),
                     flags: TcpFlags::Ack,
                     payload: None,
-                })
+                };
+
+                self.incoming_ack_update(snd_una, *snd_nxt, pending);
+
+                if self.ack_num == *snd_nxt {
+                    connections.remove(&key);
+                } else {
+                    // Consume one sequence number in RCV.NXT for the peer's FIN
+                    rcv_nxt.advance_by(1);
+                    *tcp_state = TcpState::Closing;
+                }
+
+                Some(send_info)
             }
 
             // FIN-WAIT-2, the remote peer's FIN arrives, in order -> ACK it and finish closing (no
             // TIME-WAIT)
-            (TcpState::FinWait2, TcpFlags::FinAck, None)
-                if let Some((snd_nxt, rcv_nxt)) = connections.get_snd_rcv_nxt(&key)
-                    && self.seq_num == rcv_nxt =>
-            {
+            (
+                Some(&mut ConnState { tcp_state: TcpState::FinWait2, snd_nxt, rcv_nxt, .. }),
+                TcpFlags::FinAck,
+                None,
+            ) if self.seq_num == rcv_nxt => {
                 connections.remove(&key);
 
                 Some(SendInfo {
@@ -353,43 +458,65 @@ impl TcpHandler {
 
             // CLOSING (simultaneous close), the remote peer's ACK of our FIN arrives -> fully
             // closed, no reply
-            (TcpState::Closing, TcpFlags::Ack, None)
-                if let Some((snd_nxt, _)) = connections.get_snd_rcv_nxt(&key)
-                    && self.ack_num == snd_nxt =>
-            {
+            (
+                Some(&mut ConnState { tcp_state: TcpState::Closing, snd_nxt, .. }),
+                TcpFlags::Ack,
+                None,
+            ) if self.ack_num == snd_nxt => {
                 connections.remove(&key);
                 None
             }
 
-            // Any RST -> RFC 9293, Section 3.10.7.4 has three cases for when the RST bit is set,
-            // protecting against a blind reset attack (as described in RFC 5961, Section 3):
-            //
-            // Case 1: SEG.SEQ outside window           -> silently drop segment
-            // Case 2: SEG.SEQ == RCV.NXT               -> reset connection, no reply
-            // Case 3: SEG.SEQ in window but != RCV.NXT -> no connection reset, send challenge ACK
-            //
-            // A RST from an unknown (CLOSED) connection is also silently dropped (never RST a RST)
-            (_, TcpFlags::Rst | TcpFlags::RstAck, _) => {
-                connections
-                    .get_snd_rcv_nxt(&key)
-                    .and_then(|(snd_nxt, rcv_nxt)| {
-                        if self.seq_num == rcv_nxt {
-                            // Case 2
-                            connections.remove(&key);
-                            None
-                        } else {
-                            // Cases 1 and 3
-                            connections
-                                .seq_in_recv_window(&key, self.seq_num)
-                                .then_some(SendInfo {
-                                    seq_num: snd_nxt,
-                                    ack_num: rcv_nxt,
-                                    flags: TcpFlags::Ack,
-                                    payload: None,
-                                })
-                        }
+            // RST on synchronized connection -> RFC 9293, Section 3.10.7.4 has three cases for when
+            // the RST bit is set, protecting against a blind reset attack (as described in RFC
+            // 5961, Section 3):
+            //   Case 1: SEG.SEQ outside window           -> silently drop segment
+            //   Case 2: SEG.SEQ == RCV.NXT               -> reset connection, no reply
+            //   Case 3: SEG.SEQ in window but != RCV.NXT -> no connection reset, send challenge ACK
+            (
+                Some(&mut ConnState { tcp_state, snd_nxt, rcv_nxt, .. }),
+                TcpFlags::Rst | TcpFlags::RstAck,
+                _,
+            ) if tcp_state != TcpState::SynReceived => {
+                if self.seq_num == rcv_nxt {
+                    // Case 2
+                    connections.remove(&key);
+                    None
+                } else {
+                    // Check whether `seq_num` falls within the receive window [RCV.NXT, RCV.NXT +
+                    // RCV.WND). true -> Case 3, false -> Case 1.
+                    (rcv_nxt.seq_le(self.seq_num)
+                        && self
+                            .seq_num
+                            .seq_lt(rcv_nxt.wrapping_add(u32::from(Self::RCV_WND))))
+                    .then_some(SendInfo {
+                        seq_num: snd_nxt,
+                        ack_num: rcv_nxt,
+                        flags: TcpFlags::Ack,
+                        payload: None,
                     })
+                }
             }
+
+            // RST in SYN-RECEIVED -> "If this connection was initiated with a passive OPEN (i.e.,
+            // came from the LISTEN state), then return this connection to LISTEN state" (RFC 9293,
+            // Section 3.10.7.4).
+            //
+            // As a purely server-side implementation, all connections begin with passive OPEN. In
+            // the current implementation, "returning to LISTEN" is effectively just removing the
+            // connection.
+            #[expect(clippy::match_same_arms, reason = "Keep all RST arms next to each other")]
+            (
+                Some(ConnState { tcp_state: TcpState::SynReceived, .. }),
+                TcpFlags::Rst | TcpFlags::RstAck,
+                _,
+            ) => {
+                connections.remove(&key);
+                None
+            }
+
+            // RST from an unknown (CLOSED) connection -> silently drop segment (never RST a RST)
+            (None, TcpFlags::Rst | TcpFlags::RstAck, _) => None,
 
             // Something else unrecognized (other than RST caught above) -> RST so the peer fails
             // fast instead of hanging. Per RFC 9293, Section 3.10.7.1, any non-RST segment to a
@@ -405,6 +532,24 @@ impl TcpHandler {
         .map(|send_info| {
             Self::from_pairs_and_info(self.ip_pair.swapped(), self.ports.swapped(), send_info)
         }))
+    }
+
+    /// Checks if `self.ack_num` is a "new" acknowledgment, i.e. SND.UNA < SEG.ACK <= SND.NXT (RFC
+    /// 9293, Section 3.10.7.4). If so, advances SND.UNA to `self.ack_num` and removes segments in
+    /// `pending` that have been fully acknowledged. Does nothing for old/duplicate ACKs or ACKs for
+    /// data not yet sent.
+    fn incoming_ack_update(
+        &self,
+        snd_una: &mut u32,
+        snd_nxt: u32,
+        pending: &mut Vec<PendingSegment>,
+    ) {
+        if snd_una.seq_lt(self.ack_num) && self.ack_num.seq_le(snd_nxt) {
+            *snd_una = self.ack_num;
+
+            // ACKs are cumulative, so only keep pending segments not fully covered by SEG.ACK
+            pending.retain(|pending_seg| self.ack_num.seq_lt(pending_seg.end_seq));
+        }
     }
 
     /// Returns the number of bytes in the payload, or 0 if the payload is `None`.
@@ -435,9 +580,9 @@ impl Encode for TcpHandler {
         // Flags
         *buf.try_get_mut(13)? = self.flags.into();
 
-        // Window size for flow control, left at max for simplicity
+        // Window size for flow control
         buf.try_get_mut(14..16)?
-            .copy_from_slice(&u16::MAX.to_be_bytes());
+            .copy_from_slice(&Self::RCV_WND.to_be_bytes());
 
         // Checksum at bytes 16-17 calculated later with pseudo-header
 
@@ -503,8 +648,33 @@ mod tests {
         std::assert_matches,
     };
 
+    /// Fixed value to use as the ISN randomly chosen by the client.
+    pub(super) const CLIENT_ISN: u32 = 100;
+
+    /// Fixed value to use as the ISN randomly chosen by the server.
+    pub(super) const SERVER_ISN: u32 = 400;
+
+    /// Checks at compile time that `CLIENT_ISN` and `SERVER_ISN` are sufficiently far from each
+    /// other so they cannot be mixed up in tests.
+    const _: () = assert!(CLIENT_ISN.abs_diff(SERVER_ISN) >= 100);
+
+    /// The single phantom byte consumed by SYN.
+    pub(super) const SYN_BYTE: u32 = 1;
+
+    /// The single phantom byte consumed by FIN.
+    const FIN_BYTE: u32 = 1;
+
+    /// The number of bytes in the payload `"Hello"`.
+    const HELLO_LEN: u32 = 5;
+
+    /// The number of bytes in the payload `"Hi"`.
+    const HI_LEN: u32 = 2;
+
+    /// The number of bytes in the payload `"Hey"`.
+    const HEY_LEN: u32 = 3;
+
     /// Connection key shared by test modules.
-    const KEY: ConnKey =
+    pub(super) const KEY: ConnKey =
         ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
 
     /// Builds an incoming packet from the client (port 1234) to the server (port 80).
