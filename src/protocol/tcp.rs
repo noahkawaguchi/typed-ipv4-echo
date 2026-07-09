@@ -2,6 +2,7 @@ pub use connections::TcpConnections;
 
 mod connections;
 mod flags;
+mod seq_space;
 mod state;
 
 use {
@@ -15,6 +16,7 @@ use {
             tcp::{
                 connections::ConnKey,
                 flags::TcpFlags,
+                seq_space::{AdvanceBy as _, SeqLe as _, SeqLt as _},
                 state::{ConnState, PendingSegment, TcpState},
             },
         },
@@ -23,36 +25,6 @@ use {
     },
     std::{fmt, num::TryFromIntError, rc::Rc},
 };
-
-trait SeqLt {
-    /// Returns whether `self` precedes `rhs` in TCP sequence-number space, accounting for
-    /// wraparound (RFC 9293, Section 3.4).
-    fn seq_lt(self, rhs: Self) -> bool;
-}
-
-impl SeqLt for u32 {
-    fn seq_lt(self, rhs: Self) -> bool { self.wrapping_sub(rhs) > Self::MAX / 2 }
-}
-
-trait SeqLe {
-    /// Returns whether `self` precedes or equals `rhs` in TCP sequence-number space, accounting for
-    /// wraparound (RFC 9293, Section 3.4).
-    fn seq_le(self, rhs: Self) -> bool;
-}
-
-impl SeqLe for u32 {
-    fn seq_le(self, rhs: Self) -> bool { self == rhs || self.seq_lt(rhs) }
-}
-
-trait AdvanceBy {
-    /// Like `wrapping_add`, but mutates `self` in place to avoid potentially verbose and
-    /// error-prone reassignments.
-    fn advance_by(&mut self, rhs: Self);
-}
-
-impl AdvanceBy for u32 {
-    fn advance_by(&mut self, rhs: Self) { *self = self.wrapping_add(rhs) }
-}
 
 const TCP_HEADER_MIN_LEN: u8 = 20;
 

@@ -2,7 +2,8 @@ use {
     crate::{
         addr_pairs::{Ipv4AddrPair, PortPair},
         protocol::tcp::{
-            AdvanceBy as _, SendInfo, TcpFlags, TcpHandler,
+            SendInfo, TcpFlags, TcpHandler,
+            seq_space::AdvanceBy as _,
             state::{ConnState, PendingSegment, TcpState},
         },
     },
