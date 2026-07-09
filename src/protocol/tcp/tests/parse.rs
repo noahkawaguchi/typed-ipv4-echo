@@ -9,8 +9,8 @@ fn correctly_parses_valid_packet() -> Result<()> {
             0x00, 0x00, 0x00, 0x01,              // Sequence number: 1
             0x00, 0x00, 0x00, 0x02,              // Ack number: 2
             0x50, 0x12,                          // Data offset: 5 (20 bytes), Flags: SYN|ACK
-            0xFF, 0xFF,                          // Window size
-            0x72, 0xD4,                          // Checksum (valid for this segment and `IP_PAIR`)
+            0x72, 0x10,                          // Window size: 29,200
+            0x00, 0xC4,                          // Checksum (valid for this segment and `IP_PAIR`)
             0x00, 0x00,                          // Urgent pointer
             0x48, 0x65, 0x6C, 0x6C, 0x6F,        // Payload: "Hello"
         ];
@@ -22,7 +22,8 @@ fn correctly_parses_valid_packet() -> Result<()> {
     assert_eq!(handler.ack_num, 2);
     assert_eq!(handler.offset_bytes, 20);
     assert_eq!(handler.flags, TcpFlags::SynAck);
-    assert_eq!(handler.payload.as_deref(), Some(b"Hello".as_slice()));
+    assert_eq!(handler.window, 29_200);
+    assert_eq!(handler.payload.as_deref(), Some("Hello".as_ref()));
 
     Ok(())
 }

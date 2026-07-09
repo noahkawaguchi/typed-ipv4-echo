@@ -9,6 +9,7 @@ fn write_into_produces_correct_bytes_with_no_payload() -> Result<()> {
         ack_num: 0x0000_1001,
         offset_bytes: 20,
         flags: TcpFlags::SynAck,
+        window: 29_200,
         payload: None,
     };
 
@@ -23,7 +24,7 @@ fn write_into_produces_correct_bytes_with_no_payload() -> Result<()> {
     assert_eq!(&reply[28..32], &[0x00, 0x00, 0x10, 0x01]); // Ack num
     assert_eq!(reply[32], 0x50); // Data offset: 5 (20 bytes), reserved bits: 0
     assert_eq!(reply[33], 0x12); // Flags: SYN|ACK
-    assert_eq!(&reply[34..36], &[0xFF, 0xFF]); // Window size
+    assert_eq!(&reply[34..36], &[0x72, 0x10]); // Window size: 29,200
     assert_eq!(&reply[38..40], &[0x00, 0x00]); // Urgent pointer
 
     assert_eq!(pseudo_header_checksum(&reply[20..40], IP_PAIR, Protocol::Tcp)?, 0x0000);
@@ -40,6 +41,7 @@ fn write_into_produces_correct_bytes_with_payload() -> Result<()> {
         ack_num: 4102,
         offset_bytes: 20,
         flags: TcpFlags::Ack,
+        window: TcpHandler::RCV_WND,
         payload: Some(Rc::new(*b"Hello")),
     };
 

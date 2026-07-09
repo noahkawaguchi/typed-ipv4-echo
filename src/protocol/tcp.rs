@@ -53,6 +53,11 @@ pub struct TcpHandler {
     offset_bytes: u8,
 
     flags: TcpFlags,
+
+    /// "The number of data octets beginning with the one indicated in the acknowledgment field
+    /// that the sender of this segment is willing to accept."
+    window: u16,
+
     payload: Option<Rc<[u8]>>,
 }
 
@@ -107,6 +112,7 @@ impl TcpHandler {
             ]),
             offset_bytes,
             flags: tcp_header[13].try_into()?,
+            window: u16::from_be_bytes([tcp_header[14], tcp_header[15]]),
             payload: data
                 .get(offset_bytes.into()..)
                 // Use `None` for empty payloads to avoid allocating
@@ -119,7 +125,16 @@ impl TcpHandler {
         ports: PortPair,
         SendInfo { seq_num, ack_num, flags, payload }: SendInfo,
     ) -> Self {
-        Self { ip_pair, ports, seq_num, ack_num, offset_bytes: TCP_HEADER_MIN_LEN, flags, payload }
+        Self {
+            ip_pair,
+            ports,
+            seq_num,
+            ack_num,
+            offset_bytes: TCP_HEADER_MIN_LEN,
+            flags,
+            window: Self::RCV_WND,
+            payload,
+        }
     }
 
     /// Creates a TCP header and payload for replying to `self`, or returns `Ok(None)` for no reply.
@@ -556,7 +571,7 @@ impl Encode for TcpHandler {
 
         // Window size for flow control
         buf.try_get_mut(14..16)?
-            .copy_from_slice(&Self::RCV_WND.to_be_bytes());
+            .copy_from_slice(&self.window.to_be_bytes());
 
         // Checksum at bytes 16-17 calculated later with pseudo-header
 
@@ -664,6 +679,7 @@ mod tests {
             ack_num,
             offset_bytes: 20,
             flags,
+            window: TcpHandler::RCV_WND,
             payload: (!payload.is_empty()).then(|| Rc::from(payload)),
         }
     }
@@ -677,6 +693,7 @@ mod tests {
             ack_num,
             offset_bytes: 20,
             flags,
+            window: TcpHandler::RCV_WND,
             payload: (!payload.is_empty()).then(|| Rc::from(payload)),
         }
     }
