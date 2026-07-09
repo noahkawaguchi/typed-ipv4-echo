@@ -31,6 +31,69 @@ fn creates_valid_fin_ack() -> Result<()> {
 }
 
 #[test]
+fn fin_ack_acks_prior_data_and_advances_snd_una() -> Result<()> {
+    // FIN-ACK also includes "check the ACK field" processing just like a plain ACK (RFC 9293,
+    // Section 3.10.7.4). Its SEG.ACK can acknowledge data sent earlier in the connection, and that
+    // must still advance SND.UNA and prune `pending`.
+
+    let mut connections = TcpConnections::default();
+    connections.insert_established(); // snd_nxt=snd_una=SERVER_ISN+1, rcv_nxt=CLIENT_ISN+1
+    let mut cloned_state = connections.try_get()?.clone();
+
+    // Client sends data, server echoes "Hello" back
+    client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, b"Hello")
+        .create_reply(&mut connections)?;
+
+    cloned_state.snd_nxt.advance_by(HELLO_LEN);
+    cloned_state.rcv_nxt.advance_by(HELLO_LEN);
+    // snd_una left unchanged at this point because the "Hello" echo is unacked
+
+    assert_eq!(
+        {
+            let pending = &connections.try_get()?.pending;
+            (
+                pending.len(),
+                pending
+                    .first()
+                    .and_then(|seg| seg.send_info.payload.as_deref()),
+            )
+        },
+        (1, Some("Hello".as_ref())),
+        "Intermediate `pending` should consist of the unacked \"Hello\" echo"
+    );
+
+    // Client's FIN-ACK arrives in order (seq=CLIENT_ISN+6) and acks the echoed "Hello"
+    // (ack=SERVER_ISN+6)
+    client_packet(
+        CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+        SERVER_ISN + SYN_BYTE + HELLO_LEN,
+        TcpFlags::FinAck,
+        &[],
+    )
+    .create_reply(&mut connections)?;
+
+    cloned_state.tcp_state = TcpState::LastAck;
+    cloned_state.snd_una.advance_by(HELLO_LEN);
+    cloned_state.snd_nxt.advance_by(FIN_BYTE);
+    cloned_state.rcv_nxt.advance_by(FIN_BYTE);
+
+    let final_state = connections.try_get()?;
+
+    assert_eq!(
+        final_state, &cloned_state,
+        "SEG.ACK from FIN-ACK should advance SND.UNA just like a plain ACK"
+    );
+
+    assert_eq!(
+        (final_state.pending.len(), final_state.pending.first().map(|seg| seg.send_info.flags)),
+        (1, Some(TcpFlags::FinAck)),
+        "The fully acked \"Hello\" echo should be pruned from `pending`, leaving only the FIN-ACK"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn out_of_order_fin_ack_gets_duplicate_ack_without_closing() -> Result<()> {
     // A FIN-ACK arriving before data preceding it (seq_num != rcv_nxt, e.g. an earlier data segment
     // was lost) must not be processed yet. Doing so would signal "no more data" before the missing
