@@ -303,8 +303,8 @@ impl TcpHandler {
                     tcp_state: tcp_state @ TcpState::Established,
                     snd_nxt,
                     rcv_nxt,
+                    snd_una,
                     pending,
-                    ..
                 }),
                 TcpFlags::FinAck,
                 _,
@@ -315,6 +315,8 @@ impl TcpHandler {
                     flags: TcpFlags::FinAck,
                     payload: None,
                 };
+
+                self.incoming_ack_update(snd_una, *snd_nxt, pending);
 
                 *tcp_state = TcpState::LastAck;
                 snd_nxt.advance_by(1); // Our FIN consumes one sequence number
