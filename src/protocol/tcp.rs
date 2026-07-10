@@ -212,19 +212,17 @@ impl TcpHandler {
                     snd_nxt,
                     rcv_nxt,
                     snd_una,
+                    snd_wnd,
+                    snd_wl1,
+                    snd_wl2,
                     pending,
                 }),
                 TcpFlags::Ack,
                 None,
             ) if snd_una.wrapping_add(1) == self.ack_num => {
-                // Set local rcv_nxt to remote seq_num
-                // SYN-ACK consumed one sequence number
+                self.incoming_ack_update(snd_una, *snd_nxt, snd_wnd, snd_wl1, snd_wl2, pending);
                 *tcp_state = TcpState::Established;
-                *snd_nxt = self.ack_num;
                 *rcv_nxt = self.seq_num;
-                *snd_una = self.ack_num;
-                pending.clear();
-
                 None
             }
 
@@ -246,12 +244,19 @@ impl TcpHandler {
             // the server) -> advance snd_una, no reply
             (
                 Some(ConnState {
-                    tcp_state: TcpState::Established, snd_nxt, snd_una, pending, ..
+                    tcp_state: TcpState::Established,
+                    snd_nxt,
+                    snd_una,
+                    snd_wnd,
+                    snd_wl1,
+                    snd_wl2,
+                    pending,
+                    ..
                 }),
                 TcpFlags::Ack,
                 None,
             ) => {
-                self.incoming_ack_update(snd_una, *snd_nxt, pending);
+                self.incoming_ack_update(snd_una, *snd_nxt, snd_wnd, snd_wl1, snd_wl2, pending);
                 None
             }
 
@@ -264,6 +269,9 @@ impl TcpHandler {
                     snd_nxt,
                     rcv_nxt,
                     snd_una,
+                    snd_wnd,
+                    snd_wl1,
+                    snd_wl2,
                     pending,
                 }),
                 TcpFlags::Ack,
@@ -278,7 +286,7 @@ impl TcpHandler {
                     payload: Some(Rc::clone(payload)),
                 };
 
-                self.incoming_ack_update(snd_una, *snd_nxt, pending);
+                self.incoming_ack_update(snd_una, *snd_nxt, snd_wnd, snd_wl1, snd_wl2, pending);
                 snd_nxt.advance_by(payload_len);
                 rcv_nxt.advance_by(payload_len);
 
@@ -296,12 +304,15 @@ impl TcpHandler {
                     snd_nxt,
                     rcv_nxt,
                     snd_una,
+                    snd_wnd,
+                    snd_wl1,
+                    snd_wl2,
                     pending,
                 }),
                 TcpFlags::Ack | TcpFlags::FinAck,
                 _,
             ) if self.seq_num != *rcv_nxt => {
-                self.incoming_ack_update(snd_una, *snd_nxt, pending);
+                self.incoming_ack_update(snd_una, *snd_nxt, snd_wnd, snd_wl1, snd_wl2, pending);
 
                 Some(SendInfo {
                     seq_num: *snd_nxt,
@@ -319,6 +330,9 @@ impl TcpHandler {
                     snd_nxt,
                     rcv_nxt,
                     snd_una,
+                    snd_wnd,
+                    snd_wl1,
+                    snd_wl2,
                     pending,
                 }),
                 TcpFlags::FinAck,
@@ -331,7 +345,7 @@ impl TcpHandler {
                     payload: None,
                 };
 
-                self.incoming_ack_update(snd_una, *snd_nxt, pending);
+                self.incoming_ack_update(snd_una, *snd_nxt, snd_wnd, snd_wl1, snd_wl2, pending);
 
                 *tcp_state = TcpState::LastAck;
                 snd_nxt.advance_by(1); // Our FIN consumes one sequence number
@@ -357,6 +371,9 @@ impl TcpHandler {
                     snd_nxt,
                     rcv_nxt,
                     snd_una,
+                    snd_wnd,
+                    snd_wl1,
+                    snd_wl2,
                     pending,
                 }),
                 TcpFlags::Ack,
@@ -371,7 +388,7 @@ impl TcpHandler {
                     payload: None,
                 };
 
-                self.incoming_ack_update(snd_una, *snd_nxt, pending);
+                self.incoming_ack_update(snd_una, *snd_nxt, snd_wnd, snd_wl1, snd_wl2, pending);
                 rcv_nxt.advance_by(payload_len);
 
                 Some(send_info)
@@ -383,13 +400,16 @@ impl TcpHandler {
                     tcp_state: tcp_state @ TcpState::FinWait1,
                     snd_nxt,
                     snd_una,
+                    snd_wnd,
+                    snd_wl1,
+                    snd_wl2,
                     pending,
                     ..
                 }),
                 TcpFlags::Ack,
                 None,
             ) if self.ack_num == *snd_nxt => {
-                self.incoming_ack_update(snd_una, *snd_nxt, pending);
+                self.incoming_ack_update(snd_una, *snd_nxt, snd_wnd, snd_wl1, snd_wl2, pending);
                 *tcp_state = TcpState::FinWait2;
                 None
             }
@@ -403,6 +423,9 @@ impl TcpHandler {
                     snd_nxt,
                     rcv_nxt,
                     snd_una,
+                    snd_wnd,
+                    snd_wl1,
+                    snd_wl2,
                     pending,
                 }),
                 TcpFlags::FinAck,
@@ -415,7 +438,7 @@ impl TcpHandler {
                     payload: None,
                 };
 
-                self.incoming_ack_update(snd_una, *snd_nxt, pending);
+                self.incoming_ack_update(snd_una, *snd_nxt, snd_wnd, snd_wl1, snd_wl2, pending);
 
                 if self.ack_num == *snd_nxt {
                     connections.remove(&key);
@@ -523,21 +546,42 @@ impl TcpHandler {
         }))
     }
 
-    /// Checks if `self.ack_num` is a "new" acknowledgment, i.e. SND.UNA < SEG.ACK <= SND.NXT (RFC
-    /// 9293, Section 3.10.7.4). If so, advances SND.UNA to `self.ack_num` and removes segments in
-    /// `pending` that have been fully acknowledged. Does nothing for old/duplicate ACKs or ACKs for
-    /// data not yet sent.
+    /// Per RFC 9293, Section 3.10.7.4, "Fifth, check the ACK field," "ESTABLISHED STATE," processes
+    /// an incoming segment's acknowledgment against the send-side state, updating SND.WND, SND.WL1,
+    /// SND.WL2, SND.UNA, and the retransmission queue as necessary.
+    ///
+    /// Ignores ACKs that are old (before SND.UNA) or for data not yet sent (past SND.NXT). For
+    /// updates to SND.UNA and the retransmission queue, ignores duplicate ACKs
+    /// (SND.UNA == SEG.ACK).
     fn incoming_ack_update(
         &self,
         snd_una: &mut u32,
         snd_nxt: u32,
+        snd_wnd: &mut u16,
+        snd_wl1: &mut u32,
+        snd_wl2: &mut u32,
         pending: &mut Vec<PendingSegment>,
     ) {
-        if snd_una.seq_lt(self.ack_num) && self.ack_num.seq_le(snd_nxt) {
-            *snd_una = self.ack_num;
+        if snd_una.seq_le(self.ack_num) && self.ack_num.seq_le(snd_nxt) {
+            // Include duplicate ACKs: SND.UNA <= SEG.ACK <= SND.NXT
+            //     and
+            // Guard against an old/reordered segment clobbering the window with stale data:
+            //     SND.WL1 < SEG.SEQ or (SND.WL1 == SEG.SEQ and SND.WL2 <= SEG.ACK)
+            if snd_wl1.seq_lt(self.seq_num)
+                || (*snd_wl1 == self.seq_num && snd_wl2.seq_le(self.ack_num))
+            {
+                *snd_wnd = self.window;
+                *snd_wl1 = self.seq_num;
+                *snd_wl2 = self.ack_num;
+            }
 
-            // ACKs are cumulative, so only keep pending segments not fully covered by SEG.ACK
-            pending.retain(|pending_seg| self.ack_num.seq_lt(pending_seg.end_seq));
+            // Exclude duplicate ACKs: SND.UNA < SEG.ACK <= SND.NXT
+            if snd_una.seq_lt(self.ack_num) {
+                *snd_una = self.ack_num;
+
+                // ACKs are cumulative, so only keep pending segments not fully covered by SEG.ACK
+                pending.retain(|pending_seg| self.ack_num.seq_lt(pending_seg.end_seq));
+            }
         }
     }
 
@@ -633,6 +677,7 @@ mod tests {
     mod retransmit;
     mod stray_syn;
     mod terminate;
+    mod window;
     mod write;
 
     use {

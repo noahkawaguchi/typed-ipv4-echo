@@ -140,6 +140,9 @@ fn final_ack_after_fin_ack_removes_connection_and_returns_none() -> Result<()> {
         snd_nxt: SERVER_ISN + SYN_BYTE,
         rcv_nxt: CLIENT_ISN + SYN_BYTE,
         snd_una: SERVER_ISN + SYN_BYTE,
+        snd_wnd: TcpHandler::RCV_WND,
+        snd_wl1: CLIENT_ISN + SYN_BYTE,
+        snd_wl2: SERVER_ISN + SYN_BYTE,
         pending: Vec::new(),
     });
 

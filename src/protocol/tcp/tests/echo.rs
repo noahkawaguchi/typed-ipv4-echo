@@ -34,6 +34,9 @@ fn pure_ack_on_established_connection_returns_none() -> Result<()> {
         snd_nxt: SERVER_ISN + SYN_BYTE + HELLO_LEN,
         rcv_nxt: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
         snd_una: SERVER_ISN + SYN_BYTE,
+        snd_wnd: TcpHandler::RCV_WND,
+        snd_wl1: CLIENT_ISN + SYN_BYTE,
+        snd_wl2: SERVER_ISN + SYN_BYTE,
         pending: Vec::new(),
     });
 
@@ -324,6 +327,9 @@ fn wraparound_ack_for_unsent_data_is_still_rejected() -> Result<()> {
         snd_nxt: u32::MAX,
         rcv_nxt: CLIENT_ISN + SYN_BYTE,
         snd_una: u32::MAX,
+        snd_wnd: TcpHandler::RCV_WND,
+        snd_wl1: CLIENT_ISN + SYN_BYTE,
+        snd_wl2: u32::MAX,
         pending: Vec::new(),
     };
     connections.insert(initial_state.clone());

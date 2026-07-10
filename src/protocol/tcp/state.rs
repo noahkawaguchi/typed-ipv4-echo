@@ -4,19 +4,35 @@ use {
 };
 
 /// The state of a connection in the table, including its TCP state and other locally stored data.
-/// Definitions below from RFC 9293, Section 3.4.
+/// Definitions below from RFC 9293, sections annotated inline.
 #[cfg_attr(test, derive(Debug, Clone))]
 pub(super) struct ConnState {
     pub(super) tcp_state: TcpState,
 
-    /// "SND.NXT = next sequence number to be sent"
+    /// "SND.NXT = next sequence number to be sent" (3.4).
     pub(super) snd_nxt: u32,
 
-    /// "RCV.NXT = next sequence number expected on an incoming segment"
+    /// "RCV.NXT = next sequence number expected on an incoming segment" (3.4).
     pub(super) rcv_nxt: u32,
 
-    /// "SND.UNA = oldest unacknowledged sequence number"
+    /// "SND.UNA = oldest unacknowledged sequence number" (3.4).
     pub(super) snd_una: u32,
+
+    /// SND.WND or send window. "This represents the sequence numbers that the remote (receiving)
+    /// TCP endpoint is willing to receive" (4).
+    pub(super) snd_wnd: u16,
+
+    /// SND.WL1. "segment sequence number used for last window update" (3.3.1).
+    ///
+    /// Purely used for internal bookkeeping alongside `snd_wl2` to determine whether a window
+    /// value is fresh or stale/reordered.
+    pub(super) snd_wl1: u32,
+
+    /// SND.WL2. "segment acknowledgment number used for last window update" (3.3.1).
+    ///
+    /// Purely used for internal bookkeeping alongside `snd_wl1` to determine whether a window
+    /// value is fresh or stale/reordered.
+    pub(super) snd_wl2: u32,
 
     /// Unacked segments sent by the server, kept for retransmission purposes.
     pub(super) pending: Vec<PendingSegment>,
@@ -25,11 +41,13 @@ pub(super) struct ConnState {
 #[cfg(test)]
 impl PartialEq for ConnState {
     fn eq(&self, other: &Self) -> bool {
-        // All fields except `pending`
+        // Include all fields except `pending` (timing dependent) and `snd_wl1`/`snd_wl2` (internal
+        // freshness bookkeeping for `snd_wnd`)
         self.tcp_state == other.tcp_state
             && self.snd_nxt == other.snd_nxt
             && self.rcv_nxt == other.rcv_nxt
             && self.snd_una == other.snd_una
+            && self.snd_wnd == other.snd_wnd
     }
 }
 

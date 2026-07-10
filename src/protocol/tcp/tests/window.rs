@@ -1,0 +1,184 @@
+use super::*;
+
+#[test]
+fn new_ack_adopts_segments_window() -> Result<()> {
+    // A "new" ack (SND.UNA < SEG.ACK <= SND.NXT) should also update SND.WND to the incoming
+    // segment's advertised window (RFC 9293, Section 3.10.7.4), not just leave it at whatever it
+    // was seeded with at handshake time.
+
+    const NEW_WND: u16 = 12_345;
+
+    let mut connections = TcpConnections::default();
+    connections.insert_established();
+    assert_ne!(
+        connections.try_get()?.snd_wnd,
+        NEW_WND,
+        "The initial send window must differ from the updated one for the test to be valid"
+    );
+
+    // "Hello" data, ack=SERVER_ISN+1 == current SND.UNA, so not yet a "new" ack -> SND.NXT advances
+    // to SERVER_ISN+6, but SND.WND stays untouched
+    client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, b"Hello")
+        .create_reply(&mut connections)?;
+
+    // Pure ACK of that echo, ack=SERVER_ISN+6 (now "new"), advertising a distinct window
+    let ack_with_new_window = TcpHandler {
+        ip_pair: Ipv4AddrPair { src: KEY.client_ip, dst: KEY.server_ip },
+        ports: PortPair { src: KEY.client_port, dst: KEY.server_port },
+        seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+        ack_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
+        offset_bytes: 20,
+        flags: TcpFlags::Ack,
+        window: NEW_WND,
+        payload: None,
+    };
+
+    assert_eq!(ack_with_new_window.create_reply(&mut connections)?, None);
+
+    assert_eq!(
+        connections.try_get()?.snd_wnd,
+        NEW_WND,
+        "SND.WND should adopt the new segment's advertised window"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn stale_segment_does_not_clobber_send_window() -> Result<()> {
+    // A retransmitted/out-of-order segment can still carry a "new" ack_num (SND.UNA < SEG.ACK <=
+    // SND.NXT is about cumulative acknowledgment, not about the segment being in order), but per
+    // RFC 9293, Section 3.10.7.4, SND.WND must only adopt a segment's window when SND.WL1 < SEG.SEQ
+    // or (SND.WL1 == SEG.SEQ and SND.WL2 <= SEG.ACK), preventing this kind of old segment from
+    // clobbering it with stale data.
+
+    let mut connections = TcpConnections::default();
+    connections.insert(ConnState {
+        tcp_state: TcpState::Established,
+        // Room for a "new" ACK with SND.UNA behind SND.NXT as if "Hello" was already echoed
+        snd_una: SERVER_ISN + SYN_BYTE,
+        snd_nxt: SERVER_ISN + SYN_BYTE + HELLO_LEN,
+        // RCV.NXT past the duplicate segment's seq+len, so it's treated as out-of-order/duplicate
+        rcv_nxt: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+        // As if last legitimately updated by a segment fresher than the duplicate below
+        snd_wnd: 1_000,
+        snd_wl1: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+        snd_wl2: SERVER_ISN + SYN_BYTE,
+        pending: Vec::new(),
+    });
+
+    // Duplicate of the original "Hello" segment (stale seq_num), but its ack_num happens to be
+    // exactly SND.NXT, satisfying the "new ACK" check on its own
+    let duplicate_with_different_window = TcpHandler {
+        ip_pair: Ipv4AddrPair { src: KEY.client_ip, dst: KEY.server_ip },
+        ports: PortPair { src: KEY.client_port, dst: KEY.server_port },
+        seq_num: CLIENT_ISN + SYN_BYTE,
+        ack_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
+        offset_bytes: 20,
+        flags: TcpFlags::Ack,
+        window: 65_000,
+        payload: None,
+    };
+
+    duplicate_with_different_window.create_reply(&mut connections)?;
+
+    assert_eq!(
+        connections.try_get()?.snd_wnd,
+        1_000,
+        "SND.WND must not adopt the stale segment's window despite its ack_num being new"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn same_seq_but_fresher_ack_updates_window() -> Result<()> {
+    // The window update condition is "SND.WL1 < SEG.SEQ or (SND.WL1 = SEG.SEQ and SND.WL2 =<
+    // SEG.ACK)" (RFC 9293, Section 3.10.7.4). The equal-SEQ branch matters for pure ACKs, which
+    // don't consume sequence numbers. Two of them in a row can carry the exact same SEG.SEQ while
+    // still acknowledging more data than the last (e.g. a keep-alive style followup ack), and the
+    // second one must still be allowed to update SND.WND.
+
+    let mut connections = TcpConnections::default();
+    connections.insert_established();
+
+    // Two data packets build up room for cumulative ACKs without ever giving the client's own
+    // seq_num a chance to move past CLIENT_ISN+8 again
+    client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, b"Hello")
+        .create_reply(&mut connections)?;
+    client_packet(CLIENT_ISN + SYN_BYTE + HELLO_LEN, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, b"Hi")
+        .create_reply(&mut connections)?;
+
+    // First pure ACK with seq=CLIENT_ISN+8 is fresher than the handshake's SND.WL1=CLIENT_ISN+1, so
+    // this legitimately sets SND.WL1=CLIENT_ISN+8, SND.WL2=SERVER_ISN+6
+    let first_pure_ack = TcpHandler {
+        ip_pair: Ipv4AddrPair { src: KEY.client_ip, dst: KEY.server_ip },
+        ports: PortPair { src: KEY.client_port, dst: KEY.server_port },
+        seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
+        ack_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
+        offset_bytes: 20,
+        flags: TcpFlags::Ack,
+        window: 1_000,
+        payload: None,
+    };
+    first_pure_ack.create_reply(&mut connections)?;
+    assert_eq!(connections.try_get()?.snd_wnd, 1_000, "Sanity check on the first update");
+
+    // Second pure ACK with identical seq_num (no new data sent), but a strictly higher ack_num and
+    // a different window
+    let second_pure_ack = TcpHandler {
+        ack_num: SERVER_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
+        window: 2_000,
+        ..first_pure_ack
+    };
+    second_pure_ack.create_reply(&mut connections)?;
+
+    assert_eq!(
+        connections.try_get()?.snd_wnd,
+        2_000,
+        "SND.WND should still update when SEQ repeats but ACK is fresher"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn duplicate_ack_still_updates_window() -> Result<()> {
+    // RFC 9293, Section 3.10.7.4 gives two different conditions: SND.UNA only advances on a
+    // "new" ACK (SND.UNA < SEG.ACK <= SND.NXT), but the send window update uses the non-strict
+    // SND.UNA <= SEG.ACK <= SND.NXT. A duplicate ACK (SEG.ACK == SND.UNA) must still be allowed
+    // to update SND.WND, such as a window-opening segment that doesn't acknowledge any new data.
+
+    let mut connections = TcpConnections::default();
+    connections.insert_established(); // SND.UNA=SND.NXT=SERVER_ISN+1, RCV.NXT=CLIENT_ISN+1
+
+    // "Hello" data, ack=SERVER_ISN+1 == current SND.UNA (not a "new" ACK) -> RCV.NXT advances to
+    // CLIENT_ISN+6, SND.NXT advances to SERVER_ISN+6, SND.UNA stays at SERVER_ISN+1
+    client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, b"Hello")
+        .create_reply(&mut connections)?;
+
+    // Duplicate ACK where ack_num=SERVER_ISN+1 still equals SND.UNA (nothing new acknowledged), but
+    // seq_num=CLIENT_ISN+6 is fresher than the stored SND.WL1=CLIENT_ISN+1, so this must still
+    // update SND.WND
+    let duplicate_ack_with_new_window = TcpHandler {
+        ip_pair: Ipv4AddrPair { src: KEY.client_ip, dst: KEY.server_ip },
+        ports: PortPair { src: KEY.client_port, dst: KEY.server_port },
+        seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+        ack_num: SERVER_ISN + SYN_BYTE,
+        offset_bytes: 20,
+        flags: TcpFlags::Ack,
+        window: 777,
+        payload: None,
+    };
+
+    assert_eq!(duplicate_ack_with_new_window.create_reply(&mut connections)?, None);
+
+    assert_eq!(
+        connections.try_get()?.snd_wnd,
+        777,
+        "SND.WND should update on a duplicate ack (SEG.ACK == SND.UNA) as long as SND.WL1 and \
+         SND.WL2 allow it"
+    );
+
+    Ok(())
+}
