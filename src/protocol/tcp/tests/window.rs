@@ -1,7 +1,21 @@
 use super::*;
 
+/// Creates a pure ACK packet from the client with a custom window size.
+fn custom_window_client_packet(seq_num: u32, ack_num: u32, window: u16) -> TcpHandler {
+    TcpHandler {
+        ip_pair: Ipv4AddrPair { src: KEY.client_ip, dst: KEY.server_ip },
+        ports: PortPair { src: KEY.client_port, dst: KEY.server_port },
+        seq_num,
+        ack_num,
+        offset_bytes: 20,
+        flags: TcpFlags::Ack,
+        window,
+        payload: None,
+    }
+}
+
 #[test]
-fn new_ack_adopts_segments_window() -> Result<()> {
+fn new_ack_adopts_window_from_segment() -> Result<()> {
     // A "new" ack (SND.UNA < SEG.ACK <= SND.NXT) should also update SND.WND to the incoming
     // segment's advertised window (RFC 9293, Section 3.10.7.4), not just leave it at whatever it
     // was seeded with at handshake time.
@@ -21,19 +35,16 @@ fn new_ack_adopts_segments_window() -> Result<()> {
     client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, b"Hello")
         .create_reply(&mut connections)?;
 
-    // Pure ACK of that echo, ack=SERVER_ISN+6 (now "new"), advertising a distinct window
-    let ack_with_new_window = TcpHandler {
-        ip_pair: Ipv4AddrPair { src: KEY.client_ip, dst: KEY.server_ip },
-        ports: PortPair { src: KEY.client_port, dst: KEY.server_port },
-        seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-        ack_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
-        offset_bytes: 20,
-        flags: TcpFlags::Ack,
-        window: NEW_WND,
-        payload: None,
-    };
-
-    assert_eq!(ack_with_new_window.create_reply(&mut connections)?, None);
+    // Pure ACK of that echo, ack=SERVER_ISN+6 (now "new"), advertising a new window
+    assert_eq!(
+        custom_window_client_packet(
+            CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            SERVER_ISN + SYN_BYTE + HELLO_LEN,
+            NEW_WND,
+        )
+        .create_reply(&mut connections)?,
+        None
+    );
 
     assert_eq!(
         connections.try_get()?.snd_wnd,
@@ -67,25 +78,22 @@ fn stale_segment_does_not_clobber_send_window() -> Result<()> {
         pending: Vec::new(),
     });
 
-    // Duplicate of the original "Hello" segment (stale seq_num), but its ack_num happens to be
-    // exactly SND.NXT, satisfying the "new ACK" check on its own
-    let duplicate_with_different_window = TcpHandler {
-        ip_pair: Ipv4AddrPair { src: KEY.client_ip, dst: KEY.server_ip },
-        ports: PortPair { src: KEY.client_port, dst: KEY.server_port },
-        seq_num: CLIENT_ISN + SYN_BYTE,
-        ack_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
-        offset_bytes: 20,
-        flags: TcpFlags::Ack,
-        window: 65_000,
-        payload: None,
-    };
-
-    duplicate_with_different_window.create_reply(&mut connections)?;
+    // Duplicate of the original "Hello" segment (stale seq_num), but its ack_num is exactly
+    // SND.NXT, satisfying the "new ACK" check on its own, and it has a different window
+    assert_eq!(
+        custom_window_client_packet(
+            CLIENT_ISN + SYN_BYTE,
+            SERVER_ISN + SYN_BYTE + HELLO_LEN,
+            65_000
+        )
+        .create_reply(&mut connections)?,
+        None
+    );
 
     assert_eq!(
         connections.try_get()?.snd_wnd,
         1_000,
-        "SND.WND must not adopt the stale segment's window despite its ack_num being new"
+        "SND.WND must not adopt the stale segment's window despite SEG.ACK being new"
     );
 
     Ok(())
@@ -111,27 +119,29 @@ fn same_seq_but_fresher_ack_updates_window() -> Result<()> {
 
     // First pure ACK with seq=CLIENT_ISN+8 is fresher than the handshake's SND.WL1=CLIENT_ISN+1, so
     // this legitimately sets SND.WL1=CLIENT_ISN+8, SND.WL2=SERVER_ISN+6
-    let first_pure_ack = TcpHandler {
-        ip_pair: Ipv4AddrPair { src: KEY.client_ip, dst: KEY.server_ip },
-        ports: PortPair { src: KEY.client_port, dst: KEY.server_port },
-        seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
-        ack_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
-        offset_bytes: 20,
-        flags: TcpFlags::Ack,
-        window: 1_000,
-        payload: None,
-    };
-    first_pure_ack.create_reply(&mut connections)?;
+    assert_eq!(
+        custom_window_client_packet(
+            CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
+            SERVER_ISN + SYN_BYTE + HELLO_LEN,
+            1_000,
+        )
+        .create_reply(&mut connections)?,
+        None
+    );
+
     assert_eq!(connections.try_get()?.snd_wnd, 1_000, "Sanity check on the first update");
 
     // Second pure ACK with identical seq_num (no new data sent), but a strictly higher ack_num and
     // a different window
-    let second_pure_ack = TcpHandler {
-        ack_num: SERVER_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
-        window: 2_000,
-        ..first_pure_ack
-    };
-    second_pure_ack.create_reply(&mut connections)?;
+    assert_eq!(
+        custom_window_client_packet(
+            CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
+            SERVER_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
+            2_000,
+        )
+        .create_reply(&mut connections)?,
+        None
+    );
 
     assert_eq!(
         connections.try_get()?.snd_wnd,
@@ -159,19 +169,12 @@ fn duplicate_ack_still_updates_window() -> Result<()> {
 
     // Duplicate ACK where ack_num=SERVER_ISN+1 still equals SND.UNA (nothing new acknowledged), but
     // seq_num=CLIENT_ISN+6 is fresher than the stored SND.WL1=CLIENT_ISN+1, so this must still
-    // update SND.WND
-    let duplicate_ack_with_new_window = TcpHandler {
-        ip_pair: Ipv4AddrPair { src: KEY.client_ip, dst: KEY.server_ip },
-        ports: PortPair { src: KEY.client_port, dst: KEY.server_port },
-        seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-        ack_num: SERVER_ISN + SYN_BYTE,
-        offset_bytes: 20,
-        flags: TcpFlags::Ack,
-        window: 777,
-        payload: None,
-    };
-
-    assert_eq!(duplicate_ack_with_new_window.create_reply(&mut connections)?, None);
+    // update SND.WND to the new window
+    assert_eq!(
+        custom_window_client_packet(CLIENT_ISN + SYN_BYTE + HELLO_LEN, SERVER_ISN + SYN_BYTE, 777)
+            .create_reply(&mut connections)?,
+        None
+    );
 
     assert_eq!(
         connections.try_get()?.snd_wnd,
