@@ -40,14 +40,27 @@ pub(super) struct ConnState {
 
 #[cfg(test)]
 impl PartialEq for ConnState {
-    fn eq(&self, other: &Self) -> bool {
-        // Include all fields except `pending` (timing dependent) and `snd_wl1`/`snd_wl2` (internal
-        // freshness bookkeeping for `snd_wnd`)
-        self.tcp_state == other.tcp_state
-            && self.snd_nxt == other.snd_nxt
-            && self.rcv_nxt == other.rcv_nxt
-            && self.snd_una == other.snd_una
-            && self.snd_wnd == other.snd_wnd
+    fn eq(
+        &self,
+        &Self {
+            // Include all fields except `snd_wl1`/`snd_wl2` (internal freshness bookkeeping for
+            // `snd_wnd`) and `pending` (timing dependent), explicitly destructured to catch any
+            // fields added later
+            tcp_state,
+            snd_nxt,
+            rcv_nxt,
+            snd_una,
+            snd_wnd,
+            snd_wl1: _,
+            snd_wl2: _,
+            pending: _,
+        }: &Self,
+    ) -> bool {
+        self.tcp_state == tcp_state
+            && self.snd_nxt == snd_nxt
+            && self.rcv_nxt == rcv_nxt
+            && self.snd_una == snd_una
+            && self.snd_wnd == snd_wnd
     }
 }
 
