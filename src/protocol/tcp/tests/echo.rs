@@ -28,19 +28,14 @@ fn pure_ack_on_established_connection_returns_none() -> Result<()> {
     // the connection stays open for more data.
 
     let mut connections = TcpConnections::default();
-    // State after receiving and echoing "Hello"
-    connections.insert(ConnState {
-        tcp_state: TcpState::Established,
-        snd_nxt: SERVER_ISN + SYN_BYTE + HELLO_LEN,
-        rcv_nxt: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-        snd_una: SERVER_ISN + SYN_BYTE,
-        snd_wnd: TcpHandler::RCV_WND,
-        snd_wl1: CLIENT_ISN + SYN_BYTE,
-        snd_wl2: SERVER_ISN + SYN_BYTE,
-        pending: Vec::new(),
-    });
+    connections.insert_established();
 
     let mut cloned_state = connections.try_get()?.clone();
+    cloned_state.snd_nxt.advance_by(HELLO_LEN);
+    cloned_state.rcv_nxt.advance_by(HELLO_LEN);
+
+    client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, b"Hello")
+        .create_reply(&mut connections)?;
 
     // ack=SERVER_ISN + 5 bytes echoed + 1
     assert_eq!(
