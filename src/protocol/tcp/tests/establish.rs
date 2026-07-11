@@ -72,6 +72,7 @@ fn handshake_ack_establishes_connection_and_returns_none() -> Result<()> {
     cloned_state.tcp_state = TcpState::Established;
     cloned_state.rcv_nxt = CLIENT_ISN + SYN_BYTE;
     cloned_state.snd_una.advance_by(SYN_BYTE);
+    cloned_state.snd_wnd = TcpHandler::RCV_WND;
 
     assert_eq!(connections.try_get()?, &cloned_state);
 

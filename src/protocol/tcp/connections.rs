@@ -54,6 +54,11 @@ impl TcpConnections {
                 rcv_nxt: 0,
                 // The SYN-ACK we're sending is unacknowledged (this is the ISN)
                 snd_una: send_info.seq_num,
+                // Window-related values are set at connection establishment once the peer's window
+                // is actually known
+                snd_wnd: 0,
+                snd_wl1: 0,
+                snd_wl2: 0,
                 pending: vec![PendingSegment::new(send_info, 1)],
             },
         );
@@ -212,6 +217,9 @@ impl TcpConnections {
                 snd_nxt: SERVER_ISN + SYN_BYTE,
                 rcv_nxt: CLIENT_ISN + SYN_BYTE,
                 snd_una: SERVER_ISN + SYN_BYTE,
+                snd_wnd: TcpHandler::RCV_WND,
+                snd_wl1: CLIENT_ISN + SYN_BYTE,
+                snd_wl2: SERVER_ISN + SYN_BYTE,
                 pending: Vec::new(),
             },
         );

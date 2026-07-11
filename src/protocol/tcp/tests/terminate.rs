@@ -135,13 +135,17 @@ fn final_ack_after_fin_ack_removes_connection_and_returns_none() -> Result<()> {
     // so the client can close cleanly from TIME-WAIT.
 
     let mut connections = TcpConnections::default();
-    connections.insert(ConnState {
-        tcp_state: TcpState::LastAck,
-        snd_nxt: SERVER_ISN + SYN_BYTE,
-        rcv_nxt: CLIENT_ISN + SYN_BYTE,
-        snd_una: SERVER_ISN + SYN_BYTE,
-        pending: Vec::new(),
-    });
+    connections.insert_established();
+    let mut cloned_state = connections.try_get()?.clone();
+
+    client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::FinAck, &[])
+        .create_reply(&mut connections)?;
+
+    cloned_state.tcp_state = TcpState::LastAck;
+    cloned_state.snd_nxt.advance_by(1);
+    cloned_state.rcv_nxt.advance_by(1);
+
+    assert_eq!(connections.try_get()?, &cloned_state);
 
     // ack=SERVER_ISN+2 (our FIN-ACK seq + 1)
     assert_eq!(
