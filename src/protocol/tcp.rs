@@ -76,7 +76,7 @@ impl TcpHandler {
     /// receive... segments overlapping the range RCV.NXT to RCV.NXT + RCV.WND - 1 carry acceptable
     /// data or control" (RFC 9293, Section 4).
     ///
-    /// Currently left at max for simplicity.
+    /// Left at max because as an echo server, there's no buffer accumulating data.
     const RCV_WND: u16 = u16::MAX;
 
     /// Parses `data` as a TCP header and payload.
