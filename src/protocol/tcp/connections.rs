@@ -209,21 +209,8 @@ impl TcpConnections {
     /// `SERVER_ISN`.
     #[cfg(test)]
     pub(super) fn insert_established(&mut self) {
-        use crate::protocol::tcp::tests::{CLIENT_ISN, KEY, SERVER_ISN, SYN_BYTE};
+        use crate::protocol::tcp::tests::KEY;
 
-        self.table.insert(
-            KEY,
-            ConnState {
-                tcp_state: TcpState::Established,
-                snd_nxt: SERVER_ISN + SYN_BYTE,
-                rcv_nxt: CLIENT_ISN + SYN_BYTE,
-                snd_una: SERVER_ISN + SYN_BYTE,
-                snd_wnd: TcpHandler::RCV_WND,
-                snd_wl1: CLIENT_ISN + SYN_BYTE,
-                snd_wl2: SERVER_ISN + SYN_BYTE,
-                pending: Vec::new(),
-                send_buffer: VecDeque::new(),
-            },
-        );
+        self.table.insert(KEY, ConnState::default());
     }
 }

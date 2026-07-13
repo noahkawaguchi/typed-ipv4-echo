@@ -1,4 +1,4 @@
-use {super::*, std::collections::VecDeque};
+use super::*;
 
 #[test]
 fn creates_valid_data_echo() -> Result<()> {
@@ -317,17 +317,8 @@ fn wraparound_ack_for_unsent_data_is_still_rejected() -> Result<()> {
     // `u32::MAX` is false and let it through.
 
     let mut connections = TcpConnections::default();
-    let initial_state = ConnState {
-        tcp_state: TcpState::Established,
-        snd_nxt: u32::MAX,
-        rcv_nxt: CLIENT_ISN + SYN_BYTE,
-        snd_una: u32::MAX,
-        snd_wnd: TcpHandler::RCV_WND,
-        snd_wl1: CLIENT_ISN + SYN_BYTE,
-        snd_wl2: u32::MAX,
-        pending: Vec::new(),
-        send_buffer: VecDeque::new(),
-    };
+    let initial_state =
+        ConnState { snd_nxt: u32::MAX, snd_una: u32::MAX, snd_wl2: u32::MAX, ..Default::default() };
     connections.insert(initial_state.clone());
 
     // ack=0 wraps 1 past SND.NXT=`u32::MAX`

@@ -1,20 +1,4 @@
-use {super::*, std::collections::VecDeque};
-
-/// Builds an ESTABLISHED connection with a custom `snd_wnd`, otherwise matching
-/// `TcpConnections::insert_established`.
-fn established_with_window(snd_wnd: u16) -> ConnState {
-    ConnState {
-        tcp_state: TcpState::Established,
-        snd_nxt: SERVER_ISN + SYN_BYTE,
-        rcv_nxt: CLIENT_ISN + SYN_BYTE,
-        snd_una: SERVER_ISN + SYN_BYTE,
-        snd_wnd,
-        snd_wl1: CLIENT_ISN + SYN_BYTE,
-        snd_wl2: SERVER_ISN + SYN_BYTE,
-        pending: Vec::new(),
-        send_buffer: VecDeque::new(),
-    }
-}
+use super::*;
 
 /// Builds a data packet from the client with a custom advertised window (`client_packet` always
 /// hardcodes `TcpHandler::RCV_WND`, which would clobber the small windows these tests rely on).
@@ -39,8 +23,8 @@ fn client_data_packet_with_window(
 #[test]
 fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result<()> {
     let mut connections = TcpConnections::default();
-    connections.insert(established_with_window(3));
-    let mut cloned_state = connections.try_get()?.clone();
+    let mut expected_state = ConnState { snd_wnd: 3, ..Default::default() };
+    connections.insert(expected_state.clone());
 
     let reply =
         client_data_packet_with_window(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, 3, b"Hello")
@@ -57,13 +41,13 @@ fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result<()> {
         "Only the first 3 bytes fit in the advertised window of 3"
     );
 
-    cloned_state.snd_nxt.advance_by(3);
-    cloned_state.rcv_nxt.advance_by(HELLO_LEN);
-    cloned_state.send_buffer.extend(b"lo");
+    expected_state.snd_nxt.advance_by(3);
+    expected_state.rcv_nxt.advance_by(HELLO_LEN);
+    expected_state.send_buffer.extend(b"lo");
 
     assert_eq!(
         connections.try_get()?,
-        &cloned_state,
+        &expected_state,
         "SND.NXT should advance only by what was sent, and the rest should be buffered"
     );
 
@@ -73,18 +57,18 @@ fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result<()> {
 #[test]
 fn window_opening_via_ack_drains_buffered_remainder() -> Result<()> {
     let mut connections = TcpConnections::default();
-    connections.insert(established_with_window(3));
-    let mut cloned_state = connections.try_get()?.clone();
+    let mut expected_state = ConnState { snd_wnd: 3, ..Default::default() };
+    connections.insert(expected_state.clone());
 
     // "Hello" (5 bytes), window only allows 3 -> "Hel" sent, "lo" buffered
     client_data_packet_with_window(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, 3, b"Hello")
         .create_reply(&mut connections)?;
 
-    cloned_state.snd_nxt.advance_by(3);
-    cloned_state.rcv_nxt.advance_by(HELLO_LEN);
-    cloned_state.send_buffer.extend(b"lo");
+    expected_state.snd_nxt.advance_by(3);
+    expected_state.rcv_nxt.advance_by(HELLO_LEN);
+    expected_state.send_buffer.extend(b"lo");
 
-    assert_eq!(connections.try_get()?, &cloned_state, "State confirmation before window update");
+    assert_eq!(connections.try_get()?, &expected_state, "State confirmation before window update");
 
     // Client acks the 3 sent bytes and advertises a bigger window -> should drain "lo"
     let reply = custom_window_client_packet(
@@ -105,14 +89,14 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result<()> {
         "The buffered remainder should drain once the window opens, piggybacked on the next ACK"
     );
 
-    cloned_state.snd_una.advance_by(3);
-    cloned_state.snd_wnd = 10;
-    cloned_state.snd_nxt.advance_by(2);
-    cloned_state.send_buffer.clear();
+    expected_state.snd_una.advance_by(3);
+    expected_state.snd_wnd = 10;
+    expected_state.snd_nxt.advance_by(2);
+    expected_state.send_buffer.clear();
 
     assert_eq!(
         connections.try_get()?,
-        &cloned_state,
+        &expected_state,
         "All bytes should have fully drained from the buffer"
     );
 
@@ -122,8 +106,8 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result<()> {
 #[test]
 fn zero_window_buffers_entire_payload_and_gets_bare_ack() -> Result<()> {
     let mut connections = TcpConnections::default();
-    connections.insert(established_with_window(0));
-    let mut cloned_state = connections.try_get()?.clone();
+    let mut expected_state = ConnState { snd_wnd: 0, ..Default::default() };
+    connections.insert(expected_state.clone());
 
     let reply =
         client_data_packet_with_window(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, 0, b"Hello")
@@ -140,12 +124,12 @@ fn zero_window_buffers_entire_payload_and_gets_bare_ack() -> Result<()> {
         "A closed window still gets a bare ACK for the receipt, just no echoed payload"
     );
 
-    cloned_state.rcv_nxt.advance_by(HELLO_LEN);
-    cloned_state.send_buffer.extend(b"Hello");
+    expected_state.rcv_nxt.advance_by(HELLO_LEN);
+    expected_state.send_buffer.extend(b"Hello");
 
     assert_eq!(
         connections.try_get()?,
-        &cloned_state,
+        &expected_state,
         "Since nothing was sent, SND.NXT shouldn't advance, and the whole payload should be \
          buffered"
     );
