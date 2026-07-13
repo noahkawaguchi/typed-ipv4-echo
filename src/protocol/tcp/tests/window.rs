@@ -8,8 +8,7 @@ fn new_ack_adopts_window_from_segment() -> Result<()> {
 
     const NEW_WND: u16 = 12_345;
 
-    let mut connections = TcpConnections::default();
-    connections.insert_established();
+    let mut connections = TcpConnections::after_handshake();
     let mut cloned_state = connections.try_get()?.clone();
 
     assert_ne!(
@@ -58,8 +57,7 @@ fn stale_segment_does_not_clobber_send_window() -> Result<()> {
     // or (SND.WL1 == SEG.SEQ and SND.WL2 <= SEG.ACK), preventing this kind of old segment from
     // clobbering it with stale data.
 
-    let mut connections = TcpConnections::default();
-    connections.insert_established();
+    let mut connections = TcpConnections::after_handshake();
     let mut cloned_state = connections.try_get()?.clone();
 
     // "Hello" data, ack=SERVER_ISN+1 == current SND.UNA -> RCV.NXT advances to CLIENT_ISN+6,
@@ -116,8 +114,7 @@ fn same_seq_but_fresher_ack_updates_window() -> Result<()> {
     // still acknowledging more data than the last (e.g. a keep-alive style followup ack), and the
     // second one must still be allowed to update SND.WND.
 
-    let mut connections = TcpConnections::default();
-    connections.insert_established();
+    let mut connections = TcpConnections::after_handshake();
     let mut cloned_state = connections.try_get()?.clone();
 
     // Two data packets build up room for cumulative ACKs without ever giving the client's own
@@ -184,8 +181,8 @@ fn duplicate_ack_updates_window() -> Result<()> {
 
     const NEW_WND: u16 = 777;
 
-    let mut connections = TcpConnections::default();
-    connections.insert_established(); // SND.UNA=SND.NXT=SERVER_ISN+1, RCV.NXT=CLIENT_ISN+1
+    // SND.UNA=SND.NXT=SERVER_ISN+1, RCV.NXT=CLIENT_ISN+1
+    let mut connections = TcpConnections::after_handshake();
     let mut cloned_state = connections.try_get()?.clone();
 
     assert_ne!(

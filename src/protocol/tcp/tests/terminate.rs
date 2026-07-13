@@ -3,8 +3,7 @@ use super::*;
 #[test]
 fn creates_valid_fin_ack() -> Result<()> {
     // Simulate an established connection
-    let mut connections = TcpConnections::default();
-    connections.insert_established(); // FIN-ACK arrives at seq=CLIENT_ISN+1
+    let mut connections = TcpConnections::after_handshake(); // FIN-ACK arrives at seq=CLIENT_ISN+1
     let mut cloned_state = connections.try_get()?.clone();
 
     let reply = client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::FinAck, &[])
@@ -36,8 +35,8 @@ fn fin_ack_acks_prior_data_and_advances_snd_una() -> Result<()> {
     // Section 3.10.7.4). Its SEG.ACK can acknowledge data sent earlier in the connection, and that
     // must still advance SND.UNA and prune `pending`.
 
-    let mut connections = TcpConnections::default();
-    connections.insert_established(); // snd_nxt=snd_una=SERVER_ISN+1, rcv_nxt=CLIENT_ISN+1
+    // snd_nxt=snd_una=SERVER_ISN+1, rcv_nxt=CLIENT_ISN+1
+    let mut connections = TcpConnections::after_handshake();
     let mut cloned_state = connections.try_get()?.clone();
 
     // Client sends data, server echoes "Hello" back
@@ -100,8 +99,7 @@ fn out_of_order_fin_ack_gets_duplicate_ack_without_closing() -> Result<()> {
     // data has been delivered. Until the gap is filled, treat it like out-of-order data by sending
     // a duplicate ACK reflecting the current rcv_nxt with no change to local state.
 
-    let mut connections = TcpConnections::default();
-    connections.insert_established(); // rcv_nxt = CLIENT_ISN+1
+    let mut connections = TcpConnections::after_handshake(); // rcv_nxt = CLIENT_ISN+1
     let initial_state = connections.try_get()?.clone();
 
     // FIN-ACK arrives at seq=CLIENT_ISN+6, but rcv_nxt is still CLIENT_ISN+1 (a 5-byte gap)
@@ -134,8 +132,7 @@ fn final_ack_after_fin_ack_removes_connection_and_returns_none() -> Result<()> {
     // Simulates the client's final ACK completing the 4-step close. Should get no reply (not RST)
     // so the client can close cleanly from TIME-WAIT.
 
-    let mut connections = TcpConnections::default();
-    connections.insert_established();
+    let mut connections = TcpConnections::after_handshake();
     let mut cloned_state = connections.try_get()?.clone();
 
     client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::FinAck, &[])
@@ -166,8 +163,8 @@ fn final_ack_after_fin_ack_removes_connection_and_returns_none() -> Result<()> {
 
 #[test]
 fn close_established_sends_fin_ack_and_transitions_to_fin_wait_1() -> Result<()> {
-    let mut connections = TcpConnections::default();
-    connections.insert_established(); // snd_nxt=SERVER_ISN+1, rcv_nxt=CLIENT_ISN+1
+    // snd_nxt=SERVER_ISN+1, rcv_nxt=CLIENT_ISN+1
+    let mut connections = TcpConnections::after_handshake();
     let mut cloned_state = connections.try_get()?.clone();
 
     let mut replies = connections.close_established();
@@ -191,8 +188,7 @@ fn close_established_sends_fin_ack_and_transitions_to_fin_wait_1() -> Result<()>
 
 #[test]
 fn fin_wait_1_to_fin_wait_2_on_ack_of_our_fin() -> Result<()> {
-    let mut connections = TcpConnections::default();
-    connections.insert_established();
+    let mut connections = TcpConnections::after_handshake();
     connections.close_established(); // -> FIN-WAIT-1, snd_nxt=SERVER_ISN+2
     let mut cloned_state = connections.try_get()?.clone();
 
@@ -212,8 +208,7 @@ fn fin_wait_1_to_fin_wait_2_on_ack_of_our_fin() -> Result<()> {
 
 #[test]
 fn fin_wait_2_closes_on_fin_ack_from_peer() -> Result<()> {
-    let mut connections = TcpConnections::default();
-    connections.insert_established();
+    let mut connections = TcpConnections::after_handshake();
     connections.close_established(); // -> FIN-WAIT-1, snd_nxt=SERVER_ISN+2
     let mut cloned_state = connections.try_get()?.clone();
 
@@ -256,8 +251,7 @@ fn fin_wait_1_closes_immediately_if_peers_fin_also_acks_ours() -> Result<()> {
     // Simultaneous close where the peer's FIN, arriving while we're still in FIN-WAIT-1, also
     // acknowledges our FIN -> fully closed immediately, skipping FIN-WAIT-2/CLOSING.
 
-    let mut connections = TcpConnections::default();
-    connections.insert_established();
+    let mut connections = TcpConnections::after_handshake();
     connections.close_established(); // -> FIN-WAIT-1, snd_nxt=SERVER_ISN+2
 
     // Client's FIN arrives in order and also acknowledges our FIN (ack=SERVER_ISN+2)
@@ -290,8 +284,7 @@ fn data_after_our_fin_in_fin_wait_1_is_acked_without_echo() -> Result<()> {
     // FIN also arrives, so data already in flight from the peer must still be accepted and ACKed,
     // even though we have no send side left to echo it with.
 
-    let mut connections = TcpConnections::default();
-    connections.insert_established(); // rcv_nxt=CLIENT_ISN+1
+    let mut connections = TcpConnections::after_handshake(); // rcv_nxt=CLIENT_ISN+1
     connections.close_established(); // -> FIN-WAIT-1, snd_nxt=SERVER_ISN+2
     let mut cloned_state = connections.try_get()?.clone();
 
@@ -318,8 +311,7 @@ fn data_after_our_fin_in_fin_wait_1_is_acked_without_echo() -> Result<()> {
 
 #[test]
 fn data_after_our_fin_in_fin_wait_2_is_acked_without_echo() -> Result<()> {
-    let mut connections = TcpConnections::default();
-    connections.insert_established();
+    let mut connections = TcpConnections::after_handshake();
     connections.close_established(); // -> FIN-WAIT-1, snd_nxt=SERVER_ISN+2
     let mut cloned_state = connections.try_get()?.clone();
 
@@ -358,8 +350,7 @@ fn data_after_our_fin_in_fin_wait_2_is_acked_without_echo() -> Result<()> {
 
 #[test]
 fn simultaneous_close_transitions_through_closing_to_closed() -> Result<()> {
-    let mut connections = TcpConnections::default();
-    connections.insert_established();
+    let mut connections = TcpConnections::after_handshake();
     connections.close_established(); // -> FIN-WAIT-1, snd_nxt=SERVER_ISN+2
     let mut cloned_state = connections.try_get()?.clone();
 

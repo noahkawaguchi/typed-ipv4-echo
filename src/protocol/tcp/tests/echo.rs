@@ -2,8 +2,8 @@ use super::*;
 
 #[test]
 fn creates_valid_data_echo() -> Result<()> {
-    let mut connections = TcpConnections::default();
-    connections.insert_established(); // rcv_nxt = client's seq at handshake ACK time
+    // rcv_nxt = client's seq at handshake ACK time
+    let mut connections = TcpConnections::after_handshake();
 
     let reply =
         client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, b"Hello")
@@ -27,10 +27,9 @@ fn pure_ack_on_established_connection_returns_none() -> Result<()> {
     // Simulates the client ACKing the server's echo reply. This should get no reply (not RST) so
     // the connection stays open for more data.
 
-    let mut connections = TcpConnections::default();
-    connections.insert_established();
-
+    let mut connections = TcpConnections::after_handshake();
     let mut cloned_state = connections.try_get()?.clone();
+
     cloned_state.snd_nxt.advance_by(HELLO_LEN);
     cloned_state.rcv_nxt.advance_by(HELLO_LEN);
 
@@ -67,8 +66,7 @@ fn consecutive_replies_use_snd_nxt_for_seq_num() -> Result<()> {
     // next reply's seq_num must be SERVER_ISN+6 even when the client sends a stale
     // ack_num=SERVER_ISN+1.
 
-    let mut connections = TcpConnections::default();
-    connections.insert_established();
+    let mut connections = TcpConnections::after_handshake();
     let mut cloned_state = connections.try_get()?.clone();
 
     // First data packet: "Hello" (5 bytes), ack=SERVER_ISN+1 (acknowledges our ISN+1)
@@ -126,8 +124,8 @@ fn old_ack_num_does_not_regress_snd_una() -> Result<()> {
     // (now older than SND.UNA) must not move SND.UNA backward, even though the segment is
     // otherwise processed normally (seq_num still matches RCV.NXT).
 
-    let mut connections = TcpConnections::default();
-    connections.insert_established(); // SND.UNA=SND.NXT=SERVER_ISN+1, RCV.NXT=CLIENT_ISN+1
+    // SND.UNA=SND.NXT=SERVER_ISN+1, RCV.NXT=CLIENT_ISN+1
+    let mut connections = TcpConnections::after_handshake();
     let mut cloned_state = connections.try_get()?.clone();
     assert_eq!(cloned_state.snd_una, SERVER_ISN + SYN_BYTE);
 
@@ -226,8 +224,7 @@ fn duplicate_data_packet_gets_duplicate_ack_without_echo() -> Result<()> {
     // because the retransmitted packet's seq+len points back to CLIENT_ISN+6, but rcv_nxt is
     // CLIENT_ISN+8 after both deliveries.
 
-    let mut connections = TcpConnections::default();
-    connections.insert_established();
+    let mut connections = TcpConnections::after_handshake();
 
     let hello =
         client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, b"Hello");
@@ -291,8 +288,8 @@ fn ack_for_unsent_data_is_dropped_and_gets_current_state_reply() -> Result<()> {
     // SND.NXT/RCV.NXT, with no payload echoed and no state change. seq_num matches RCV.NXT, so this
     // would otherwise be treated as valid in-order data.
 
-    let mut connections = TcpConnections::default();
-    connections.insert_established(); // SND.NXT=SERVER_ISN+1, RCV.NXT=CLIENT_ISN+1
+    // SND.NXT=SERVER_ISN+1, RCV.NXT=CLIENT_ISN+1
+    let mut connections = TcpConnections::after_handshake();
     let initial_state = connections.try_get()?.clone();
 
     // seq_num == RCV.NXT, but ack_num=SERVER_ISN+20 is past SND.NXT=SERVER_ISN+1

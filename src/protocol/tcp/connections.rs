@@ -188,7 +188,7 @@ impl TcpConnections {
         self.table.insert(KEY, conn);
     }
 
-    /// Inserts a SYN-RECEIVED connection into the table using `KEY`, `CLIENT_ISN`, AND
+    /// Inserts a SYN-RECEIVED connection into the table using `KEY`, `CLIENT_ISN`, and
     /// `SERVER_ISN`.
     #[cfg(test)]
     pub(super) fn insert_syn_recv(&mut self) {
@@ -205,12 +205,14 @@ impl TcpConnections {
         );
     }
 
-    /// Inserts an ESTABLISHED connection into the table using `KEY`, `CLIENT_ISN`, AND
-    /// `SERVER_ISN`.
+    /// Creates a default-initialized `Self` and inserts a default-initialized ESTABLISHED
+    /// connection using `KEY` as if the initial three-way handshake had just completed.
     #[cfg(test)]
-    pub(super) fn insert_established(&mut self) {
+    pub(super) fn after_handshake() -> Self {
         use crate::protocol::tcp::tests::KEY;
 
-        self.table.insert(KEY, ConnState::default());
+        let mut connections = Self::default();
+        connections.table.insert(KEY, ConnState::default());
+        connections
     }
 }

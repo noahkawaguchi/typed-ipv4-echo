@@ -6,8 +6,8 @@ fn stray_syn_out_of_window_on_established_gets_challenge_ack() -> Result<()> {
     // window gets a challenge ACK (<SEQ=SND.NXT><ACK=RCV.NXT><CTL=ACK>) and is dropped. "Fourth,
     // check the SYN bit" is not reached.
 
-    let mut connections = TcpConnections::default();
-    connections.insert_established(); // snd_nxt=SERVER_ISN+1, rcv_nxt=CLIENT_ISN+1
+    // snd_nxt=SERVER_ISN+1, rcv_nxt=CLIENT_ISN+1
+    let mut connections = TcpConnections::after_handshake();
     let initial_state = connections.try_get()?.clone();
 
     // seq=CLIENT_ISN-20 < rcv_nxt=CLIENT_ISN+1, outside the receive window, caught at "First, check
@@ -36,8 +36,8 @@ fn stray_syn_in_window_on_established_gets_challenge_ack() -> Result<()> {
     // (incorporated into RFC 9293) recommends a challenge ACK irrespective of the sequence number,
     // and the connection must not be reset.
 
-    let mut connections = TcpConnections::default();
-    connections.insert_established(); // snd_nxt=SERVER_ISN+1, rcv_nxt=CLIENT_ISN+1
+    // snd_nxt=SERVER_ISN+1, rcv_nxt=CLIENT_ISN+1
+    let mut connections = TcpConnections::after_handshake();
     let initial_state = connections.try_get()?.clone();
 
     // seq=CLIENT_ISN+1 == rcv_nxt, inside the receive window, reaches "Fourth, check the SYN bit"
@@ -64,8 +64,7 @@ fn stray_syn_in_window_on_fin_wait_1_gets_challenge_ack() -> Result<()> {
     // The same RFC 9293, Section 3.10.7.4 SYN rule as above applies to all synchronized states
     // listed there, not just ESTABLISHED.
 
-    let mut connections = TcpConnections::default();
-    connections.insert_established(); // rcv_nxt=CLIENT_ISN+1
+    let mut connections = TcpConnections::after_handshake(); // rcv_nxt=CLIENT_ISN+1
     connections.close_established(); // -> FIN-WAIT-1, snd_nxt=SERVER_ISN+2
 
     let initial_state = connections.try_get()?.clone();
