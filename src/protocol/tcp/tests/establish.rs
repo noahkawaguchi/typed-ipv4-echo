@@ -4,7 +4,8 @@ use super::*;
 fn creates_valid_syn_ack() -> Result<()> {
     let mut connections = TcpConnections::default();
 
-    let reply = client_packet(CLIENT_ISN, 0, TcpFlags::Syn, &[]).create_reply(&mut connections)?;
+    let reply = TcpHandler { seq_num: CLIENT_ISN, flags: TcpFlags::Syn, ..CLIENT_PACKET }
+        .create_reply(&mut connections)?;
 
     // seq_num is the random ISN that was stored in the connection table
     let stored_isn = connections.try_get()?.snd_una;
@@ -23,7 +24,8 @@ fn duplicate_syn_during_syn_received_resends_same_syn_ack() -> Result<()> {
     connections.insert_syn_recv(); // Simulate having already sent a SYN-ACK with ISN=SERVER_ISN
     let initial_state = connections.try_get()?.clone();
 
-    let reply = client_packet(CLIENT_ISN, 0, TcpFlags::Syn, &[]).create_reply(&mut connections)?;
+    let reply = TcpHandler { seq_num: CLIENT_ISN, flags: TcpFlags::Syn, ..CLIENT_PACKET }
+        .create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
@@ -45,9 +47,13 @@ fn data_packet_before_complete_handshake_gets_rst() -> Result<()> {
     let mut connections = TcpConnections::default();
     connections.insert_syn_recv(); // SYN-ACK sent, but handshake not yet completed
 
-    let reply =
-        client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, b"Hello")
-            .create_reply(&mut connections)?;
+    let reply = TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE,
+        ack_num: SERVER_ISN + SYN_BYTE,
+        payload: payload_from("Hello"),
+        ..CLIENT_PACKET
+    }
+    .create_reply(&mut connections)?;
 
     assert_eq!(reply, Some(server_reply(SERVER_ISN + SYN_BYTE, 0, TcpFlags::Rst, &[])));
 
@@ -63,8 +69,12 @@ fn handshake_ack_establishes_connection_and_returns_none() -> Result<()> {
     let mut cloned_state = connections.try_get()?.clone();
 
     assert_eq!(
-        client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, &[])
-            .create_reply(&mut connections)?,
+        TcpHandler {
+            seq_num: CLIENT_ISN + SYN_BYTE,
+            ack_num: SERVER_ISN + SYN_BYTE,
+            ..CLIENT_PACKET
+        }
+        .create_reply(&mut connections)?,
         None
     );
 

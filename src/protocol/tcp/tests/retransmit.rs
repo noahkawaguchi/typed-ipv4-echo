@@ -4,7 +4,8 @@ use {super::*, std::time::Duration};
 fn syn_ack_is_resent_while_due() -> Result<()> {
     let mut connections = TcpConnections::new(Duration::ZERO, 5);
 
-    client_packet(CLIENT_ISN, 0, TcpFlags::Syn, &[]).create_reply(&mut connections)?;
+    TcpHandler { seq_num: CLIENT_ISN, flags: TcpFlags::Syn, ..CLIENT_PACKET }
+        .create_reply(&mut connections)?;
 
     let isn = connections.try_get()?.snd_una;
 
@@ -22,13 +23,18 @@ fn syn_ack_is_resent_while_due() -> Result<()> {
 fn pending_segment_is_cleared_once_acked() -> Result<()> {
     let mut connections = TcpConnections::new(Duration::ZERO, 5);
 
-    client_packet(CLIENT_ISN, 0, TcpFlags::Syn, &[]).create_reply(&mut connections)?;
+    TcpHandler { seq_num: CLIENT_ISN, flags: TcpFlags::Syn, ..CLIENT_PACKET }
+        .create_reply(&mut connections)?;
 
     let isn = connections.try_get()?.snd_una;
 
     // Handshake ACK completes the connection and should clear the pending SYN-ACK
-    client_packet(CLIENT_ISN + SYN_BYTE, isn.wrapping_add(SYN_BYTE), TcpFlags::Ack, &[])
-        .create_reply(&mut connections)?;
+    TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE,
+        ack_num: isn.wrapping_add(SYN_BYTE),
+        ..CLIENT_PACKET
+    }
+    .create_reply(&mut connections)?;
 
     assert!(
         connections.make_retransmissions().is_empty(),
@@ -43,8 +49,13 @@ fn data_echo_is_resent_unchanged() -> Result<()> {
     let mut connections = TcpConnections::new(Duration::ZERO, 5);
     connections.insert(ConnState::default());
 
-    client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, b"Hello")
-        .create_reply(&mut connections)?;
+    TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE,
+        ack_num: SERVER_ISN + SYN_BYTE,
+        payload: payload_from("Hello"),
+        ..CLIENT_PACKET
+    }
+    .create_reply(&mut connections)?;
 
     let mut resent = connections.make_retransmissions();
     let reply = resent.pop().ok_or("Expected one retransmitted segment")?;
@@ -91,13 +102,23 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result<()> {
 
     // First data packet: "Hello" (5 bytes), ack=SERVER_ISN+1 -> echoed, pending segment
     // seq=SERVER_ISN+1..SERVER_ISN+6
-    client_packet(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, b"Hello")
-        .create_reply(&mut connections)?;
+    TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE,
+        ack_num: SERVER_ISN + SYN_BYTE,
+        payload: payload_from("Hello"),
+        ..CLIENT_PACKET
+    }
+    .create_reply(&mut connections)?;
 
     // Second data packet: "Hi" (2 bytes), still ack=SERVER_ISN+1 (hasn't acked the first echo yet)
     // -> echoed, pending segment seq=SERVER_ISN+6..SERVER_ISN+8
-    client_packet(CLIENT_ISN + SYN_BYTE + HELLO_LEN, SERVER_ISN + SYN_BYTE, TcpFlags::Ack, b"Hi")
-        .create_reply(&mut connections)?;
+    TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+        ack_num: SERVER_ISN + SYN_BYTE,
+        payload: payload_from("Hi"),
+        ..CLIENT_PACKET
+    }
+    .create_reply(&mut connections)?;
 
     let [hello, hi] = connections
         .make_retransmissions()
@@ -133,7 +154,8 @@ fn gives_up_after_max_retransmits() -> Result<()> {
 
     let mut connections = TcpConnections::new(Duration::ZERO, MAX_RETRIES);
 
-    client_packet(CLIENT_ISN, 0, TcpFlags::Syn, &[]).create_reply(&mut connections)?;
+    TcpHandler { seq_num: CLIENT_ISN, flags: TcpFlags::Syn, ..CLIENT_PACKET }
+        .create_reply(&mut connections)?;
 
     for _ in 0..MAX_RETRIES {
         let resent = connections.make_retransmissions();

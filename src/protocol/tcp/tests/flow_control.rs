@@ -1,34 +1,19 @@
 use super::*;
 
-/// Builds a data packet from the client with a custom advertised window (`client_packet` always
-/// hardcodes `TcpHandler::RCV_WND`, which would clobber the small windows these tests rely on).
-fn client_data_packet_with_window(
-    seq_num: u32,
-    ack_num: u32,
-    window: u16,
-    payload: &[u8],
-) -> TcpHandler {
-    TcpHandler {
-        ip_pair: Ipv4AddrPair { src: KEY.client_ip, dst: KEY.server_ip },
-        ports: PortPair { src: KEY.client_port, dst: KEY.server_port },
-        seq_num,
-        ack_num,
-        offset_bytes: 20,
-        flags: TcpFlags::Ack,
-        window,
-        payload: (!payload.is_empty()).then(|| Rc::from(payload)),
-    }
-}
-
 #[test]
 fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result<()> {
     let mut connections = TcpConnections::default();
     let mut expected_state = ConnState { snd_wnd: 3, ..Default::default() };
     connections.insert(expected_state.clone());
 
-    let reply =
-        client_data_packet_with_window(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, 3, b"Hello")
-            .create_reply(&mut connections)?;
+    let reply = TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE,
+        ack_num: SERVER_ISN + SYN_BYTE,
+        window: 3,
+        payload: payload_from("Hello"),
+        ..CLIENT_PACKET
+    }
+    .create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
@@ -61,8 +46,14 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result<()> {
     connections.insert(expected_state.clone());
 
     // "Hello" (5 bytes), window only allows 3 -> "Hel" sent, "lo" buffered
-    client_data_packet_with_window(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, 3, b"Hello")
-        .create_reply(&mut connections)?;
+    TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE,
+        ack_num: SERVER_ISN + SYN_BYTE,
+        window: 3,
+        payload: payload_from("Hello"),
+        ..CLIENT_PACKET
+    }
+    .create_reply(&mut connections)?;
 
     expected_state.snd_nxt.advance_by(3);
     expected_state.rcv_nxt.advance_by(HELLO_LEN);
@@ -71,11 +62,12 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result<()> {
     assert_eq!(connections.try_get()?, &expected_state, "State confirmation before window update");
 
     // Client acks the 3 sent bytes and advertises a bigger window -> should drain "lo"
-    let reply = custom_window_client_packet(
-        CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-        SERVER_ISN + SYN_BYTE + 3,
-        10,
-    )
+    let reply = TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+        ack_num: SERVER_ISN + SYN_BYTE + 3,
+        window: 10,
+        ..CLIENT_PACKET
+    }
     .create_reply(&mut connections)?;
 
     assert_eq!(
@@ -109,9 +101,14 @@ fn zero_window_buffers_entire_payload_and_gets_bare_ack() -> Result<()> {
     let mut expected_state = ConnState { snd_wnd: 0, ..Default::default() };
     connections.insert(expected_state.clone());
 
-    let reply =
-        client_data_packet_with_window(CLIENT_ISN + SYN_BYTE, SERVER_ISN + SYN_BYTE, 0, b"Hello")
-            .create_reply(&mut connections)?;
+    let reply = TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE,
+        ack_num: SERVER_ISN + SYN_BYTE,
+        window: 0,
+        payload: payload_from("Hello"),
+        ..CLIENT_PACKET
+    }
+    .create_reply(&mut connections)?;
 
     assert_eq!(
         reply,

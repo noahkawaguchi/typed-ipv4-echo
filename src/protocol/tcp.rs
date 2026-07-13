@@ -658,18 +658,22 @@ mod tests {
     pub(super) const KEY: ConnKey =
         ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
 
-    /// Builds an incoming packet from the client (port 1234) to the server (port 80).
-    fn client_packet(seq_num: u32, ack_num: u32, flags: TcpFlags, payload: &[u8]) -> TcpHandler {
-        TcpHandler {
-            ip_pair: Ipv4AddrPair { src: KEY.client_ip, dst: KEY.server_ip },
-            ports: PortPair { src: KEY.client_port, dst: KEY.server_port },
-            seq_num,
-            ack_num,
-            offset_bytes: 20,
-            flags,
-            window: u16::MAX,
-            payload: (!payload.is_empty()).then(|| Rc::from(payload)),
-        }
+    /// An incoming pure ACK packet from the client (port 1234) to the server (port 80).
+    /// `seq_num` and `ack_num` will be 0 if not overridden.
+    const CLIENT_PACKET: TcpHandler = TcpHandler {
+        ip_pair: Ipv4AddrPair { src: KEY.client_ip, dst: KEY.server_ip },
+        ports: PortPair { src: KEY.client_port, dst: KEY.server_port },
+        seq_num: 0,
+        ack_num: 0,
+        offset_bytes: 20,
+        flags: TcpFlags::Ack,
+        window: u16::MAX,
+        payload: None,
+    };
+
+    /// Converts a `&str` into an `Option<Rc<[u8]>>`, with an empty string mapping to `None`.
+    fn payload_from(payload: &str) -> Option<Rc<[u8]>> {
+        (!payload.is_empty()).then(|| Rc::from(payload.as_bytes()))
     }
 
     /// Builds an expected reply from the server (port 80) to the client (port 1234).
@@ -683,20 +687,6 @@ mod tests {
             flags,
             window: u16::MAX,
             payload: (!payload.is_empty()).then(|| Rc::from(payload)),
-        }
-    }
-
-    /// Creates a pure ACK packet from the client with a custom window size.
-    fn custom_window_client_packet(seq_num: u32, ack_num: u32, window: u16) -> TcpHandler {
-        TcpHandler {
-            ip_pair: Ipv4AddrPair { src: KEY.client_ip, dst: KEY.server_ip },
-            ports: PortPair { src: KEY.client_port, dst: KEY.server_port },
-            seq_num,
-            ack_num,
-            offset_bytes: 20,
-            flags: TcpFlags::Ack,
-            window,
-            payload: None,
         }
     }
 }

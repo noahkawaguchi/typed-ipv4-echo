@@ -1,6 +1,8 @@
 use super::*;
 
-fn client_rst(seq_num: u32) -> TcpHandler { client_packet(seq_num, 0, TcpFlags::Rst, &[]) }
+fn client_rst(seq_num: u32) -> TcpHandler {
+    TcpHandler { seq_num, flags: TcpFlags::Rst, ..CLIENT_PACKET }
+}
 
 #[test]
 fn rst_exactly_at_rcv_nxt_cleans_up_connection_and_returns_none() -> Result<()> {
