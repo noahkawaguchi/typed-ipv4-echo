@@ -626,7 +626,7 @@ mod tests {
     use {
         super::*,
         crate::protocol::test_consts::{DST_IP, IP_PAIR, SRC_IP},
-        std::assert_matches,
+        std::{assert_matches, collections::VecDeque},
     };
 
     /// Fixed value to use as the ISN randomly chosen by the client.
@@ -657,6 +657,21 @@ mod tests {
     /// Connection key shared by test modules.
     pub(super) const KEY: ConnKey =
         ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
+
+    /// An ESTABLISHED connection as if the initial three-way handshake had just completed. Uses the
+    /// test constants `CLIENT_ISN` and `SERVER_ISN`. Has the maximum SND.WND and empty
+    /// `pending`/`send_buffer`.
+    pub(super) const AFTER_HANDSHAKE: ConnState = ConnState {
+        tcp_state: TcpState::Established,
+        snd_nxt: SERVER_ISN + SYN_BYTE,
+        rcv_nxt: CLIENT_ISN + SYN_BYTE,
+        snd_una: SERVER_ISN + SYN_BYTE,
+        snd_wnd: u16::MAX,
+        snd_wl1: CLIENT_ISN + SYN_BYTE,
+        snd_wl2: SERVER_ISN + SYN_BYTE,
+        pending: Vec::new(),
+        send_buffer: VecDeque::new(),
+    };
 
     /// An incoming pure ACK packet from the client (port 1234) to the server (port 80).
     /// `seq_num` and `ack_num` will be 0 if not overridden.

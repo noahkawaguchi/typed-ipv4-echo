@@ -209,10 +209,10 @@ impl TcpConnections {
     /// connection using `KEY` as if the initial three-way handshake had just completed.
     #[cfg(test)]
     pub(super) fn after_handshake() -> Self {
-        use crate::protocol::tcp::tests::KEY;
+        use crate::protocol::tcp::tests::{AFTER_HANDSHAKE, KEY};
 
         let mut connections = Self::default();
-        connections.table.insert(KEY, ConnState::default());
+        connections.table.insert(KEY, AFTER_HANDSHAKE);
         connections
     }
 }

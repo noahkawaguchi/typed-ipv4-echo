@@ -47,7 +47,7 @@ fn pending_segment_is_cleared_once_acked() -> Result<()> {
 #[test]
 fn data_echo_is_resent_unchanged() -> Result<()> {
     let mut connections = TcpConnections::new(Duration::ZERO, 5);
-    connections.insert(ConnState::default());
+    connections.insert(AFTER_HANDSHAKE);
 
     TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE,
@@ -77,7 +77,7 @@ fn data_echo_is_resent_unchanged() -> Result<()> {
 #[test]
 fn fin_ack_is_resent_unchanged() -> Result<()> {
     let mut connections = TcpConnections::new(Duration::ZERO, 5);
-    connections.insert(ConnState::default());
+    connections.insert(AFTER_HANDSHAKE);
     connections.close_established();
 
     let mut resent = connections.make_retransmissions();
@@ -98,7 +98,7 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result<()> {
     // retransmitting every unacked segment, not just the most recently sent one.
 
     let mut connections = TcpConnections::new(Duration::ZERO, 5);
-    connections.insert(ConnState::default());
+    connections.insert(AFTER_HANDSHAKE);
 
     // First data packet: "Hello" (5 bytes), ack=SERVER_ISN+1 -> echoed, pending segment
     // seq=SERVER_ISN+1..SERVER_ISN+6

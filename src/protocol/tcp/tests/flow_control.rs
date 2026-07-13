@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result<()> {
     let mut connections = TcpConnections::default();
-    let mut expected_state = ConnState { snd_wnd: 3, ..Default::default() };
+    let mut expected_state = ConnState { snd_wnd: 3, ..AFTER_HANDSHAKE };
     connections.insert(expected_state.clone());
 
     let reply = TcpHandler {
@@ -42,7 +42,7 @@ fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result<()> {
 #[test]
 fn window_opening_via_ack_drains_buffered_remainder() -> Result<()> {
     let mut connections = TcpConnections::default();
-    let mut expected_state = ConnState { snd_wnd: 3, ..Default::default() };
+    let mut expected_state = ConnState { snd_wnd: 3, ..AFTER_HANDSHAKE };
     connections.insert(expected_state.clone());
 
     // "Hello" (5 bytes), window only allows 3 -> "Hel" sent, "lo" buffered
@@ -98,7 +98,7 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result<()> {
 #[test]
 fn zero_window_buffers_entire_payload_and_gets_bare_ack() -> Result<()> {
     let mut connections = TcpConnections::default();
-    let mut expected_state = ConnState { snd_wnd: 0, ..Default::default() };
+    let mut expected_state = ConnState { snd_wnd: 0, ..AFTER_HANDSHAKE };
     connections.insert(expected_state.clone());
 
     let reply = TcpHandler {

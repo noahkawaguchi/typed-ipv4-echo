@@ -88,28 +88,6 @@ impl PartialEq for ConnState {
     }
 }
 
-#[cfg(test)]
-impl Default for ConnState {
-    /// Creates an ESTABLISHED connection as if the initial three-way handshake had just completed
-    /// using the test constants `CLIENT_ISN` and `SERVER_ISN`. The created connection has has the
-    /// maximum SND.WND and empty `pending`/`send_buffer`.
-    fn default() -> Self {
-        use crate::protocol::tcp::tests::{CLIENT_ISN, SERVER_ISN, SYN_BYTE};
-
-        Self {
-            tcp_state: TcpState::Established,
-            snd_nxt: SERVER_ISN + SYN_BYTE,
-            rcv_nxt: CLIENT_ISN + SYN_BYTE,
-            snd_una: SERVER_ISN + SYN_BYTE,
-            snd_wnd: u16::MAX,
-            snd_wl1: CLIENT_ISN + SYN_BYTE,
-            snd_wl2: SERVER_ISN + SYN_BYTE,
-            pending: Vec::new(),
-            send_buffer: VecDeque::new(),
-        }
-    }
-}
-
 /// The set of states of a TCP connection (non-exhaustive). Variant meanings below from RFC 9293,
 /// Section 3.3.2.
 #[derive(PartialEq, Eq, Clone, Copy)]
