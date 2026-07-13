@@ -667,7 +667,7 @@ mod tests {
             ack_num,
             offset_bytes: 20,
             flags,
-            window: TcpHandler::RCV_WND,
+            window: u16::MAX,
             payload: (!payload.is_empty()).then(|| Rc::from(payload)),
         }
     }
@@ -681,7 +681,7 @@ mod tests {
             ack_num,
             offset_bytes: 20,
             flags,
-            window: TcpHandler::RCV_WND,
+            window: u16::MAX,
             payload: (!payload.is_empty()).then(|| Rc::from(payload)),
         }
     }

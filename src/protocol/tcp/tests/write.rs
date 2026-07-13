@@ -41,7 +41,7 @@ fn write_into_produces_correct_bytes_with_payload() -> Result<()> {
         ack_num: 4102,
         offset_bytes: 20,
         flags: TcpFlags::Ack,
-        window: TcpHandler::RCV_WND,
+        window: u16::MAX,
         payload: Some(Rc::new(*b"Hello")),
     };
 
