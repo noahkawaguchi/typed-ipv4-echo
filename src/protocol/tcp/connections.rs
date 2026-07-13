@@ -8,7 +8,7 @@ use {
         },
     },
     std::{
-        collections::HashMap,
+        collections::{HashMap, VecDeque},
         net::Ipv4Addr,
         time::{Duration, Instant},
     },
@@ -60,6 +60,7 @@ impl TcpConnections {
                 snd_wl1: 0,
                 snd_wl2: 0,
                 pending: vec![PendingSegment::new(send_info, 1)],
+                send_buffer: VecDeque::new(),
             },
         );
     }
@@ -221,6 +222,7 @@ impl TcpConnections {
                 snd_wl1: CLIENT_ISN + SYN_BYTE,
                 snd_wl2: SERVER_ISN + SYN_BYTE,
                 pending: Vec::new(),
+                send_buffer: VecDeque::new(),
             },
         );
     }

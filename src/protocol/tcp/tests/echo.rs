@@ -1,4 +1,4 @@
-use super::*;
+use {super::*, std::collections::VecDeque};
 
 #[test]
 fn creates_valid_data_echo() -> Result<()> {
@@ -326,6 +326,7 @@ fn wraparound_ack_for_unsent_data_is_still_rejected() -> Result<()> {
         snd_wl1: CLIENT_ISN + SYN_BYTE,
         snd_wl2: u32::MAX,
         pending: Vec::new(),
+        send_buffer: VecDeque::new(),
     };
     connections.insert(initial_state.clone());
 

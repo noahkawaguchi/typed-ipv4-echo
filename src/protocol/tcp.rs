@@ -232,19 +232,24 @@ impl TcpHandler {
             }),
 
             // Pure ACK (no payload) on an established connection (acknowledgment of data sent by
-            // the server) -> advance snd_una, no reply
+            // the server) -> advance SND.UNA, then send however much the window allows from the
+            // data queued to be sent, if any
             (
                 Some(conn @ ConnState { tcp_state: TcpState::Established, .. }),
                 TcpFlags::Ack,
                 None,
             ) => {
                 self.incoming_ack_update(conn);
-                None
+
+                match conn.drain_transmittable() {
+                    Some(to_send) => Some(Self::data_payload(conn, to_send)?),
+                    None => None,
+                }
             }
 
-            // In-order data packet on an established connection -> send ACK, echo payload. Use
-            // snd_nxt as seq_num and rcv_nxt + bytes received as ack_num, then advance both locally
-            // by bytes received.
+            // In-order data packet on an established connection -> ACK receipt of data, advancing
+            // RCV.NXT, and echo as much of the queued data as SND.WND currently allows. Buffer
+            // anything that doesn't fit to go out later as the window opens.
             (
                 Some(conn @ ConnState { tcp_state: TcpState::Established, .. }),
                 TcpFlags::Ack,
@@ -252,21 +257,20 @@ impl TcpHandler {
             ) if self.seq_num == conn.rcv_nxt => {
                 let payload_len = u32::from(self.payload_len()?);
 
-                let send_info = SendInfo {
-                    seq_num: conn.snd_nxt,
-                    ack_num: conn.rcv_nxt.wrapping_add(payload_len),
-                    flags: TcpFlags::Ack,
-                    payload: Some(Rc::clone(payload)),
-                };
-
                 self.incoming_ack_update(conn);
-                conn.snd_nxt.advance_by(payload_len);
                 conn.rcv_nxt.advance_by(payload_len);
+                conn.send_buffer.extend(payload.iter());
 
-                conn.pending
-                    .push(PendingSegment::new(send_info.clone(), payload_len));
+                Some(match conn.drain_transmittable() {
+                    Some(to_send) => Self::data_payload(conn, to_send)?,
 
-                Some(send_info)
+                    None => SendInfo {
+                        seq_num: conn.snd_nxt,
+                        ack_num: conn.rcv_nxt,
+                        flags: TcpFlags::Ack,
+                        payload: None,
+                    },
+                })
             }
 
             // Out-of-order/duplicate data or out-of-order FIN-ACK on an established connection
@@ -505,6 +509,24 @@ impl TcpHandler {
         }
     }
 
+    /// Creates a `SendInfo` for the payload `to_send`, using and then updating the state of `conn`.
+    fn data_payload(conn: &mut ConnState, to_send: Rc<[u8]>) -> Result<SendInfo, TryFromIntError> {
+        let send_len = u32::try_from(to_send.len())?;
+
+        let send_info = SendInfo {
+            seq_num: conn.snd_nxt,
+            ack_num: conn.rcv_nxt,
+            flags: TcpFlags::Ack,
+            payload: Some(to_send),
+        };
+
+        conn.snd_nxt.advance_by(send_len);
+        conn.pending
+            .push(PendingSegment::new(send_info.clone(), send_len));
+
+        Ok(send_info)
+    }
+
     /// Returns the number of bytes in the payload, or 0 if the payload is `None`.
     fn payload_len(&self) -> Result<u16, TryFromIntError> {
         self.payload.as_ref().map_or(0, |p| p.len()).try_into()
@@ -593,6 +615,7 @@ mod tests {
     mod abort;
     mod echo;
     mod establish;
+    mod flow_control;
     mod parse;
     mod retransmit;
     mod stray_syn;
@@ -660,6 +683,20 @@ mod tests {
             flags,
             window: TcpHandler::RCV_WND,
             payload: (!payload.is_empty()).then(|| Rc::from(payload)),
+        }
+    }
+
+    /// Creates a pure ACK packet from the client with a custom window size.
+    fn custom_window_client_packet(seq_num: u32, ack_num: u32, window: u16) -> TcpHandler {
+        TcpHandler {
+            ip_pair: Ipv4AddrPair { src: KEY.client_ip, dst: KEY.server_ip },
+            ports: PortPair { src: KEY.client_port, dst: KEY.server_port },
+            seq_num,
+            ack_num,
+            offset_bytes: 20,
+            flags: TcpFlags::Ack,
+            window,
+            payload: None,
         }
     }
 }

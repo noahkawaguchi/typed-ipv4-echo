@@ -1,19 +1,5 @@
 use super::*;
 
-/// Creates a pure ACK packet from the client with a custom window size.
-fn custom_window_client_packet(seq_num: u32, ack_num: u32, window: u16) -> TcpHandler {
-    TcpHandler {
-        ip_pair: Ipv4AddrPair { src: KEY.client_ip, dst: KEY.server_ip },
-        ports: PortPair { src: KEY.client_port, dst: KEY.server_port },
-        seq_num,
-        ack_num,
-        offset_bytes: 20,
-        flags: TcpFlags::Ack,
-        window,
-        payload: None,
-    }
-}
-
 #[test]
 fn new_ack_adopts_window_from_segment() -> Result<()> {
     // A "new" ack (SND.UNA < SEG.ACK <= SND.NXT) should also update SND.WND to the incoming

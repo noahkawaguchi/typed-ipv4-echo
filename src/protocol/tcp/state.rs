@@ -1,6 +1,10 @@
 use {
     crate::protocol::tcp::SendInfo,
-    std::time::{Duration, Instant},
+    std::{
+        collections::VecDeque,
+        rc::Rc,
+        time::{Duration, Instant},
+    },
 };
 
 /// The state of a connection in the table, including its TCP state and other locally stored data.
@@ -36,6 +40,24 @@ pub(super) struct ConnState {
 
     /// Unacked segments sent by the server, kept for retransmission purposes.
     pub(super) pending: Vec<PendingSegment>,
+
+    /// Bytes received from the peer that are queued to be echoed once SND.WND has room for them.
+    pub(super) send_buffer: VecDeque<u8>,
+}
+
+impl ConnState {
+    /// Removes and returns as many bytes as the peer's currently advertised window allows from the
+    /// front of the send buffer, or `None` if nothing can be sent right now because the buffer is
+    /// empty or the window is full. Does not mutate any other state.
+    pub(super) fn drain_transmittable(&mut self) -> Option<Rc<[u8]>> {
+        let sent_but_not_acked = self.snd_nxt.wrapping_sub(self.snd_una);
+        let available = u32::from(self.snd_wnd).saturating_sub(sent_but_not_acked);
+        let n = usize::try_from(available)
+            .unwrap_or(usize::MAX)
+            .min(self.send_buffer.len());
+
+        (n > 0).then(|| self.send_buffer.drain(..n).collect())
+    }
 }
 
 #[cfg(test)]
@@ -54,6 +76,7 @@ impl PartialEq for ConnState {
             snd_wl1: _,
             snd_wl2: _,
             pending: _,
+            ref send_buffer,
         }: &Self,
     ) -> bool {
         self.tcp_state == tcp_state
@@ -61,6 +84,7 @@ impl PartialEq for ConnState {
             && self.rcv_nxt == rcv_nxt
             && self.snd_una == snd_una
             && self.snd_wnd == snd_wnd
+            && &self.send_buffer == send_buffer
     }
 }
 
