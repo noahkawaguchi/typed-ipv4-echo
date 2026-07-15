@@ -211,7 +211,7 @@ impl TcpHandler {
                 TcpFlags::Ack,
                 None,
             ) if conn.snd_una.wrapping_add(1) == self.ack_num => {
-                self.incoming_ack_update(conn);
+                conn.incoming_ack_update(self);
                 conn.tcp_state = TcpState::Established;
                 conn.rcv_nxt = self.seq_num;
                 None
@@ -239,7 +239,7 @@ impl TcpHandler {
                 TcpFlags::Ack,
                 None,
             ) => {
-                self.incoming_ack_update(conn);
+                conn.incoming_ack_update(self);
 
                 match conn.drain_transmittable() {
                     Some(to_send) => Some(Self::data_payload(conn, to_send)?),
@@ -257,7 +257,7 @@ impl TcpHandler {
             ) if self.seq_num == conn.rcv_nxt => {
                 let payload_len = u32::from(self.payload_len()?);
 
-                self.incoming_ack_update(conn);
+                conn.incoming_ack_update(self);
                 conn.rcv_nxt.advance_by(payload_len);
                 conn.send_buffer.extend(payload.iter());
 
@@ -281,7 +281,7 @@ impl TcpHandler {
                 TcpFlags::Ack | TcpFlags::FinAck,
                 _,
             ) if self.seq_num != conn.rcv_nxt => {
-                self.incoming_ack_update(conn);
+                conn.incoming_ack_update(self);
 
                 Some(SendInfo {
                     seq_num: conn.snd_nxt,
@@ -305,7 +305,7 @@ impl TcpHandler {
                     payload: None,
                 };
 
-                self.incoming_ack_update(conn);
+                conn.incoming_ack_update(self);
 
                 conn.tcp_state = TcpState::LastAck;
                 conn.snd_nxt.advance_by(1); // Our FIN consumes one sequence number
@@ -339,7 +339,7 @@ impl TcpHandler {
                     payload: None,
                 };
 
-                self.incoming_ack_update(conn);
+                conn.incoming_ack_update(self);
                 conn.rcv_nxt.advance_by(payload_len);
 
                 Some(send_info)
@@ -349,7 +349,7 @@ impl TcpHandler {
             (Some(conn @ ConnState { tcp_state: TcpState::FinWait1, .. }), TcpFlags::Ack, None)
                 if self.ack_num == conn.snd_nxt =>
             {
-                self.incoming_ack_update(conn);
+                conn.incoming_ack_update(self);
                 conn.tcp_state = TcpState::FinWait2;
                 None
             }
@@ -369,7 +369,7 @@ impl TcpHandler {
                     payload: None,
                 };
 
-                self.incoming_ack_update(conn);
+                conn.incoming_ack_update(self);
 
                 if self.ack_num == conn.snd_nxt {
                     connections.remove(&key);
@@ -475,38 +475,6 @@ impl TcpHandler {
         .map(|send_info| {
             Self::from_pairs_and_info(self.ip_pair.swapped(), self.ports.swapped(), send_info)
         }))
-    }
-
-    /// Per RFC 9293, Section 3.10.7.4, "Fifth, check the ACK field," "ESTABLISHED STATE," processes
-    /// an incoming segment's acknowledgment against the send-side state, updating SND.WND, SND.WL1,
-    /// SND.WL2, SND.UNA, and the retransmission queue as necessary.
-    ///
-    /// Ignores ACKs that are old (before SND.UNA) or for data not yet sent (past SND.NXT). For
-    /// updates to SND.UNA and the retransmission queue, ignores duplicate ACKs
-    /// (SND.UNA == SEG.ACK).
-    fn incoming_ack_update(&self, conn: &mut ConnState) {
-        if conn.snd_una.seq_le(self.ack_num) && self.ack_num.seq_le(conn.snd_nxt) {
-            // Include duplicate ACKs: SND.UNA <= SEG.ACK <= SND.NXT
-            //     and
-            // Guard against an old/reordered segment clobbering the window with stale data:
-            //     SND.WL1 < SEG.SEQ or (SND.WL1 == SEG.SEQ and SND.WL2 <= SEG.ACK)
-            if conn.snd_wl1.seq_lt(self.seq_num)
-                || (conn.snd_wl1 == self.seq_num && conn.snd_wl2.seq_le(self.ack_num))
-            {
-                conn.snd_wnd = self.window;
-                conn.snd_wl1 = self.seq_num;
-                conn.snd_wl2 = self.ack_num;
-            }
-
-            // Exclude duplicate ACKs: SND.UNA < SEG.ACK <= SND.NXT
-            if conn.snd_una.seq_lt(self.ack_num) {
-                conn.snd_una = self.ack_num;
-
-                // ACKs are cumulative, so only keep pending segments not fully covered by SEG.ACK
-                conn.pending
-                    .retain(|pending_seg| self.ack_num.seq_lt(pending_seg.end_seq));
-            }
-        }
     }
 
     /// Creates a `SendInfo` for the payload `to_send`, using and then updating the state of `conn`.
