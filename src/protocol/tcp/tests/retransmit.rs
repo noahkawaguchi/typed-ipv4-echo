@@ -13,7 +13,15 @@ fn syn_ack_is_resent_while_due() -> Result<()> {
     let reply = resent.pop().ok_or("Expected one retransmitted segment")?;
 
     assert!(resent.is_empty(), "Expected exactly one retransmitted segment");
-    assert_eq!(reply, server_reply(isn, CLIENT_ISN + SYN_BYTE, TcpFlags::SynAck, &[]));
+    assert_eq!(
+        reply,
+        TcpHandler {
+            seq_num: isn,
+            ack_num: CLIENT_ISN + SYN_BYTE,
+            flags: TcpFlags::SynAck,
+            ..SERVER_REPLY
+        }
+    );
     assert_eq!(reply.get_ip_pair(), IP_PAIR.swapped());
 
     Ok(())
@@ -63,12 +71,12 @@ fn data_echo_is_resent_unchanged() -> Result<()> {
     assert!(resent.is_empty(), "Expected exactly one retransmitted segment");
     assert_eq!(
         reply,
-        server_reply(
-            SERVER_ISN + SYN_BYTE,
-            CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-            TcpFlags::Ack,
-            b"Hello"
-        )
+        TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            payload: payload_from("Hello"),
+            ..SERVER_REPLY
+        }
     );
 
     Ok(())
@@ -86,7 +94,12 @@ fn fin_ack_is_resent_unchanged() -> Result<()> {
     assert!(resent.is_empty(), "Expected exactly one retransmitted segment");
     assert_eq!(
         reply,
-        server_reply(SERVER_ISN + SYN_BYTE, CLIENT_ISN + SYN_BYTE, TcpFlags::FinAck, &[])
+        TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE,
+            flags: TcpFlags::FinAck,
+            ..SERVER_REPLY
+        }
     );
 
     Ok(())
@@ -127,22 +140,22 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result<()> {
 
     assert_eq!(
         hello,
-        server_reply(
-            SERVER_ISN + SYN_BYTE,
-            CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-            TcpFlags::Ack,
-            b"Hello"
-        )
+        TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            payload: payload_from("Hello"),
+            ..SERVER_REPLY
+        }
     );
 
     assert_eq!(
         hi,
-        server_reply(
-            SERVER_ISN + SYN_BYTE + HELLO_LEN,
-            CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
-            TcpFlags::Ack,
-            b"Hi"
-        )
+        TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
+            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
+            payload: payload_from("Hi"),
+            ..SERVER_REPLY
+        }
     );
 
     Ok(())

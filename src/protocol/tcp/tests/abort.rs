@@ -30,7 +30,11 @@ fn rst_within_window_but_not_at_rcv_nxt_gets_challenge_ack() -> Result<()> {
 
     assert_eq!(
         reply,
-        Some(server_reply(SERVER_ISN + SYN_BYTE, CLIENT_ISN + SYN_BYTE, TcpFlags::Ack, &[])),
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE,
+            ..SERVER_REPLY
+        }),
         "In-window non-exact RST should get a challenge ACK, not a silent drop or reset"
     );
 

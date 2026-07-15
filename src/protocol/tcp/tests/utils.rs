@@ -57,21 +57,20 @@ pub const CLIENT_PACKET: TcpHandler = TcpHandler {
     payload: None,
 };
 
+/// An outgoing pure ACK packet from the server (port 80) to the client (port 1234).
+/// `seq_num` and `ack_num` will be 0 if not overridden.
+pub const SERVER_REPLY: TcpHandler = TcpHandler {
+    ip_pair: Ipv4AddrPair { src: KEY.server_ip, dst: KEY.client_ip },
+    ports: PortPair { src: KEY.server_port, dst: KEY.client_port },
+    seq_num: 0,
+    ack_num: 0,
+    offset_bytes: 20,
+    flags: TcpFlags::Ack,
+    window: u16::MAX,
+    payload: None,
+};
+
 /// Converts a `&str` into an `Option<Rc<[u8]>>`, with an empty string mapping to `None`.
 pub fn payload_from(payload: &str) -> Option<Rc<[u8]>> {
     (!payload.is_empty()).then(|| Rc::from(payload.as_bytes()))
-}
-
-/// Builds an expected reply from the server (port 80) to the client (port 1234).
-pub fn server_reply(seq_num: u32, ack_num: u32, flags: TcpFlags, payload: &[u8]) -> TcpHandler {
-    TcpHandler {
-        ip_pair: Ipv4AddrPair { src: KEY.server_ip, dst: KEY.client_ip },
-        ports: PortPair { src: KEY.server_port, dst: KEY.client_port },
-        seq_num,
-        ack_num,
-        offset_bytes: 20,
-        flags,
-        window: u16::MAX,
-        payload: (!payload.is_empty()).then(|| Rc::from(payload)),
-    }
 }

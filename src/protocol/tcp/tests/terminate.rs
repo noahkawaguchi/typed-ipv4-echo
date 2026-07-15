@@ -16,12 +16,12 @@ fn creates_valid_fin_ack() -> Result<()> {
 
     assert_eq!(
         reply,
-        Some(server_reply(
-            SERVER_ISN + SYN_BYTE,
-            CLIENT_ISN + SYN_BYTE + FIN_BYTE,
-            TcpFlags::FinAck,
-            &[]
-        ))
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE + FIN_BYTE,
+            flags: TcpFlags::FinAck,
+            ..SERVER_REPLY
+        })
     );
 
     // Connection is now in LAST-ACK state (waiting for client's final ACK), not yet removed
@@ -123,7 +123,11 @@ fn out_of_order_fin_ack_gets_duplicate_ack_without_closing() -> Result<()> {
 
     assert_eq!(
         reply,
-        Some(server_reply(SERVER_ISN + SYN_BYTE, CLIENT_ISN + SYN_BYTE, TcpFlags::Ack, &[])),
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE,
+            ..SERVER_REPLY
+        }),
         "Out-of-order FIN-ACK should get a duplicate ACK reflecting rcv_nxt=CLIENT_ISN+1, not a \
          FIN-ACK in response"
     );
@@ -187,7 +191,12 @@ fn close_established_sends_fin_ack_and_transitions_to_fin_wait_1() -> Result<()>
     assert!(replies.is_empty(), "Expected exactly one reply");
     assert_eq!(
         reply,
-        server_reply(SERVER_ISN + SYN_BYTE, CLIENT_ISN + SYN_BYTE, TcpFlags::FinAck, &[])
+        TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE,
+            flags: TcpFlags::FinAck,
+            ..SERVER_REPLY
+        }
     );
 
     // IP addresses are swapped: server -> client
@@ -255,12 +264,11 @@ fn fin_wait_2_closes_on_fin_ack_from_peer() -> Result<()> {
 
     assert_eq!(
         fin_reply,
-        Some(server_reply(
-            SERVER_ISN + SYN_BYTE + FIN_BYTE,
-            CLIENT_ISN + SYN_BYTE + FIN_BYTE,
-            TcpFlags::Ack,
-            &[]
-        ))
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE + FIN_BYTE,
+            ..SERVER_REPLY
+        })
     );
 
     assert_matches!(connections.try_get(), Err(_), "Connection should be removed");
@@ -287,12 +295,11 @@ fn fin_wait_1_closes_immediately_if_peers_fin_also_acks_ours() -> Result<()> {
 
     assert_eq!(
         reply,
-        Some(server_reply(
-            SERVER_ISN + SYN_BYTE + FIN_BYTE,
-            CLIENT_ISN + SYN_BYTE + FIN_BYTE,
-            TcpFlags::Ack,
-            &[]
-        ))
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE + FIN_BYTE,
+            ..SERVER_REPLY
+        })
     );
 
     assert_matches!(connections.try_get(), Err(_), "Connection should be removed");
@@ -320,12 +327,11 @@ fn data_after_our_fin_in_fin_wait_1_is_acked_without_echo() -> Result<()> {
 
     assert_eq!(
         reply,
-        Some(server_reply(
-            SERVER_ISN + SYN_BYTE + FIN_BYTE,
-            CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-            TcpFlags::Ack,
-            &[]
-        )),
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            ..SERVER_REPLY
+        }),
         "Data arriving after our FIN should be ACKed without being echoed, not RST"
     );
 
@@ -363,12 +369,11 @@ fn data_after_our_fin_in_fin_wait_2_is_acked_without_echo() -> Result<()> {
 
     assert_eq!(
         reply,
-        Some(server_reply(
-            SERVER_ISN + SYN_BYTE + FIN_BYTE,
-            CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-            TcpFlags::Ack,
-            &[]
-        )),
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            ..SERVER_REPLY
+        }),
         "Data arriving after our FIN should be ACKed without being echoed, not RST"
     );
 
@@ -396,12 +401,11 @@ fn simultaneous_close_transitions_through_closing_to_closed() -> Result<()> {
 
     assert_eq!(
         reply,
-        Some(server_reply(
-            SERVER_ISN + SYN_BYTE + FIN_BYTE,
-            CLIENT_ISN + SYN_BYTE + FIN_BYTE,
-            TcpFlags::Ack,
-            &[]
-        ))
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE + FIN_BYTE,
+            ..SERVER_REPLY
+        })
     );
 
     cloned_state.tcp_state = TcpState::Closing;

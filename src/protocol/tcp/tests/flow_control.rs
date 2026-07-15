@@ -17,12 +17,12 @@ fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result<()> {
 
     assert_eq!(
         reply,
-        Some(server_reply(
-            SERVER_ISN + SYN_BYTE,
-            CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-            TcpFlags::Ack,
-            b"Hel",
-        )),
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            payload: payload_from("Hel"),
+            ..SERVER_REPLY
+        }),
         "Only the first 3 bytes fit in the advertised window of 3"
     );
 
@@ -72,12 +72,12 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result<()> {
 
     assert_eq!(
         reply,
-        Some(server_reply(
-            SERVER_ISN + SYN_BYTE + 3,
-            CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-            TcpFlags::Ack,
-            b"lo",
-        )),
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE + 3,
+            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            payload: payload_from("lo"),
+            ..SERVER_REPLY
+        }),
         "The buffered remainder should drain once the window opens, piggybacked on the next ACK"
     );
 
@@ -112,12 +112,11 @@ fn zero_window_buffers_entire_payload_and_gets_bare_ack() -> Result<()> {
 
     assert_eq!(
         reply,
-        Some(server_reply(
-            SERVER_ISN + SYN_BYTE,
-            CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-            TcpFlags::Ack,
-            &[],
-        )),
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            ..SERVER_REPLY
+        }),
         "A closed window still gets a bare ACK for the receipt, just no echoed payload"
     );
 

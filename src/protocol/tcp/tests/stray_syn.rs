@@ -17,7 +17,11 @@ fn stray_syn_out_of_window_on_established_gets_challenge_ack() -> Result<()> {
 
     assert_eq!(
         reply,
-        Some(server_reply(SERVER_ISN + SYN_BYTE, CLIENT_ISN + SYN_BYTE, TcpFlags::Ack, &[])),
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE,
+            ..SERVER_REPLY
+        }),
         "Out-of-window stray SYN must produce a challenge ACK, not a RST"
     );
 
@@ -47,7 +51,11 @@ fn stray_syn_in_window_on_established_gets_challenge_ack() -> Result<()> {
 
     assert_eq!(
         reply,
-        Some(server_reply(SERVER_ISN + SYN_BYTE, CLIENT_ISN + SYN_BYTE, TcpFlags::Ack, &[])),
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE,
+            ..SERVER_REPLY
+        }),
         "In-window stray SYN must produce a challenge ACK, not a RST"
     );
 
@@ -77,12 +85,11 @@ fn stray_syn_in_window_on_fin_wait_1_gets_challenge_ack() -> Result<()> {
 
     assert_eq!(
         reply,
-        Some(server_reply(
-            SERVER_ISN + SYN_BYTE + FIN_BYTE,
-            CLIENT_ISN + SYN_BYTE,
-            TcpFlags::Ack,
-            &[]
-        )),
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE,
+            ..SERVER_REPLY
+        }),
         "Stray SYN in FIN-WAIT-1 must produce a challenge ACK using snd_nxt=SERVER_ISN+2"
     );
 

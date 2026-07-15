@@ -10,7 +10,15 @@ fn creates_valid_syn_ack() -> Result<()> {
     // seq_num is the random ISN that was stored in the connection table
     let stored_isn = connections.try_get()?.snd_una;
 
-    assert_eq!(reply, Some(server_reply(stored_isn, CLIENT_ISN + SYN_BYTE, TcpFlags::SynAck, &[])));
+    assert_eq!(
+        reply,
+        Some(TcpHandler {
+            seq_num: stored_isn,
+            ack_num: CLIENT_ISN + SYN_BYTE,
+            flags: TcpFlags::SynAck,
+            ..SERVER_REPLY
+        })
+    );
 
     Ok(())
 }
@@ -29,7 +37,12 @@ fn duplicate_syn_during_syn_received_resends_same_syn_ack() -> Result<()> {
 
     assert_eq!(
         reply,
-        Some(server_reply(SERVER_ISN, CLIENT_ISN + SYN_BYTE, TcpFlags::SynAck, &[])),
+        Some(TcpHandler {
+            seq_num: SERVER_ISN,
+            ack_num: CLIENT_ISN + SYN_BYTE,
+            flags: TcpFlags::SynAck,
+            ..SERVER_REPLY
+        }),
         "Retransmitted SYN should get the same SYN-ACK resent, not a RST"
     );
 
@@ -55,7 +68,10 @@ fn data_packet_before_complete_handshake_gets_rst() -> Result<()> {
     }
     .create_reply(&mut connections)?;
 
-    assert_eq!(reply, Some(server_reply(SERVER_ISN + SYN_BYTE, 0, TcpFlags::Rst, &[])));
+    assert_eq!(
+        reply,
+        Some(TcpHandler { seq_num: SERVER_ISN + SYN_BYTE, flags: TcpFlags::Rst, ..SERVER_REPLY })
+    );
 
     Ok(())
 }
