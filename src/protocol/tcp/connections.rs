@@ -8,7 +8,7 @@ use {
         },
     },
     std::{
-        collections::HashMap,
+        collections::{HashMap, VecDeque},
         net::Ipv4Addr,
         time::{Duration, Instant},
     },
@@ -60,6 +60,7 @@ impl TcpConnections {
                 snd_wl1: 0,
                 snd_wl2: 0,
                 pending: vec![PendingSegment::new(send_info, 1)],
+                send_buffer: VecDeque::new(),
             },
         );
     }
@@ -187,7 +188,7 @@ impl TcpConnections {
         self.table.insert(KEY, conn);
     }
 
-    /// Inserts a SYN-RECEIVED connection into the table using `KEY`, `CLIENT_ISN`, AND
+    /// Inserts a SYN-RECEIVED connection into the table using `KEY`, `CLIENT_ISN`, and
     /// `SERVER_ISN`.
     #[cfg(test)]
     pub(super) fn insert_syn_recv(&mut self) {
@@ -204,24 +205,14 @@ impl TcpConnections {
         );
     }
 
-    /// Inserts an ESTABLISHED connection into the table using `KEY`, `CLIENT_ISN`, AND
-    /// `SERVER_ISN`.
+    /// Creates a default-initialized `Self` and inserts a default-initialized ESTABLISHED
+    /// connection using `KEY` as if the initial three-way handshake had just completed.
     #[cfg(test)]
-    pub(super) fn insert_established(&mut self) {
-        use crate::protocol::tcp::tests::{CLIENT_ISN, KEY, SERVER_ISN, SYN_BYTE};
+    pub(super) fn after_handshake() -> Self {
+        use crate::protocol::tcp::tests::{AFTER_HANDSHAKE, KEY};
 
-        self.table.insert(
-            KEY,
-            ConnState {
-                tcp_state: TcpState::Established,
-                snd_nxt: SERVER_ISN + SYN_BYTE,
-                rcv_nxt: CLIENT_ISN + SYN_BYTE,
-                snd_una: SERVER_ISN + SYN_BYTE,
-                snd_wnd: TcpHandler::RCV_WND,
-                snd_wl1: CLIENT_ISN + SYN_BYTE,
-                snd_wl2: SERVER_ISN + SYN_BYTE,
-                pending: Vec::new(),
-            },
-        );
+        let mut connections = Self::default();
+        connections.table.insert(KEY, AFTER_HANDSHAKE);
+        connections
     }
 }

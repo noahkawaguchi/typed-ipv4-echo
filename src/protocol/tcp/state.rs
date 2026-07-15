@@ -1,6 +1,13 @@
 use {
-    crate::protocol::tcp::SendInfo,
-    std::time::{Duration, Instant},
+    crate::protocol::tcp::{
+        SendInfo, TcpHandler,
+        seq_space::{SeqLe as _, SeqLt as _},
+    },
+    std::{
+        collections::VecDeque,
+        rc::Rc,
+        time::{Duration, Instant},
+    },
 };
 
 /// The state of a connection in the table, including its TCP state and other locally stored data.
@@ -36,6 +43,56 @@ pub(super) struct ConnState {
 
     /// Unacked segments sent by the server, kept for retransmission purposes.
     pub(super) pending: Vec<PendingSegment>,
+
+    /// Bytes received from the peer that are queued to be echoed once SND.WND has room for them.
+    pub(super) send_buffer: VecDeque<u8>,
+}
+
+impl ConnState {
+    /// Per RFC 9293, Section 3.10.7.4, "Fifth, check the ACK field," "ESTABLISHED STATE," processes
+    /// an incoming segment's acknowledgment against the send-side state, updating SND.WND, SND.WL1,
+    /// SND.WL2, SND.UNA, and the retransmission queue as necessary.
+    ///
+    /// Ignores ACKs that are old (before SND.UNA) or for data not yet sent (past SND.NXT). For
+    /// updates to SND.UNA and the retransmission queue, ignores duplicate ACKs
+    /// (SND.UNA == SEG.ACK).
+    pub(super) fn incoming_ack_update(&mut self, seg: &TcpHandler) {
+        if self.snd_una.seq_le(seg.ack_num) && seg.ack_num.seq_le(self.snd_nxt) {
+            // Include duplicate ACKs: SND.UNA <= SEG.ACK <= SND.NXT
+            //     and
+            // Guard against an old/reordered segment clobbering the window with stale data:
+            //     SND.WL1 < SEG.SEQ or (SND.WL1 == SEG.SEQ and SND.WL2 <= SEG.ACK)
+            if self.snd_wl1.seq_lt(seg.seq_num)
+                || (self.snd_wl1 == seg.seq_num && self.snd_wl2.seq_le(seg.ack_num))
+            {
+                self.snd_wnd = seg.window;
+                self.snd_wl1 = seg.seq_num;
+                self.snd_wl2 = seg.ack_num;
+            }
+
+            // Exclude duplicate ACKs: SND.UNA < SEG.ACK <= SND.NXT
+            if self.snd_una.seq_lt(seg.ack_num) {
+                self.snd_una = seg.ack_num;
+
+                // ACKs are cumulative, so only keep pending segments not fully covered by SEG.ACK
+                self.pending
+                    .retain(|pending_seg| seg.ack_num.seq_lt(pending_seg.end_seq));
+            }
+        }
+    }
+
+    /// Removes and returns as many bytes as the peer's currently advertised window allows from the
+    /// front of the send buffer, or `None` if nothing can be sent right now because the buffer is
+    /// empty or the window is full. Does not mutate any other state.
+    pub(super) fn drain_transmittable(&mut self) -> Option<Rc<[u8]>> {
+        let sent_but_not_acked = self.snd_nxt.wrapping_sub(self.snd_una);
+        let available = u32::from(self.snd_wnd).saturating_sub(sent_but_not_acked);
+        let n = usize::try_from(available)
+            .unwrap_or(usize::MAX)
+            .min(self.send_buffer.len());
+
+        (n > 0).then(|| self.send_buffer.drain(..n).collect())
+    }
 }
 
 #[cfg(test)]
@@ -54,6 +111,7 @@ impl PartialEq for ConnState {
             snd_wl1: _,
             snd_wl2: _,
             pending: _,
+            ref send_buffer,
         }: &Self,
     ) -> bool {
         self.tcp_state == tcp_state
@@ -61,6 +119,7 @@ impl PartialEq for ConnState {
             && self.rcv_nxt == rcv_nxt
             && self.snd_una == snd_una
             && self.snd_wnd == snd_wnd
+            && &self.send_buffer == send_buffer
     }
 }
 

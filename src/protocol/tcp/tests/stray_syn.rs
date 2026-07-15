@@ -6,18 +6,22 @@ fn stray_syn_out_of_window_on_established_gets_challenge_ack() -> Result<()> {
     // window gets a challenge ACK (<SEQ=SND.NXT><ACK=RCV.NXT><CTL=ACK>) and is dropped. "Fourth,
     // check the SYN bit" is not reached.
 
-    let mut connections = TcpConnections::default();
-    connections.insert_established(); // snd_nxt=SERVER_ISN+1, rcv_nxt=CLIENT_ISN+1
+    // snd_nxt=SERVER_ISN+1, rcv_nxt=CLIENT_ISN+1
+    let mut connections = TcpConnections::after_handshake();
     let initial_state = connections.try_get()?.clone();
 
     // seq=CLIENT_ISN-20 < rcv_nxt=CLIENT_ISN+1, outside the receive window, caught at "First, check
     // sequence number"
-    let reply =
-        client_packet(CLIENT_ISN - 20, 0, TcpFlags::Syn, &[]).create_reply(&mut connections)?;
+    let reply = TcpHandler { seq_num: CLIENT_ISN - 20, flags: TcpFlags::Syn, ..CLIENT_PACKET }
+        .create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
-        Some(server_reply(SERVER_ISN + SYN_BYTE, CLIENT_ISN + SYN_BYTE, TcpFlags::Ack, &[])),
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE,
+            ..SERVER_REPLY
+        }),
         "Out-of-window stray SYN must produce a challenge ACK, not a RST"
     );
 
@@ -36,17 +40,22 @@ fn stray_syn_in_window_on_established_gets_challenge_ack() -> Result<()> {
     // (incorporated into RFC 9293) recommends a challenge ACK irrespective of the sequence number,
     // and the connection must not be reset.
 
-    let mut connections = TcpConnections::default();
-    connections.insert_established(); // snd_nxt=SERVER_ISN+1, rcv_nxt=CLIENT_ISN+1
+    // snd_nxt=SERVER_ISN+1, rcv_nxt=CLIENT_ISN+1
+    let mut connections = TcpConnections::after_handshake();
     let initial_state = connections.try_get()?.clone();
 
     // seq=CLIENT_ISN+1 == rcv_nxt, inside the receive window, reaches "Fourth, check the SYN bit"
-    let reply = client_packet(CLIENT_ISN + SYN_BYTE, 0, TcpFlags::Syn, &[])
-        .create_reply(&mut connections)?;
+    let reply =
+        TcpHandler { seq_num: CLIENT_ISN + SYN_BYTE, flags: TcpFlags::Syn, ..CLIENT_PACKET }
+            .create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
-        Some(server_reply(SERVER_ISN + SYN_BYTE, CLIENT_ISN + SYN_BYTE, TcpFlags::Ack, &[])),
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE,
+            ..SERVER_REPLY
+        }),
         "In-window stray SYN must produce a challenge ACK, not a RST"
     );
 
@@ -64,24 +73,23 @@ fn stray_syn_in_window_on_fin_wait_1_gets_challenge_ack() -> Result<()> {
     // The same RFC 9293, Section 3.10.7.4 SYN rule as above applies to all synchronized states
     // listed there, not just ESTABLISHED.
 
-    let mut connections = TcpConnections::default();
-    connections.insert_established(); // rcv_nxt=CLIENT_ISN+1
+    let mut connections = TcpConnections::after_handshake(); // rcv_nxt=CLIENT_ISN+1
     connections.close_established(); // -> FIN-WAIT-1, snd_nxt=SERVER_ISN+2
 
     let initial_state = connections.try_get()?.clone();
     assert_eq!(initial_state.tcp_state, TcpState::FinWait1);
 
-    let reply = client_packet(CLIENT_ISN + SYN_BYTE, 0, TcpFlags::Syn, &[])
-        .create_reply(&mut connections)?;
+    let reply =
+        TcpHandler { seq_num: CLIENT_ISN + SYN_BYTE, flags: TcpFlags::Syn, ..CLIENT_PACKET }
+            .create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
-        Some(server_reply(
-            SERVER_ISN + SYN_BYTE + FIN_BYTE,
-            CLIENT_ISN + SYN_BYTE,
-            TcpFlags::Ack,
-            &[]
-        )),
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE,
+            ..SERVER_REPLY
+        }),
         "Stray SYN in FIN-WAIT-1 must produce a challenge ACK using snd_nxt=SERVER_ISN+2"
     );
 

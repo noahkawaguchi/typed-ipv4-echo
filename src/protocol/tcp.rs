@@ -76,7 +76,12 @@ impl TcpHandler {
     /// receive... segments overlapping the range RCV.NXT to RCV.NXT + RCV.WND - 1 carry acceptable
     /// data or control" (RFC 9293, Section 4).
     ///
-    /// Left at max because as an echo server, there's no buffer accumulating data.
+    /// Currently left at max because as an echo server, there's no receive-side buffer accumulating
+    /// data for an application.
+    ///
+    /// However, a dynamic RCV.WND could be used in the future to bound the send buffer's growth,
+    /// throttling the peer's sending rate if they keep sending more data than they are willing to
+    /// receive.
     const RCV_WND: u16 = u16::MAX;
 
     /// Parses `data` as a TCP header and payload.
@@ -211,7 +216,7 @@ impl TcpHandler {
                 TcpFlags::Ack,
                 None,
             ) if conn.snd_una.wrapping_add(1) == self.ack_num => {
-                self.incoming_ack_update(conn);
+                conn.incoming_ack_update(self);
                 conn.tcp_state = TcpState::Established;
                 conn.rcv_nxt = self.seq_num;
                 None
@@ -232,19 +237,24 @@ impl TcpHandler {
             }),
 
             // Pure ACK (no payload) on an established connection (acknowledgment of data sent by
-            // the server) -> advance snd_una, no reply
+            // the server) -> advance SND.UNA, then send however much the window allows from the
+            // data queued to be sent, if any
             (
                 Some(conn @ ConnState { tcp_state: TcpState::Established, .. }),
                 TcpFlags::Ack,
                 None,
             ) => {
-                self.incoming_ack_update(conn);
-                None
+                conn.incoming_ack_update(self);
+
+                match conn.drain_transmittable() {
+                    Some(to_send) => Some(Self::data_payload(conn, to_send)?),
+                    None => None,
+                }
             }
 
-            // In-order data packet on an established connection -> send ACK, echo payload. Use
-            // snd_nxt as seq_num and rcv_nxt + bytes received as ack_num, then advance both locally
-            // by bytes received.
+            // In-order data packet on an established connection -> ACK receipt of data, advancing
+            // RCV.NXT, and echo as much of the queued data as SND.WND currently allows. Buffer
+            // anything that doesn't fit to go out later as the window opens.
             (
                 Some(conn @ ConnState { tcp_state: TcpState::Established, .. }),
                 TcpFlags::Ack,
@@ -252,21 +262,20 @@ impl TcpHandler {
             ) if self.seq_num == conn.rcv_nxt => {
                 let payload_len = u32::from(self.payload_len()?);
 
-                let send_info = SendInfo {
-                    seq_num: conn.snd_nxt,
-                    ack_num: conn.rcv_nxt.wrapping_add(payload_len),
-                    flags: TcpFlags::Ack,
-                    payload: Some(Rc::clone(payload)),
-                };
-
-                self.incoming_ack_update(conn);
-                conn.snd_nxt.advance_by(payload_len);
+                conn.incoming_ack_update(self);
                 conn.rcv_nxt.advance_by(payload_len);
+                conn.send_buffer.extend(payload.iter());
 
-                conn.pending
-                    .push(PendingSegment::new(send_info.clone(), payload_len));
+                Some(match conn.drain_transmittable() {
+                    Some(to_send) => Self::data_payload(conn, to_send)?,
 
-                Some(send_info)
+                    None => SendInfo {
+                        seq_num: conn.snd_nxt,
+                        ack_num: conn.rcv_nxt,
+                        flags: TcpFlags::Ack,
+                        payload: None,
+                    },
+                })
             }
 
             // Out-of-order/duplicate data or out-of-order FIN-ACK on an established connection
@@ -277,7 +286,7 @@ impl TcpHandler {
                 TcpFlags::Ack | TcpFlags::FinAck,
                 _,
             ) if self.seq_num != conn.rcv_nxt => {
-                self.incoming_ack_update(conn);
+                conn.incoming_ack_update(self);
 
                 Some(SendInfo {
                     seq_num: conn.snd_nxt,
@@ -301,7 +310,7 @@ impl TcpHandler {
                     payload: None,
                 };
 
-                self.incoming_ack_update(conn);
+                conn.incoming_ack_update(self);
 
                 conn.tcp_state = TcpState::LastAck;
                 conn.snd_nxt.advance_by(1); // Our FIN consumes one sequence number
@@ -335,7 +344,7 @@ impl TcpHandler {
                     payload: None,
                 };
 
-                self.incoming_ack_update(conn);
+                conn.incoming_ack_update(self);
                 conn.rcv_nxt.advance_by(payload_len);
 
                 Some(send_info)
@@ -345,7 +354,7 @@ impl TcpHandler {
             (Some(conn @ ConnState { tcp_state: TcpState::FinWait1, .. }), TcpFlags::Ack, None)
                 if self.ack_num == conn.snd_nxt =>
             {
-                self.incoming_ack_update(conn);
+                conn.incoming_ack_update(self);
                 conn.tcp_state = TcpState::FinWait2;
                 None
             }
@@ -365,7 +374,7 @@ impl TcpHandler {
                     payload: None,
                 };
 
-                self.incoming_ack_update(conn);
+                conn.incoming_ack_update(self);
 
                 if self.ack_num == conn.snd_nxt {
                     connections.remove(&key);
@@ -473,36 +482,22 @@ impl TcpHandler {
         }))
     }
 
-    /// Per RFC 9293, Section 3.10.7.4, "Fifth, check the ACK field," "ESTABLISHED STATE," processes
-    /// an incoming segment's acknowledgment against the send-side state, updating SND.WND, SND.WL1,
-    /// SND.WL2, SND.UNA, and the retransmission queue as necessary.
-    ///
-    /// Ignores ACKs that are old (before SND.UNA) or for data not yet sent (past SND.NXT). For
-    /// updates to SND.UNA and the retransmission queue, ignores duplicate ACKs
-    /// (SND.UNA == SEG.ACK).
-    fn incoming_ack_update(&self, conn: &mut ConnState) {
-        if conn.snd_una.seq_le(self.ack_num) && self.ack_num.seq_le(conn.snd_nxt) {
-            // Include duplicate ACKs: SND.UNA <= SEG.ACK <= SND.NXT
-            //     and
-            // Guard against an old/reordered segment clobbering the window with stale data:
-            //     SND.WL1 < SEG.SEQ or (SND.WL1 == SEG.SEQ and SND.WL2 <= SEG.ACK)
-            if conn.snd_wl1.seq_lt(self.seq_num)
-                || (conn.snd_wl1 == self.seq_num && conn.snd_wl2.seq_le(self.ack_num))
-            {
-                conn.snd_wnd = self.window;
-                conn.snd_wl1 = self.seq_num;
-                conn.snd_wl2 = self.ack_num;
-            }
+    /// Creates a `SendInfo` for the payload `to_send`, using and then updating the state of `conn`.
+    fn data_payload(conn: &mut ConnState, to_send: Rc<[u8]>) -> Result<SendInfo, TryFromIntError> {
+        let send_len = u32::try_from(to_send.len())?;
 
-            // Exclude duplicate ACKs: SND.UNA < SEG.ACK <= SND.NXT
-            if conn.snd_una.seq_lt(self.ack_num) {
-                conn.snd_una = self.ack_num;
+        let send_info = SendInfo {
+            seq_num: conn.snd_nxt,
+            ack_num: conn.rcv_nxt,
+            flags: TcpFlags::Ack,
+            payload: Some(to_send),
+        };
 
-                // ACKs are cumulative, so only keep pending segments not fully covered by SEG.ACK
-                conn.pending
-                    .retain(|pending_seg| self.ack_num.seq_lt(pending_seg.end_seq));
-            }
-        }
+        conn.snd_nxt.advance_by(send_len);
+        conn.pending
+            .push(PendingSegment::new(send_info.clone(), send_len));
+
+        Ok(send_info)
     }
 
     /// Returns the number of bytes in the payload, or 0 if the payload is `None`.
@@ -593,73 +588,19 @@ mod tests {
     mod abort;
     mod echo;
     mod establish;
+    mod flow_control;
     mod parse;
     mod retransmit;
     mod stray_syn;
     mod terminate;
+    mod utils;
     mod window;
     mod write;
 
+    pub(super) use utils::*;
     use {
         super::*,
         crate::protocol::test_consts::{DST_IP, IP_PAIR, SRC_IP},
-        std::assert_matches,
+        std::{assert_matches, collections::VecDeque},
     };
-
-    /// Fixed value to use as the ISN randomly chosen by the client.
-    pub(super) const CLIENT_ISN: u32 = 100;
-
-    /// Fixed value to use as the ISN randomly chosen by the server.
-    pub(super) const SERVER_ISN: u32 = 400;
-
-    /// Checks at compile time that `CLIENT_ISN` and `SERVER_ISN` are sufficiently far from each
-    /// other so they cannot be mixed up in tests.
-    const _: () = assert!(CLIENT_ISN.abs_diff(SERVER_ISN) >= 100);
-
-    /// The single phantom byte consumed by SYN.
-    pub(super) const SYN_BYTE: u32 = 1;
-
-    /// The single phantom byte consumed by FIN.
-    const FIN_BYTE: u32 = 1;
-
-    /// The number of bytes in the payload `"Hello"`.
-    const HELLO_LEN: u32 = 5;
-
-    /// The number of bytes in the payload `"Hi"`.
-    const HI_LEN: u32 = 2;
-
-    /// The number of bytes in the payload `"Hey"`.
-    const HEY_LEN: u32 = 3;
-
-    /// Connection key shared by test modules.
-    pub(super) const KEY: ConnKey =
-        ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
-
-    /// Builds an incoming packet from the client (port 1234) to the server (port 80).
-    fn client_packet(seq_num: u32, ack_num: u32, flags: TcpFlags, payload: &[u8]) -> TcpHandler {
-        TcpHandler {
-            ip_pair: Ipv4AddrPair { src: KEY.client_ip, dst: KEY.server_ip },
-            ports: PortPair { src: KEY.client_port, dst: KEY.server_port },
-            seq_num,
-            ack_num,
-            offset_bytes: 20,
-            flags,
-            window: TcpHandler::RCV_WND,
-            payload: (!payload.is_empty()).then(|| Rc::from(payload)),
-        }
-    }
-
-    /// Builds an expected reply from the server (port 80) to the client (port 1234).
-    fn server_reply(seq_num: u32, ack_num: u32, flags: TcpFlags, payload: &[u8]) -> TcpHandler {
-        TcpHandler {
-            ip_pair: Ipv4AddrPair { src: KEY.server_ip, dst: KEY.client_ip },
-            ports: PortPair { src: KEY.server_port, dst: KEY.client_port },
-            seq_num,
-            ack_num,
-            offset_bytes: 20,
-            flags,
-            window: TcpHandler::RCV_WND,
-            payload: (!payload.is_empty()).then(|| Rc::from(payload)),
-        }
-    }
 }
