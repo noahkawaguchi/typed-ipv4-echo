@@ -9,7 +9,8 @@ use {
     std::fmt,
 };
 
-const ICMP_HEADER_LEN: u16 = 8;
+/// The number of bytes in an ICMP header.
+const ICMP_HDR_LEN: u16 = 8;
 
 /// Manages ICMP Echo Request/Reply headers, data, and reply logic.
 #[cfg_attr(test, derive(Debug))]
@@ -32,7 +33,7 @@ impl<'a> IcmpEchoHandler<'a> {
 
     /// Parses `data` as an ICMP Echo Request header and payload.
     pub(super) fn parse(data: &'a [u8], ip_pair: Ipv4AddrPair) -> Result<Self, String> {
-        let Some((icmp_header, payload)) = data.split_first_chunk::<{ ICMP_HEADER_LEN as usize }>()
+        let Some((icmp_header, payload)) = data.split_first_chunk::<{ ICMP_HDR_LEN as usize }>()
         else {
             return Err(format!("Too short for ICMP header ({} bytes)", data.len()));
         };
@@ -77,8 +78,7 @@ impl Encode for IcmpEchoHandler<'_> {
     fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
         // Copy echo payload
         buf.try_get_mut(
-            usize::from(ICMP_HEADER_LEN)
-                ..usize::from(ICMP_HEADER_LEN).try_add(self.payload.len())?,
+            usize::from(ICMP_HDR_LEN)..usize::from(ICMP_HDR_LEN).try_add(self.payload.len())?,
         )?
         .copy_from_slice(self.payload);
 
@@ -96,7 +96,7 @@ impl Encode for IcmpEchoHandler<'_> {
             .copy_from_slice(&self.sequence.to_be_bytes());
 
         // ICMP length: fixed ICMP header length (8 bytes) + length of echo payload
-        let icmp_len = ICMP_HEADER_LEN.try_add(self.payload.len().try_into()?)?;
+        let icmp_len = ICMP_HDR_LEN.try_add(self.payload.len().try_into()?)?;
 
         // Calculate ICMP checksum (covers the entire ICMP message: header + payload)
         let icmp_checksum = checksum::calculate(buf.try_get(..usize::from(icmp_len))?);

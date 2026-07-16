@@ -8,7 +8,8 @@ use {
     std::fmt,
 };
 
-const UDP_HEADER_LEN: u16 = 8;
+/// The number of bytes in a UDP header.
+const UDP_HDR_LEN: u16 = 8;
 
 /// Manages UDP headers, data, and reply logic.
 #[cfg_attr(test, derive(Debug))]
@@ -23,7 +24,7 @@ pub struct UdpHandler<'a> {
 impl<'a> UdpHandler<'a> {
     /// Parses `data` as a UDP header and payload.
     pub(super) fn parse(data: &'a [u8], ip_pair: Ipv4AddrPair) -> Result<Self> {
-        let Some((udp_header, payload)) = data.split_first_chunk::<{ UDP_HEADER_LEN as usize }>()
+        let Some((udp_header, payload)) = data.split_first_chunk::<{ UDP_HDR_LEN as usize }>()
         else {
             return Err(format!("Too short for UDP header ({} bytes)", data.len()).into());
         };
@@ -61,7 +62,7 @@ impl Encode for UdpHandler<'_> {
             .copy_from_slice(&self.ports.dst.to_be_bytes());
 
         // UDP length: fixed UDP header length (8 bytes) + length of echo payload
-        let udp_len = UDP_HEADER_LEN.try_add(self.payload.len().try_into()?)?;
+        let udp_len = UDP_HDR_LEN.try_add(self.payload.len().try_into()?)?;
         buf.try_get_mut(4..6)?
             .copy_from_slice(&udp_len.to_be_bytes());
 
@@ -69,7 +70,7 @@ impl Encode for UdpHandler<'_> {
 
         // Copy payload for echo
         buf.try_get_mut(
-            usize::from(UDP_HEADER_LEN)..usize::from(UDP_HEADER_LEN).try_add(self.payload.len())?,
+            usize::from(UDP_HDR_LEN)..usize::from(UDP_HDR_LEN).try_add(self.payload.len())?,
         )?
         .copy_from_slice(self.payload);
 

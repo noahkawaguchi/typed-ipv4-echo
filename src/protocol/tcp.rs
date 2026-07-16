@@ -26,7 +26,8 @@ use {
     std::{fmt, num::TryFromIntError, rc::Rc},
 };
 
-const TCP_HEADER_MIN_LEN: u8 = 20;
+/// The minimum number of bytes in a TCP header (no options).
+const TCP_HDR_MIN_LEN: u8 = 20;
 
 /// Manages TCP headers, data, and reply logic. Field definitions below from RFC 9293, Section 3.1.
 #[cfg_attr(test, derive(Debug, PartialEq, Eq, Clone))]
@@ -86,7 +87,7 @@ impl TcpHandler {
 
     /// Parses `data` as a TCP header and payload.
     pub(super) fn parse(data: &[u8], ip_pair: Ipv4AddrPair) -> Result<Self> {
-        let Some(tcp_header) = data.first_chunk::<{ TCP_HEADER_MIN_LEN as usize }>() else {
+        let Some(tcp_header) = data.first_chunk::<{ TCP_HDR_MIN_LEN as usize }>() else {
             return Err(format!("Too short for TCP header ({} bytes)", data.len()).into());
         };
 
@@ -135,7 +136,7 @@ impl TcpHandler {
             ports,
             seq_num,
             ack_num,
-            offset_bytes: TCP_HEADER_MIN_LEN,
+            offset_bytes: TCP_HDR_MIN_LEN,
             flags,
             window: Self::RCV_WND,
             payload,
@@ -540,14 +541,13 @@ impl Encode for TcpHandler {
         // Copy payload into reply if echoing
         if let Some(data) = self.payload.as_ref() {
             buf.try_get_mut(
-                usize::from(TCP_HEADER_MIN_LEN)
-                    ..usize::from(TCP_HEADER_MIN_LEN).try_add(data.len())?,
+                usize::from(TCP_HDR_MIN_LEN)..usize::from(TCP_HDR_MIN_LEN).try_add(data.len())?,
             )?
             .copy_from_slice(data);
         }
 
         // TCP segment length: minimum TCP header length (20 bytes) + payload length (0+ bytes)
-        let tcp_segment_len = u16::from(TCP_HEADER_MIN_LEN).try_add(self.payload_len()?)?;
+        let tcp_segment_len = u16::from(TCP_HDR_MIN_LEN).try_add(self.payload_len()?)?;
 
         // Zero out checksum field before calculating checksum
         buf.try_get_mut(16..18)?.copy_from_slice(&[0x00, 0x00]);

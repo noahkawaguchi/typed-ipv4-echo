@@ -194,7 +194,7 @@ fn send_packet(
     write_buf: &mut [u8; ETHERNET_MTU],
     handler: &impl Encode,
 ) -> Result {
-    let proto_len = handler.write_into(&mut write_buf[Ipv4Header::REPLY_HEADER_LEN..])?;
+    let proto_len = handler.write_into(&mut write_buf[Ipv4Header::REPLY_HDR_LEN..])?;
 
     let ipv4_header = Ipv4Header::try_new(handler.proto(), handler.get_ip_pair(), proto_len)?;
     ipv4_header.write_into(write_buf);
