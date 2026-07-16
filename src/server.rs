@@ -95,7 +95,7 @@ pub fn run(
             // A retransmit deadline elapsed -> retransmit all expired segments
             Ok(false) => {
                 for reply_handler in tcp_connections.make_retransmissions() {
-                    println!("\n ==== Packet sent (retransmit) ====");
+                    println!("\n ==== Packet sent (retransmission) ====");
                     send_packet(device, &mut write_buf, &reply_handler)?;
                 }
             }
@@ -152,8 +152,8 @@ pub fn run(
 
 /// Sends FIN-ACK to all established connections, initiating active close.
 ///
-/// Returns the shutdown deadline to wait until, or `None` if there were no established connections
-/// to close (nothing to wait for).
+/// Returns the shutdown deadline to wait until, or `Ok(None)` if there were no established
+/// connections to close (nothing to wait for).
 fn start_active_close(
     device: &mut impl Write,
     write_buf: &mut [u8; ETHERNET_MTU],
