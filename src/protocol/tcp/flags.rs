@@ -16,16 +16,16 @@ impl TcpFlags {
     // Meanings below from RFC 9293, Section 3.1
 
     /// "Acknowledgment field is significant."
-    const ACK_BIT: u8 = 0x10;
+    const ACK_BIT: u8 = 0b_0001_0000;
 
     /// "Reset the connection."
-    const RST_BIT: u8 = 0x04;
+    const RST_BIT: u8 = 0b_0000_0100;
 
     /// "Synchronize sequence numbers."
-    const SYN_BIT: u8 = 0x02;
+    const SYN_BIT: u8 = 0b_0000_0010;
 
     /// "No more data from sender."
-    const FIN_BIT: u8 = 0x01;
+    const FIN_BIT: u8 = 0b_0000_0001;
 }
 
 impl TryFrom<u8> for TcpFlags {
@@ -88,12 +88,12 @@ mod tests {
     #[test]
     fn round_trips_all_variants() {
         for (flags, byte) in [
-            (TcpFlags::Syn, 0x02),
-            (TcpFlags::SynAck, 0x12),
-            (TcpFlags::Ack, 0x10),
-            (TcpFlags::FinAck, 0x11),
-            (TcpFlags::Rst, 0x04),
-            (TcpFlags::RstAck, 0x14),
+            (TcpFlags::Syn, 0b_0000_0010),
+            (TcpFlags::SynAck, 0b_0001_0010),
+            (TcpFlags::Ack, 0b_0001_0000),
+            (TcpFlags::FinAck, 0b_0001_0001),
+            (TcpFlags::Rst, 0b_0000_0100),
+            (TcpFlags::RstAck, 0b_0001_0100),
         ] {
             assert_eq!(u8::from(flags), byte);
             assert_eq!(TcpFlags::try_from(byte), Ok(flags));
@@ -103,13 +103,13 @@ mod tests {
     #[test]
     fn masks_off_irrelevant_bits() {
         // CWR (0x80), ECE (0x40), URG (0x20), and PSH (0x08) bits should be ignored
-        assert_eq!(TcpFlags::try_from(0x02 | 0x80 | 0x40 | 0x20 | 0x08), Ok(TcpFlags::Syn));
+        assert_eq!(TcpFlags::try_from(0b1110_1010), Ok(TcpFlags::Syn));
     }
 
     #[test]
     fn errors_on_invalid_combinations() {
-        assert_matches!(TcpFlags::try_from(0x00), Err(_), "No flags");
-        assert_matches!(TcpFlags::try_from(0x01), Err(_), "FIN alone");
-        assert_matches!(TcpFlags::try_from(0x03), Err(_), "SYN + FIN");
+        assert_matches!(TcpFlags::try_from(0b_0000_0000), Err(_), "No flags");
+        assert_matches!(TcpFlags::try_from(0b_0000_0001), Err(_), "FIN alone");
+        assert_matches!(TcpFlags::try_from(0b_0000_0011), Err(_), "SYN + FIN");
     }
 }

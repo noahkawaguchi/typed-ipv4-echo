@@ -1,7 +1,7 @@
 use {super::*, std::time::Duration};
 
 #[test]
-fn syn_ack_is_resent_while_due() -> Result<()> {
+fn syn_ack_is_resent_while_due() -> Result {
     let mut connections = TcpConnections::new(Duration::ZERO, 5);
 
     TcpHandler { seq_num: CLIENT_ISN, flags: TcpFlags::Syn, ..CLIENT_PACKET }
@@ -28,7 +28,7 @@ fn syn_ack_is_resent_while_due() -> Result<()> {
 }
 
 #[test]
-fn pending_segment_is_cleared_once_acked() -> Result<()> {
+fn pending_segment_is_cleared_once_acked() -> Result {
     let mut connections = TcpConnections::new(Duration::ZERO, 5);
 
     TcpHandler { seq_num: CLIENT_ISN, flags: TcpFlags::Syn, ..CLIENT_PACKET }
@@ -53,7 +53,7 @@ fn pending_segment_is_cleared_once_acked() -> Result<()> {
 }
 
 #[test]
-fn data_echo_is_resent_unchanged() -> Result<()> {
+fn data_echo_is_resent_unchanged() -> Result {
     let mut connections = TcpConnections::new(Duration::ZERO, 5);
     connections.insert(AFTER_HANDSHAKE);
 
@@ -83,7 +83,7 @@ fn data_echo_is_resent_unchanged() -> Result<()> {
 }
 
 #[test]
-fn fin_ack_is_resent_unchanged() -> Result<()> {
+fn fin_ack_is_resent_unchanged() -> Result {
     let mut connections = TcpConnections::new(Duration::ZERO, 5);
     connections.insert(AFTER_HANDSHAKE);
     connections.close_established();
@@ -106,7 +106,7 @@ fn fin_ack_is_resent_unchanged() -> Result<()> {
 }
 
 #[test]
-fn multiple_unacked_segments_are_all_retransmitted() -> Result<()> {
+fn multiple_unacked_segments_are_all_retransmitted() -> Result {
     // If the client pipelines multiple segments before acking the first, the server must keep
     // retransmitting every unacked segment, not just the most recently sent one.
 
@@ -162,7 +162,7 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result<()> {
 }
 
 #[test]
-fn gives_up_after_max_retransmits() -> Result<()> {
+fn gives_up_after_max_retransmits() -> Result {
     const MAX_RETRIES: u8 = 3;
 
     let mut connections = TcpConnections::new(Duration::ZERO, MAX_RETRIES);

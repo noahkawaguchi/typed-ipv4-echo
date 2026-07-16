@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn new_ack_adopts_window_from_segment() -> Result<()> {
+fn new_ack_adopts_window_from_segment() -> Result {
     // A "new" ack (SND.UNA < SEG.ACK <= SND.NXT) should also update SND.WND to the incoming
     // segment's advertised window (RFC 9293, Section 3.10.7.4), not just leave it at whatever it
     // was seeded with at handshake time.
@@ -56,7 +56,7 @@ fn new_ack_adopts_window_from_segment() -> Result<()> {
 }
 
 #[test]
-fn stale_segment_does_not_clobber_send_window() -> Result<()> {
+fn stale_segment_does_not_clobber_send_window() -> Result {
     // A retransmitted/out-of-order segment can still carry a "new" ack_num (SND.UNA < SEG.ACK <=
     // SND.NXT is about cumulative acknowledgment, not about the segment being in order), but per
     // RFC 9293, Section 3.10.7.4, SND.WND must only adopt a segment's window when SND.WL1 < SEG.SEQ
@@ -124,7 +124,7 @@ fn stale_segment_does_not_clobber_send_window() -> Result<()> {
 }
 
 #[test]
-fn same_seq_but_fresher_ack_updates_window() -> Result<()> {
+fn same_seq_but_fresher_ack_updates_window() -> Result {
     // The window update condition is "SND.WL1 < SEG.SEQ or (SND.WL1 = SEG.SEQ and SND.WL2 =<
     // SEG.ACK)" (RFC 9293, Section 3.10.7.4). The equal-SEQ branch matters for pure ACKs, which
     // don't consume sequence numbers. Two of them in a row can carry the exact same SEG.SEQ while
@@ -204,7 +204,7 @@ fn same_seq_but_fresher_ack_updates_window() -> Result<()> {
 }
 
 #[test]
-fn duplicate_ack_updates_window() -> Result<()> {
+fn duplicate_ack_updates_window() -> Result {
     // RFC 9293, Section 3.10.7.4 gives two different conditions: SND.UNA only advances on a
     // "new" ACK (SND.UNA < SEG.ACK <= SND.NXT), but the send window update uses the non-strict
     // SND.UNA <= SEG.ACK <= SND.NXT. A duplicate ACK (SEG.ACK == SND.UNA) must still be allowed

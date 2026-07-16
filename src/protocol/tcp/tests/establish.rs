@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn creates_valid_syn_ack() -> Result<()> {
+fn creates_valid_syn_ack() -> Result {
     let mut connections = TcpConnections::default();
 
     let reply = TcpHandler { seq_num: CLIENT_ISN, flags: TcpFlags::Syn, ..CLIENT_PACKET }
@@ -24,7 +24,7 @@ fn creates_valid_syn_ack() -> Result<()> {
 }
 
 #[test]
-fn duplicate_syn_during_syn_received_resends_same_syn_ack() -> Result<()> {
+fn duplicate_syn_during_syn_received_resends_same_syn_ack() -> Result {
     // If our SYN-ACK is lost, the client's retransmission timer will resend its SYN. We must resend
     // the same SYN-ACK (same ISN), not RST the retry, and not generate a new ISN.
 
@@ -56,7 +56,7 @@ fn duplicate_syn_during_syn_received_resends_same_syn_ack() -> Result<()> {
 }
 
 #[test]
-fn data_packet_before_complete_handshake_gets_rst() -> Result<()> {
+fn data_packet_before_complete_handshake_gets_rst() -> Result {
     let mut connections = TcpConnections::default();
     connections.insert_syn_recv(); // SYN-ACK sent, but handshake not yet completed
 
@@ -77,7 +77,7 @@ fn data_packet_before_complete_handshake_gets_rst() -> Result<()> {
 }
 
 #[test]
-fn handshake_ack_establishes_connection_and_returns_none() -> Result<()> {
+fn handshake_ack_establishes_connection_and_returns_none() -> Result {
     let mut connections = TcpConnections::default();
     // Simulate having sent a SYN-ACK with ISN=SERVER_ISN so ack_num=SERVER_ISN+1 is the correct
     // completion

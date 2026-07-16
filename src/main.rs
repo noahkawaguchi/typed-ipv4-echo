@@ -1,5 +1,5 @@
 #[cfg(not(target_os = "linux"))]
-compile_error!("This crate only supports Linux because it uses Linux APIs directly");
+compile_error!("This crate only supports Linux because it directly uses low-level Linux APIs");
 
 mod addr_pairs;
 mod checksum;
@@ -11,13 +11,13 @@ mod try_ops;
 
 use std::{env, time::Duration};
 
-type Result<T, E = Box<dyn std::error::Error>> = std::result::Result<T, E>;
+type Result<T = (), E = Box<dyn std::error::Error>> = std::result::Result<T, E>;
 
 /// The Maximum Transmission Unit of standard Ethernet (frames up to 1500 bytes of IP packet data).
 const ETHERNET_MTU: usize = 1500;
 
 /// Runs an echo server that uses a TUN device to read and write IPv4 packets: TCP, UDP, and ICMP.
-fn main() -> Result<()> {
+fn main() -> Result {
     /// The amount of time to wait for established TCP connections to finish closing after a
     /// shutdown signal before exiting unconditionally.
     const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(5);

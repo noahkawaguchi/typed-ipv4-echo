@@ -5,7 +5,7 @@ fn client_rst(seq_num: u32) -> TcpHandler {
 }
 
 #[test]
-fn rst_exactly_at_rcv_nxt_cleans_up_connection_and_returns_none() -> Result<()> {
+fn rst_exactly_at_rcv_nxt_cleans_up_connection_and_returns_none() -> Result {
     // RFC 9293, Section 3.10.7.4, RST bit set, SEG.SEQ == RCV.NXT -> reset connection
 
     let mut connections = TcpConnections::after_handshake();
@@ -16,7 +16,7 @@ fn rst_exactly_at_rcv_nxt_cleans_up_connection_and_returns_none() -> Result<()> 
 }
 
 #[test]
-fn rst_within_window_but_not_at_rcv_nxt_gets_challenge_ack() -> Result<()> {
+fn rst_within_window_but_not_at_rcv_nxt_gets_challenge_ack() -> Result {
     // RFC 9293, Section 3.10.7.4, RST bit set, SEG.SEQ in receive window but SEG.SEQ != RCV.NXT ->
     // send challenge ACK, don't reset connection
 
@@ -48,7 +48,7 @@ fn rst_within_window_but_not_at_rcv_nxt_gets_challenge_ack() -> Result<()> {
 }
 
 #[test]
-fn rst_with_out_of_window_seq_is_silently_dropped() -> Result<()> {
+fn rst_with_out_of_window_seq_is_silently_dropped() -> Result {
     // RFC 9293, Section 3.10.7.4, RST bit set, SEG.SEQ outside the current receive window -> must
     // be silently ignored. (This is protection against blind RST-spoofing where an attacker knows
     // the 4-tuple but not the current sequence numbers.)
@@ -74,7 +74,7 @@ fn rst_with_out_of_window_seq_is_silently_dropped() -> Result<()> {
 }
 
 #[test]
-fn rst_in_syn_received_cleans_up_connection_and_returns_none() -> Result<()> {
+fn rst_in_syn_received_cleans_up_connection_and_returns_none() -> Result {
     let mut connections = TcpConnections::default();
     connections.insert_syn_recv();
 
@@ -85,7 +85,7 @@ fn rst_in_syn_received_cleans_up_connection_and_returns_none() -> Result<()> {
 }
 
 #[test]
-fn rst_for_unknown_connection_is_silently_dropped() -> Result<()> {
+fn rst_for_unknown_connection_is_silently_dropped() -> Result {
     let mut connections = TcpConnections::default();
 
     assert_eq!(

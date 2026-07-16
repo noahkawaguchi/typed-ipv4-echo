@@ -34,7 +34,7 @@ pub fn run(
     device: &mut (impl Read + Write + AsFd),
     shutdown_check: impl Fn() -> bool,
     shutdown_grace_period: Duration,
-) -> Result<()> {
+) -> Result {
     let mut tcp_connections = TcpConnections::new(RETRANSMIT_TIMEOUT, MAX_RETRANSMITS);
 
     let mut read_buf = [0u8; ETHERNET_MTU];
@@ -95,7 +95,7 @@ pub fn run(
             // A retransmit deadline elapsed -> retransmit all expired segments
             Ok(false) => {
                 for reply_handler in tcp_connections.make_retransmissions() {
-                    println!("\n ==== Packet sent (retransmit) ====");
+                    println!("\n ==== Packet sent (retransmission) ====");
                     send_packet(device, &mut write_buf, &reply_handler)?;
                 }
             }
@@ -152,8 +152,8 @@ pub fn run(
 
 /// Sends FIN-ACK to all established connections, initiating active close.
 ///
-/// Returns the shutdown deadline to wait until, or `None` if there were no established connections
-/// to close (nothing to wait for).
+/// Returns the shutdown deadline to wait until, or `Ok(None)` if there were no established
+/// connections to close (nothing to wait for).
 fn start_active_close(
     device: &mut impl Write,
     write_buf: &mut [u8; ETHERNET_MTU],
@@ -193,8 +193,8 @@ fn send_packet(
     device: &mut impl Write,
     write_buf: &mut [u8; ETHERNET_MTU],
     handler: &impl Encode,
-) -> Result<()> {
-    let proto_len = handler.write_into(&mut write_buf[Ipv4Header::REPLY_HEADER_LEN..])?;
+) -> Result {
+    let proto_len = handler.write_into(&mut write_buf[Ipv4Header::REPLY_HDR_LEN..])?;
 
     let ipv4_header = Ipv4Header::try_new(handler.proto(), handler.get_ip_pair(), proto_len)?;
     ipv4_header.write_into(write_buf);

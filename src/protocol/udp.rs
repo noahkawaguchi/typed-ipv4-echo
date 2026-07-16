@@ -8,7 +8,8 @@ use {
     std::fmt,
 };
 
-const UDP_HEADER_LEN: u16 = 8;
+/// The number of bytes in a UDP header.
+const UDP_HDR_LEN: u16 = 8;
 
 /// Manages UDP headers, data, and reply logic.
 #[cfg_attr(test, derive(Debug))]
@@ -23,7 +24,7 @@ pub struct UdpHandler<'a> {
 impl<'a> UdpHandler<'a> {
     /// Parses `data` as a UDP header and payload.
     pub(super) fn parse(data: &'a [u8], ip_pair: Ipv4AddrPair) -> Result<Self> {
-        let Some((udp_header, payload)) = data.split_first_chunk::<{ UDP_HEADER_LEN as usize }>()
+        let Some((udp_header, payload)) = data.split_first_chunk::<{ UDP_HDR_LEN as usize }>()
         else {
             return Err(format!("Too short for UDP header ({} bytes)", data.len()).into());
         };
@@ -61,7 +62,7 @@ impl Encode for UdpHandler<'_> {
             .copy_from_slice(&self.ports.dst.to_be_bytes());
 
         // UDP length: fixed UDP header length (8 bytes) + length of echo payload
-        let udp_len = UDP_HEADER_LEN.try_add(self.payload.len().try_into()?)?;
+        let udp_len = UDP_HDR_LEN.try_add(self.payload.len().try_into()?)?;
         buf.try_get_mut(4..6)?
             .copy_from_slice(&udp_len.to_be_bytes());
 
@@ -69,7 +70,7 @@ impl Encode for UdpHandler<'_> {
 
         // Copy payload for echo
         buf.try_get_mut(
-            usize::from(UDP_HEADER_LEN)..usize::from(UDP_HEADER_LEN).try_add(self.payload.len())?,
+            usize::from(UDP_HDR_LEN)..usize::from(UDP_HDR_LEN).try_add(self.payload.len())?,
         )?
         .copy_from_slice(self.payload);
 
@@ -110,7 +111,7 @@ mod tests {
     };
 
     #[test]
-    fn correctly_parses_valid_packet() -> Result<()> {
+    fn correctly_parses_valid_packet() -> Result {
         #[rustfmt::skip]
         const DATA: [u8; 16] = [
             0x04, 0xD2,              // Source port: 1234
@@ -158,7 +159,7 @@ mod tests {
     }
 
     #[test]
-    fn parsing_accepts_zero_checksum_as_not_computed() -> Result<()> {
+    fn parsing_accepts_zero_checksum_as_not_computed() -> Result {
         #[rustfmt::skip]
         const DATA: [u8; 16] = [
             0x04, 0xD2,              // Source port: 1234
@@ -178,7 +179,7 @@ mod tests {
     }
 
     #[test]
-    fn parsing_handles_empty_payload() -> Result<()> {
+    fn parsing_handles_empty_payload() -> Result {
         #[rustfmt::skip]
         const DATA: [u8; 8] = [
             0x1F, 0x90,              // Source port: 8080
@@ -196,7 +197,7 @@ mod tests {
     }
 
     #[test]
-    fn extracts_ports_correctly() -> Result<()> {
+    fn extracts_ports_correctly() -> Result {
         #[rustfmt::skip]
         const DATA: [u8; 12] = [
             0xFF, 0xFF,              // Source port: 65535 (max)
@@ -214,7 +215,7 @@ mod tests {
     }
 
     #[test]
-    fn transmits_all_ones_when_computed_checksum_is_zero() -> Result<()> {
+    fn transmits_all_ones_when_computed_checksum_is_zero() -> Result {
         // Payload [0xE6, 0xB5] results in a pseudo-header checksum of 0x0000 for ports 1234 -> 80
         // over `IP_PAIR`. However, 0xFFFF must be transmitted instead of 0x0000.
 
@@ -233,7 +234,7 @@ mod tests {
     }
 
     #[test]
-    fn creates_valid_echo_reply() -> Result<()> {
+    fn creates_valid_echo_reply() -> Result {
         #[rustfmt::skip]
         const REQUEST: [u8; 16] = [
             0x04, 0xD2,              // Source port: 1234

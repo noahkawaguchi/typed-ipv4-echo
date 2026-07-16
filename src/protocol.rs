@@ -19,20 +19,20 @@ use {
 /// header and payload. Does not zero out the checksum field inside the header of `data` before
 /// calculating.
 fn pseudo_header_checksum(data: &[u8], ip_pair: Ipv4AddrPair, protocol: Protocol) -> Result<u16> {
-    /// The number of bytes in the TCP/UDP pseudo-header.
-    const PSEUDO_HEADER_LEN: usize = 12;
+    /// The number of bytes in a TCP/UDP pseudo-header.
+    const PSEUDO_HDR_LEN: usize = 12;
 
     let proto_len = u16::try_from(data.len())?;
-    let checksum_len = PSEUDO_HEADER_LEN + usize::from(proto_len);
+    let checksum_len = PSEUDO_HDR_LEN + usize::from(proto_len);
 
-    let mut checksum_data = [0u8; PSEUDO_HEADER_LEN + ETHERNET_MTU];
+    let mut checksum_data = [0u8; PSEUDO_HDR_LEN + ETHERNET_MTU];
     checksum_data[0..4].copy_from_slice(&ip_pair.src.octets());
     checksum_data[4..8].copy_from_slice(&ip_pair.dst.octets());
     // Byte 8 is reserved padding for alignment
     checksum_data[9] = protocol.into();
     checksum_data[10..12].copy_from_slice(&proto_len.to_be_bytes());
     checksum_data
-        .try_get_mut(PSEUDO_HEADER_LEN..checksum_len)?
+        .try_get_mut(PSEUDO_HDR_LEN..checksum_len)?
         .copy_from_slice(data);
 
     Ok(checksum::calculate(checksum_data.try_get(..checksum_len)?))

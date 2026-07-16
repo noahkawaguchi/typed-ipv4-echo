@@ -5,10 +5,10 @@ use {
     std::{fmt, net::Ipv4Addr},
 };
 
-/// The minimum number of bytes for an IPv4 header (no options) as a `u8`.
+/// The minimum number of bytes in an IPv4 header (no options) as a `u8`.
 const IPV4_HDR_MIN_LEN_U8: u8 = 20;
 
-/// The minimum number of bytes for an IPv4 header (no options) as a `usize`.
+/// The minimum number of bytes in an IPv4 header (no options) as a `usize`.
 const IPV4_HDR_MIN_LEN_USIZE: usize = IPV4_HDR_MIN_LEN_U8 as usize;
 
 /// Manages IPv4 header fields.
@@ -21,7 +21,7 @@ pub struct Ipv4Header {
 
 impl Ipv4Header {
     /// The length in bytes of an IPv4 header for a reply packet (no options).
-    pub const REPLY_HEADER_LEN: usize = IPV4_HDR_MIN_LEN_USIZE;
+    pub const REPLY_HDR_LEN: usize = IPV4_HDR_MIN_LEN_USIZE;
 
     /// Creates an IPv4 header with the given `protocol` and `ip_pair`. Total length is the length
     /// of the IPv4 header + `proto_len`.
