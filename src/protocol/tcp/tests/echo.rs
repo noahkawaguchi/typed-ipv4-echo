@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn creates_valid_data_echo() -> Result<()> {
+fn creates_valid_data_echo() -> Result {
     // rcv_nxt = client's seq at handshake ACK time
     let mut connections = TcpConnections::after_handshake();
 
@@ -27,7 +27,7 @@ fn creates_valid_data_echo() -> Result<()> {
 }
 
 #[test]
-fn pure_ack_on_established_connection_returns_none() -> Result<()> {
+fn pure_ack_on_established_connection_returns_none() -> Result {
     // Simulates the client ACKing the server's echo reply. This should get no reply (not RST) so
     // the connection stays open for more data.
 
@@ -68,7 +68,7 @@ fn pure_ack_on_established_connection_returns_none() -> Result<()> {
 }
 
 #[test]
-fn consecutive_replies_use_snd_nxt_for_seq_num() -> Result<()> {
+fn consecutive_replies_use_snd_nxt_for_seq_num() -> Result {
     // Verifies that the server updates and uses its own snd_nxt for seq_num rather than simply
     // mirroring the client's ack_num. After sending a 5-byte echo, snd_nxt=SERVER_ISN+6, then the
     // next reply's seq_num must be SERVER_ISN+6 even when the client sends a stale
@@ -130,7 +130,7 @@ fn consecutive_replies_use_snd_nxt_for_seq_num() -> Result<()> {
 }
 
 #[test]
-fn old_ack_num_does_not_regress_snd_una() -> Result<()> {
+fn old_ack_num_does_not_regress_snd_una() -> Result {
     // SND.UNA should only ever advance on a "new" ack (RFC 9293, Section 3.10.7.4). After two
     // exchanges bring SND.UNA up to SERVER_ISN+6, a third packet with a stale ack_num=SERVER_ISN+1
     // (now older than SND.UNA) must not move SND.UNA backward, even though the segment is
@@ -234,7 +234,7 @@ fn old_ack_num_does_not_regress_snd_una() -> Result<()> {
 }
 
 #[test]
-fn duplicate_data_packet_gets_duplicate_ack_without_echo() -> Result<()> {
+fn duplicate_data_packet_gets_duplicate_ack_without_echo() -> Result {
     // A retransmitted segment should get a duplicate ACK pointing at the current rcv_nxt, not
     // another echo. Processing a second distinct packet first makes the seq_num check meaningful
     // because the retransmitted packet's seq+len points back to CLIENT_ISN+6, but rcv_nxt is
@@ -302,7 +302,7 @@ fn duplicate_data_packet_gets_duplicate_ack_without_echo() -> Result<()> {
 }
 
 #[test]
-fn ack_for_unsent_data_is_dropped_and_gets_current_state_reply() -> Result<()> {
+fn ack_for_unsent_data_is_dropped_and_gets_current_state_reply() -> Result {
     // Per RFC 9293 Section 3.10.7.4, an ACK acknowledging data the server hasn't sent yet (ack_num
     // past SND.NXT) must be dropped, and the reply should be a bare ACK reflecting the current
     // SND.NXT/RCV.NXT, with no payload echoed and no state change. seq_num matches RCV.NXT, so this
@@ -336,7 +336,7 @@ fn ack_for_unsent_data_is_dropped_and_gets_current_state_reply() -> Result<()> {
 }
 
 #[test]
-fn wraparound_ack_for_unsent_data_is_still_rejected() -> Result<()> {
+fn wraparound_ack_for_unsent_data_is_still_rejected() -> Result {
     // ISNs are random (RFC 9293, Section 3.4.1) and can land near `u32::MAX`, wrapping SND.NXT to a
     // small value. An ack_num that wraps one past SND.NXT must still be recognized as acknowledging
     // unsent data, even though a naive numeric comparison (ack_num > snd_nxt) would say 0 >
@@ -362,7 +362,7 @@ fn wraparound_ack_for_unsent_data_is_still_rejected() -> Result<()> {
 }
 
 #[test]
-fn data_packet_for_unknown_connection_gets_rst() -> Result<()> {
+fn data_packet_for_unknown_connection_gets_rst() -> Result {
     // ACK with payload for a connection the server has no record of (e.g. after restart)
 
     let mut connections = TcpConnections::default(); // Empty, no known connections

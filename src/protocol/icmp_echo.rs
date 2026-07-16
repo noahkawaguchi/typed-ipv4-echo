@@ -230,7 +230,7 @@ mod tests {
     }
 
     #[test]
-    fn creates_valid_echo_reply() -> Result<()> {
+    fn creates_valid_echo_reply() -> Result {
         #[rustfmt::skip]
         const REQUEST: [u8; 13] = [
             8, 0,                          // Type 8 (Echo Request), Code 0

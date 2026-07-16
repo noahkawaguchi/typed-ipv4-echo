@@ -34,7 +34,7 @@ pub fn run(
     device: &mut (impl Read + Write + AsFd),
     shutdown_check: impl Fn() -> bool,
     shutdown_grace_period: Duration,
-) -> Result<()> {
+) -> Result {
     let mut tcp_connections = TcpConnections::new(RETRANSMIT_TIMEOUT, MAX_RETRANSMITS);
 
     let mut read_buf = [0u8; ETHERNET_MTU];
@@ -193,7 +193,7 @@ fn send_packet(
     device: &mut impl Write,
     write_buf: &mut [u8; ETHERNET_MTU],
     handler: &impl Encode,
-) -> Result<()> {
+) -> Result {
     let proto_len = handler.write_into(&mut write_buf[Ipv4Header::REPLY_HEADER_LEN..])?;
 
     let ipv4_header = Ipv4Header::try_new(handler.proto(), handler.get_ip_pair(), proto_len)?;

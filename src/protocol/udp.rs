@@ -110,7 +110,7 @@ mod tests {
     };
 
     #[test]
-    fn correctly_parses_valid_packet() -> Result<()> {
+    fn correctly_parses_valid_packet() -> Result {
         #[rustfmt::skip]
         const DATA: [u8; 16] = [
             0x04, 0xD2,              // Source port: 1234
@@ -158,7 +158,7 @@ mod tests {
     }
 
     #[test]
-    fn parsing_accepts_zero_checksum_as_not_computed() -> Result<()> {
+    fn parsing_accepts_zero_checksum_as_not_computed() -> Result {
         #[rustfmt::skip]
         const DATA: [u8; 16] = [
             0x04, 0xD2,              // Source port: 1234
@@ -178,7 +178,7 @@ mod tests {
     }
 
     #[test]
-    fn parsing_handles_empty_payload() -> Result<()> {
+    fn parsing_handles_empty_payload() -> Result {
         #[rustfmt::skip]
         const DATA: [u8; 8] = [
             0x1F, 0x90,              // Source port: 8080
@@ -196,7 +196,7 @@ mod tests {
     }
 
     #[test]
-    fn extracts_ports_correctly() -> Result<()> {
+    fn extracts_ports_correctly() -> Result {
         #[rustfmt::skip]
         const DATA: [u8; 12] = [
             0xFF, 0xFF,              // Source port: 65535 (max)
@@ -214,7 +214,7 @@ mod tests {
     }
 
     #[test]
-    fn transmits_all_ones_when_computed_checksum_is_zero() -> Result<()> {
+    fn transmits_all_ones_when_computed_checksum_is_zero() -> Result {
         // Payload [0xE6, 0xB5] results in a pseudo-header checksum of 0x0000 for ports 1234 -> 80
         // over `IP_PAIR`. However, 0xFFFF must be transmitted instead of 0x0000.
 
@@ -233,7 +233,7 @@ mod tests {
     }
 
     #[test]
-    fn creates_valid_echo_reply() -> Result<()> {
+    fn creates_valid_echo_reply() -> Result {
         #[rustfmt::skip]
         const REQUEST: [u8; 16] = [
             0x04, 0xD2,              // Source port: 1234
