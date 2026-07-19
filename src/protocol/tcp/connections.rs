@@ -50,9 +50,9 @@ impl TcpConnections {
                 tcp_state: TcpState::SynReceived,
                 // SYN-ACK consumes one sequence number
                 snd_nxt: send_info.seq_num.wrapping_add(1),
-                // Set at connection establishment
-                rcv_nxt: 0,
-                // The SYN-ACK we're sending is unacknowledged (this is the ISN)
+                // Our SYN-ACK's `ack_num` is the client's ISN + 1
+                rcv_nxt: send_info.ack_num,
+                // Our SYN-ACK is unacknowledged (this is the ISN)
                 snd_una: send_info.seq_num,
                 // Window-related values are set at connection establishment once the peer's window
                 // is actually known

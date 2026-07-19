@@ -106,28 +106,66 @@ fn handshake_ack_establishes_connection_and_returns_none() -> Result {
 }
 
 #[test]
+fn handshake_ack_with_wrong_seq_num_does_not_establish() -> Result {
+    // As per RFC 9293, Section 3.10.7.4, "First, check sequence number," an unacceptable SEG.SEQ
+    // must not be processed further (i.e. must not complete the handshake), regardless of whether
+    // the ACK field is otherwise valid. Instead, an ACK reflecting current state is sent and the
+    // segment is dropped.
+
+    let mut connections = TcpConnections::default();
+    connections.insert_syn_recv();
+    let initial_state = connections.try_get()?.clone();
+
+    // Correct ack_num, but seq_num doesn't match RCV.NXT = CLIENT_ISN + SYN_BYTE
+    let reply = TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE + 1,
+        ack_num: SERVER_ISN + SYN_BYTE,
+        ..CLIENT_PACKET
+    }
+    .create_reply(&mut connections)?;
+
+    assert_eq!(
+        reply,
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE,
+            ..SERVER_REPLY
+        }),
+        "Wrong SEG.SEQ must get a plain ACK reflecting current state, not complete the handshake"
+    );
+
+    assert_eq!(
+        connections.try_get()?,
+        &initial_state,
+        "Connection must remain SYN-RECEIVED, not transition to ESTABLISHED"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn handshake_ack_sets_window_variables_without_freshness_check() -> Result {
     // As per RFC 9293, Section 3.10.7.4, "Fifth, check the ACK field," "SYN-RECEIVED STATE,"
     // entering ESTABLISHED sets SND.WND, SND.WL1, and SND.WL2 without the freshness check used for
     // ACKs in ESTABLISHED state.
-
-    /// A client's SEG.SEQ in the upper half of `u32`, which is less than zero in sequence space.
-    const HIGH_CLIENT_SEQ: u32 = 0x8000_0001;
-    assert!(HIGH_CLIENT_SEQ.seq_lt(0)); // const traits are not stable yet
 
     let mut connections = TcpConnections::default();
     connections.insert_syn_recv();
     let mut cloned_state = connections.try_get()?.clone();
 
     assert_eq!(
-        TcpHandler { seq_num: HIGH_CLIENT_SEQ, ack_num: SERVER_ISN + SYN_BYTE, ..CLIENT_PACKET }
-            .create_reply(&mut connections)?,
+        TcpHandler {
+            seq_num: CLIENT_ISN + SYN_BYTE,
+            ack_num: SERVER_ISN + SYN_BYTE,
+            ..CLIENT_PACKET
+        }
+        .create_reply(&mut connections)?,
         None
     );
 
     // Reproduce the state changes that should happen at connection establishment
     cloned_state.tcp_state = TcpState::Established;
-    cloned_state.rcv_nxt = HIGH_CLIENT_SEQ;
+    cloned_state.rcv_nxt = CLIENT_ISN + SYN_BYTE;
     cloned_state.snd_una.advance_by(SYN_BYTE);
     cloned_state.snd_wnd = u16::MAX;
 
@@ -135,7 +173,7 @@ fn handshake_ack_sets_window_variables_without_freshness_check() -> Result {
     assert_eq!(conn, &cloned_state);
 
     // `snd_wl1` and `snd_wl2` are excluded from `ConnState`'s `PartialEq`, so check them separately
-    assert_eq!(conn.snd_wl1, HIGH_CLIENT_SEQ);
+    assert_eq!(conn.snd_wl1, CLIENT_ISN + SYN_BYTE);
     assert_eq!(conn.snd_wl2, SERVER_ISN + SYN_BYTE);
 
     Ok(())

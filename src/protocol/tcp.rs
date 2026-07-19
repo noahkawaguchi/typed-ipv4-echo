@@ -210,16 +210,36 @@ impl TcpHandler {
                 })
             }
 
+            // ACK during SYN-RECEIVED with an unacceptable sequence number -> per RFC 9293, Section
+            // 3.10.7.4, "First, check sequence number," reply with an ACK reflecting current state
+            // and drop the segment.
+            //
+            // Due to the current simplification of not using a reassembly buffer, any SEG.SEQ other
+            // than exactly RCV.NXT is treated as unacceptable rather than held for later.
+            (
+                Some(&mut ConnState { tcp_state: TcpState::SynReceived, snd_nxt, rcv_nxt, .. }),
+                TcpFlags::Ack,
+                None,
+            ) if self.seq_num != rcv_nxt => Some(SendInfo {
+                seq_num: snd_nxt,
+                ack_num: rcv_nxt,
+                flags: TcpFlags::Ack,
+                payload: None,
+            }),
+
             // Handshake ACK (step 3) -> transition to ESTABLISHED, no reply needed
-            // Remote ack num should be the previous local ISN + 1, which also becomes snd_una
+            //
+            // As per RFC 9293, Section 3.10.7.4, "Fifth, check the ACK field," "SYN-RECEIVED
+            // STATE," if SND.UNA < SEG.ACK <= SND.NXT, enter ESTABLISHED and set SND.WND, SND.WL1,
+            // and SND.WL2 without the freshness check used for ESTABLISHED state ACKs.
             (
                 Some(conn @ ConnState { tcp_state: TcpState::SynReceived, .. }),
                 TcpFlags::Ack,
                 None,
-            ) if conn.snd_una.seq_lt(self.ack_num) && self.ack_num.seq_le(conn.snd_nxt) => {
-                // As per RFC 9293, Section 3.10.7.4, "Fifth, check the ACK field," "SYN-RECEIVED
-                // STATE," enter ESTABLISHED and set SND.WND/SND.WL1/SND.WL2 without the freshness
-                // check used for ESTABLISHED-state ACKs
+            ) if self.seq_num == conn.rcv_nxt
+                && conn.snd_una.seq_lt(self.ack_num)
+                && self.ack_num.seq_le(conn.snd_nxt) =>
+            {
                 conn.tcp_state = TcpState::Established;
                 conn.rcv_nxt = self.seq_num;
                 conn.snd_una = self.ack_num;
