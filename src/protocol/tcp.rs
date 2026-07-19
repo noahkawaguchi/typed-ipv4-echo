@@ -216,10 +216,18 @@ impl TcpHandler {
                 Some(conn @ ConnState { tcp_state: TcpState::SynReceived, .. }),
                 TcpFlags::Ack,
                 None,
-            ) if conn.snd_una.wrapping_add(1) == self.ack_num => {
-                conn.incoming_ack_update(self);
+            ) if conn.snd_una.seq_lt(self.ack_num) && self.ack_num.seq_le(conn.snd_nxt) => {
+                // As per RFC 9293, Section 3.10.7.4, "Fifth, check the ACK field," "SYN-RECEIVED
+                // STATE," enter ESTABLISHED and set SND.WND/SND.WL1/SND.WL2 without the freshness
+                // check used for ESTABLISHED-state ACKs
                 conn.tcp_state = TcpState::Established;
                 conn.rcv_nxt = self.seq_num;
+                conn.snd_una = self.ack_num;
+                conn.snd_wnd = self.window;
+                conn.snd_wl1 = self.seq_num;
+                conn.snd_wl2 = self.ack_num;
+                conn.pending.clear(); // Only the SYN-ACK just acknowledged could have been pending
+
                 None
             }
 

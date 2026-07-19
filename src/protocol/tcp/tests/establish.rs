@@ -104,3 +104,39 @@ fn handshake_ack_establishes_connection_and_returns_none() -> Result {
 
     Ok(())
 }
+
+#[test]
+fn handshake_ack_sets_window_variables_without_freshness_check() -> Result {
+    // As per RFC 9293, Section 3.10.7.4, "Fifth, check the ACK field," "SYN-RECEIVED STATE,"
+    // entering ESTABLISHED sets SND.WND, SND.WL1, and SND.WL2 without the freshness check used for
+    // ACKs in ESTABLISHED state.
+
+    /// A client's SEG.SEQ in the upper half of `u32`, which is less than zero in sequence space.
+    const HIGH_CLIENT_SEQ: u32 = 0x8000_0001;
+    assert!(HIGH_CLIENT_SEQ.seq_lt(0)); // const traits are not stable yet
+
+    let mut connections = TcpConnections::default();
+    connections.insert_syn_recv();
+    let mut cloned_state = connections.try_get()?.clone();
+
+    assert_eq!(
+        TcpHandler { seq_num: HIGH_CLIENT_SEQ, ack_num: SERVER_ISN + SYN_BYTE, ..CLIENT_PACKET }
+            .create_reply(&mut connections)?,
+        None
+    );
+
+    // Reproduce the state changes that should happen at connection establishment
+    cloned_state.tcp_state = TcpState::Established;
+    cloned_state.rcv_nxt = HIGH_CLIENT_SEQ;
+    cloned_state.snd_una.advance_by(SYN_BYTE);
+    cloned_state.snd_wnd = u16::MAX;
+
+    let conn = connections.try_get()?;
+    assert_eq!(conn, &cloned_state);
+
+    // `snd_wl1` and `snd_wl2` are excluded from `ConnState`'s `PartialEq`, so check them separately
+    assert_eq!(conn.snd_wl1, HIGH_CLIENT_SEQ);
+    assert_eq!(conn.snd_wl2, SERVER_ISN + SYN_BYTE);
+
+    Ok(())
+}
