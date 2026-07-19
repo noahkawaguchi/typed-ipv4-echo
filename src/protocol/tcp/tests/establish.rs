@@ -148,14 +148,33 @@ fn handshake_ack_sets_window_variables_without_freshness_check() -> Result {
     // As per RFC 9293, Section 3.10.7.4, "Fifth, check the ACK field," "SYN-RECEIVED STATE,"
     // entering ESTABLISHED sets SND.WND, SND.WL1, and SND.WL2 without the freshness check used for
     // ACKs in ESTABLISHED state.
+    //
+    // A placeholder value of zero is less than low sequence numbers in sequence space, so a low
+    // sequence number would happen to pass even with the freshness check. Therefore, a high
+    // sequence number from the client is necessary to test that the freshness check is not
+    // happening.
+
+    /// A client ISN that is the antipode of 0 in sequence space. When it is incremented by 1 for
+    /// the phantom byte consumed by SYN, it becomes less than 0 in sequence space.
+    const HIGH_CLIENT_ISN: u32 = 1 << 31;
 
     let mut connections = TcpConnections::default();
-    connections.insert_syn_recv();
+    connections.insert(ConnState {
+        tcp_state: TcpState::SynReceived,
+        snd_nxt: SERVER_ISN + SYN_BYTE,
+        rcv_nxt: HIGH_CLIENT_ISN + SYN_BYTE,
+        snd_una: SERVER_ISN,
+        snd_wnd: 0,
+        snd_wl1: 0,
+        snd_wl2: 0,
+        pending: Vec::new(),
+        send_buffer: VecDeque::new(),
+    });
     let mut cloned_state = connections.try_get()?.clone();
 
     assert_eq!(
         TcpHandler {
-            seq_num: CLIENT_ISN + SYN_BYTE,
+            seq_num: HIGH_CLIENT_ISN + SYN_BYTE,
             ack_num: SERVER_ISN + SYN_BYTE,
             ..CLIENT_PACKET
         }
@@ -165,7 +184,7 @@ fn handshake_ack_sets_window_variables_without_freshness_check() -> Result {
 
     // Reproduce the state changes that should happen at connection establishment
     cloned_state.tcp_state = TcpState::Established;
-    cloned_state.rcv_nxt = CLIENT_ISN + SYN_BYTE;
+    cloned_state.rcv_nxt = HIGH_CLIENT_ISN + SYN_BYTE;
     cloned_state.snd_una.advance_by(SYN_BYTE);
     cloned_state.snd_wnd = u16::MAX;
 
@@ -173,7 +192,7 @@ fn handshake_ack_sets_window_variables_without_freshness_check() -> Result {
     assert_eq!(conn, &cloned_state);
 
     // `snd_wl1` and `snd_wl2` are excluded from `ConnState`'s `PartialEq`, so check them separately
-    assert_eq!(conn.snd_wl1, CLIENT_ISN + SYN_BYTE);
+    assert_eq!(conn.snd_wl1, HIGH_CLIENT_ISN + SYN_BYTE);
     assert_eq!(conn.snd_wl2, SERVER_ISN + SYN_BYTE);
 
     Ok(())
