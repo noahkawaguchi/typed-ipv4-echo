@@ -52,13 +52,13 @@ impl TcpConnections {
                 snd_nxt: send_info.seq_num.wrapping_add(1),
                 // Our SYN-ACK's `ack_num` is the client's ISN + 1
                 rcv_nxt: send_info.ack_num,
-                // Our SYN-ACK is unacknowledged (this is the ISN)
+                // Our SYN-ACK is unacknowledged (this is our ISN)
                 snd_una: send_info.seq_num,
-                // Window-related values are set at connection establishment once the peer's window
-                // is actually known
-                snd_wnd: 0,
-                snd_wl1: 0,
-                snd_wl2: 0,
+                // Window-related values are set at connection establishment once the peer has
+                // provided a defined SEG.ACK
+                snd_wnd: None,
+                snd_wl1: None,
+                snd_wl2: None,
                 pending: vec![PendingSegment::new(send_info, 1)],
                 send_buffer: VecDeque::new(),
             },

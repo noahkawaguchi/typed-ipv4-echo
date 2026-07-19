@@ -343,8 +343,12 @@ fn wraparound_ack_for_unsent_data_is_still_rejected() -> Result {
     // `u32::MAX` is false and let it through.
 
     let mut connections = TcpConnections::default();
-    let initial_state =
-        ConnState { snd_nxt: u32::MAX, snd_una: u32::MAX, snd_wl2: u32::MAX, ..AFTER_HANDSHAKE };
+    let initial_state = ConnState {
+        snd_nxt: u32::MAX,
+        snd_una: u32::MAX,
+        snd_wl2: Some(u32::MAX),
+        ..AFTER_HANDSHAKE
+    };
     connections.insert(initial_state.clone());
 
     // ack=0 wraps 1 past SND.NXT=`u32::MAX`

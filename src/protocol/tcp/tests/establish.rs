@@ -98,7 +98,7 @@ fn handshake_ack_establishes_connection_and_returns_none() -> Result {
     cloned_state.tcp_state = TcpState::Established;
     cloned_state.rcv_nxt = CLIENT_ISN + SYN_BYTE;
     cloned_state.snd_una.advance_by(SYN_BYTE);
-    cloned_state.snd_wnd = u16::MAX;
+    cloned_state.snd_wnd = Some(u16::MAX);
 
     assert_eq!(connections.try_get()?, &cloned_state);
 
@@ -164,9 +164,9 @@ fn handshake_ack_sets_window_variables_without_freshness_check() -> Result {
         snd_nxt: SERVER_ISN + SYN_BYTE,
         rcv_nxt: HIGH_CLIENT_ISN + SYN_BYTE,
         snd_una: SERVER_ISN,
-        snd_wnd: 0,
-        snd_wl1: 0,
-        snd_wl2: 0,
+        snd_wnd: None,
+        snd_wl1: None,
+        snd_wl2: None,
         pending: Vec::new(),
         send_buffer: VecDeque::new(),
     });
@@ -186,14 +186,14 @@ fn handshake_ack_sets_window_variables_without_freshness_check() -> Result {
     cloned_state.tcp_state = TcpState::Established;
     cloned_state.rcv_nxt = HIGH_CLIENT_ISN + SYN_BYTE;
     cloned_state.snd_una.advance_by(SYN_BYTE);
-    cloned_state.snd_wnd = u16::MAX;
+    cloned_state.snd_wnd = Some(u16::MAX);
 
     let conn = connections.try_get()?;
     assert_eq!(conn, &cloned_state);
 
     // `snd_wl1` and `snd_wl2` are excluded from `ConnState`'s `PartialEq`, so check them separately
-    assert_eq!(conn.snd_wl1, HIGH_CLIENT_ISN + SYN_BYTE);
-    assert_eq!(conn.snd_wl2, SERVER_ISN + SYN_BYTE);
+    assert_eq!(conn.snd_wl1, Some(HIGH_CLIENT_ISN + SYN_BYTE));
+    assert_eq!(conn.snd_wl2, Some(SERVER_ISN + SYN_BYTE));
 
     Ok(())
 }

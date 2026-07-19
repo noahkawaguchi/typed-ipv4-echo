@@ -12,7 +12,8 @@ fn new_ack_adopts_window_from_segment() -> Result {
     let mut cloned_state = connections.try_get()?.clone();
 
     assert_ne!(
-        cloned_state.snd_wnd, NEW_WND,
+        cloned_state.snd_wnd,
+        Some(NEW_WND),
         "The initial send window must differ from the updated one for the test to be meaningful"
     );
 
@@ -44,7 +45,7 @@ fn new_ack_adopts_window_from_segment() -> Result {
     );
 
     cloned_state.snd_una.advance_by(HELLO_LEN);
-    cloned_state.snd_wnd = NEW_WND;
+    cloned_state.snd_wnd = Some(NEW_WND);
 
     assert_eq!(
         connections.try_get()?,
@@ -95,7 +96,7 @@ fn stale_segment_does_not_clobber_send_window() -> Result {
         None
     );
 
-    cloned_state.snd_wnd = 1000;
+    cloned_state.snd_wnd = Some(1000);
 
     assert_eq!(connections.try_get()?, &cloned_state, "First window update should be adopted");
 
@@ -174,7 +175,7 @@ fn same_seq_but_fresher_ack_updates_window() -> Result {
     );
 
     cloned_state.snd_una.advance_by(HELLO_LEN);
-    cloned_state.snd_wnd = 1000;
+    cloned_state.snd_wnd = Some(1000);
 
     assert_eq!(connections.try_get()?, &cloned_state, "First window update should be adopted");
 
@@ -192,7 +193,7 @@ fn same_seq_but_fresher_ack_updates_window() -> Result {
     );
 
     cloned_state.snd_una.advance_by(HI_LEN);
-    cloned_state.snd_wnd = 2000;
+    cloned_state.snd_wnd = Some(2000);
 
     assert_eq!(
         connections.try_get()?,
@@ -217,7 +218,8 @@ fn duplicate_ack_updates_window() -> Result {
     let mut cloned_state = connections.try_get()?.clone();
 
     assert_ne!(
-        cloned_state.snd_wnd, NEW_WND,
+        cloned_state.snd_wnd,
+        Some(NEW_WND),
         "The initial send window must differ from the updated one for the test to be meaningful"
     );
 
@@ -250,7 +252,7 @@ fn duplicate_ack_updates_window() -> Result {
         None
     );
 
-    cloned_state.snd_wnd = NEW_WND;
+    cloned_state.snd_wnd = Some(NEW_WND);
 
     assert_eq!(
         connections.try_get()?,

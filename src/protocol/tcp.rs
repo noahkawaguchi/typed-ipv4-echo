@@ -243,9 +243,9 @@ impl TcpHandler {
                 conn.tcp_state = TcpState::Established;
                 conn.rcv_nxt = self.seq_num;
                 conn.snd_una = self.ack_num;
-                conn.snd_wnd = self.window;
-                conn.snd_wl1 = self.seq_num;
-                conn.snd_wl2 = self.ack_num;
+                conn.snd_wnd = Some(self.window);
+                conn.snd_wl1 = Some(self.seq_num);
+                conn.snd_wl2 = Some(self.ack_num);
                 conn.pending.clear(); // Only the SYN-ACK just acknowledged could have been pending
 
                 None
@@ -273,9 +273,9 @@ impl TcpHandler {
                 TcpFlags::Ack,
                 None,
             ) => {
-                conn.incoming_ack_update(self);
+                conn.incoming_ack_update(self)?;
 
-                match conn.drain_transmittable() {
+                match conn.drain_transmittable()? {
                     Some(to_send) => Some(Self::data_payload(conn, to_send)?),
                     None => None,
                 }
@@ -291,11 +291,11 @@ impl TcpHandler {
             ) if self.seq_num == conn.rcv_nxt => {
                 let payload_len = u32::from(self.payload_len()?);
 
-                conn.incoming_ack_update(self);
+                conn.incoming_ack_update(self)?;
                 conn.rcv_nxt.advance_by(payload_len);
                 conn.send_buffer.extend(payload.iter());
 
-                Some(match conn.drain_transmittable() {
+                Some(match conn.drain_transmittable()? {
                     Some(to_send) => Self::data_payload(conn, to_send)?,
 
                     None => SendInfo {
@@ -315,7 +315,7 @@ impl TcpHandler {
                 TcpFlags::Ack | TcpFlags::FinAck,
                 _,
             ) if self.seq_num != conn.rcv_nxt => {
-                conn.incoming_ack_update(self);
+                conn.incoming_ack_update(self)?;
 
                 Some(SendInfo {
                     seq_num: conn.snd_nxt,
@@ -339,7 +339,7 @@ impl TcpHandler {
                     payload: None,
                 };
 
-                conn.incoming_ack_update(self);
+                conn.incoming_ack_update(self)?;
 
                 conn.tcp_state = TcpState::LastAck;
                 conn.snd_nxt.advance_by(1); // Our FIN consumes one sequence number
@@ -373,7 +373,7 @@ impl TcpHandler {
                     payload: None,
                 };
 
-                conn.incoming_ack_update(self);
+                conn.incoming_ack_update(self)?;
                 conn.rcv_nxt.advance_by(payload_len);
 
                 Some(send_info)
@@ -383,7 +383,7 @@ impl TcpHandler {
             (Some(conn @ ConnState { tcp_state: TcpState::FinWait1, .. }), TcpFlags::Ack, None)
                 if self.ack_num == conn.snd_nxt =>
             {
-                conn.incoming_ack_update(self);
+                conn.incoming_ack_update(self)?;
                 conn.tcp_state = TcpState::FinWait2;
                 None
             }
@@ -403,7 +403,7 @@ impl TcpHandler {
                     payload: None,
                 };
 
-                conn.incoming_ack_update(self);
+                conn.incoming_ack_update(self)?;
 
                 if self.ack_num == conn.snd_nxt {
                     connections.remove(&key);

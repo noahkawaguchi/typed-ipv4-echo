@@ -1,7 +1,10 @@
 use {
-    crate::protocol::tcp::{
-        SendInfo, TcpHandler,
-        seq_space::{SeqLe as _, SeqLt as _},
+    crate::{
+        Result,
+        protocol::tcp::{
+            SendInfo, TcpHandler,
+            seq_space::{SeqLe as _, SeqLt as _},
+        },
     },
     std::{
         collections::VecDeque,
@@ -27,19 +30,25 @@ pub(super) struct ConnState {
 
     /// SND.WND or send window. "This represents the sequence numbers that the remote (receiving)
     /// TCP endpoint is willing to receive" (4).
-    pub(super) snd_wnd: u16,
+    ///
+    /// Should be `None` until establishment, then always `Some`.
+    pub(super) snd_wnd: Option<u16>,
 
     /// SND.WL1. "segment sequence number used for last window update" (3.3.1).
     ///
     /// Purely used for internal bookkeeping alongside `snd_wl2` to determine whether a window
     /// value is fresh or stale/reordered.
-    pub(super) snd_wl1: u32,
+    ///
+    /// Should be `None` until establishment, then always `Some`.
+    pub(super) snd_wl1: Option<u32>,
 
     /// SND.WL2. "segment acknowledgment number used for last window update" (3.3.1).
     ///
     /// Purely used for internal bookkeeping alongside `snd_wl1` to determine whether a window
     /// value is fresh or stale/reordered.
-    pub(super) snd_wl2: u32,
+    ///
+    /// Should be `None` until establishment, then always `Some`.
+    pub(super) snd_wl2: Option<u32>,
 
     /// Unacked segments sent by the server, kept for retransmission purposes.
     pub(super) pending: Vec<PendingSegment>,
@@ -56,18 +65,22 @@ impl ConnState {
     /// Ignores ACKs that are old (before SND.UNA) or for data not yet sent (past SND.NXT). For
     /// updates to SND.UNA and the retransmission queue, ignores duplicate ACKs
     /// (SND.UNA == SEG.ACK).
-    pub(super) fn incoming_ack_update(&mut self, seg: &TcpHandler) {
+    pub(super) fn incoming_ack_update(&mut self, seg: &TcpHandler) -> Result {
+        let Some((snd_wl1, snd_wl2)) = self.snd_wl1.zip(self.snd_wl2) else {
+            return Err("`incoming_ack_update` called with uninitialized window state".into());
+        };
+
         if self.snd_una.seq_le(seg.ack_num) && seg.ack_num.seq_le(self.snd_nxt) {
             // Include duplicate ACKs: SND.UNA <= SEG.ACK <= SND.NXT
             //     and
             // Guard against an old/reordered segment clobbering the window with stale data:
             //     SND.WL1 < SEG.SEQ or (SND.WL1 == SEG.SEQ and SND.WL2 <= SEG.ACK)
-            if self.snd_wl1.seq_lt(seg.seq_num)
-                || (self.snd_wl1 == seg.seq_num && self.snd_wl2.seq_le(seg.ack_num))
+            if snd_wl1.seq_lt(seg.seq_num)
+                || (snd_wl1 == seg.seq_num && snd_wl2.seq_le(seg.ack_num))
             {
-                self.snd_wnd = seg.window;
-                self.snd_wl1 = seg.seq_num;
-                self.snd_wl2 = seg.ack_num;
+                self.snd_wnd = Some(seg.window);
+                self.snd_wl1 = Some(seg.seq_num);
+                self.snd_wl2 = Some(seg.ack_num);
             }
 
             // Exclude duplicate ACKs: SND.UNA < SEG.ACK <= SND.NXT
@@ -79,19 +92,23 @@ impl ConnState {
                     .retain(|pending_seg| seg.ack_num.seq_lt(pending_seg.end_seq));
             }
         }
+
+        Ok(())
     }
 
     /// Removes and returns as many bytes as the peer's currently advertised window allows from the
-    /// front of the send buffer, or `None` if nothing can be sent right now because the buffer is
-    /// empty or the window is full. Does not mutate any other state.
-    pub(super) fn drain_transmittable(&mut self) -> Option<Rc<[u8]>> {
-        let sent_but_not_acked = self.snd_nxt.wrapping_sub(self.snd_una);
-        let available = u32::from(self.snd_wnd).saturating_sub(sent_but_not_acked);
-        let n = usize::try_from(available)
-            .unwrap_or(usize::MAX)
-            .min(self.send_buffer.len());
+    /// front of the send buffer, or returns `Ok(None)` if nothing can be sent right now because the
+    /// buffer is empty or the window is full. Does not mutate any other state.
+    pub(super) fn drain_transmittable(&mut self) -> Result<Option<Rc<[u8]>>> {
+        let Some(snd_wnd) = self.snd_wnd else {
+            return Err("`drain_transmittable` called with uninitialized window state".into());
+        };
 
-        (n > 0).then(|| self.send_buffer.drain(..n).collect())
+        let sent_but_not_acked = self.snd_nxt.wrapping_sub(self.snd_una);
+        let available = u32::from(snd_wnd).saturating_sub(sent_but_not_acked);
+        let n = usize::try_from(available)?.min(self.send_buffer.len());
+
+        Ok((n > 0).then(|| self.send_buffer.drain(..n).collect()))
     }
 }
 
