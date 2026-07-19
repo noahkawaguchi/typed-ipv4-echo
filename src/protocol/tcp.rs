@@ -444,17 +444,17 @@ impl TcpHandler {
                 None
             }
 
-            // RST on synchronized connection -> RFC 9293, Section 3.10.7.4 has three cases for when
-            // the RST bit is set, protecting against a blind reset attack (as described in RFC
-            // 5961, Section 3):
+            // RST on a known connection -> RFC 9293, Section 3.10.7.4 has three cases for when the
+            // RST bit is set, protecting against a blind reset attack (as described in RFC 5961,
+            // Section 3):
             //   Case 1: SEG.SEQ outside window           -> silently drop segment
             //   Case 2: SEG.SEQ == RCV.NXT               -> reset connection, no reply
             //   Case 3: SEG.SEQ in window but != RCV.NXT -> no connection reset, send challenge ACK
             (
-                Some(&mut ConnState { tcp_state, snd_nxt, rcv_nxt, .. }),
+                Some(&mut ConnState { snd_nxt, rcv_nxt, .. }),
                 TcpFlags::Rst | TcpFlags::RstAck,
                 _,
-            ) if tcp_state != TcpState::SynReceived => {
+            ) => {
                 if self.seq_num == rcv_nxt {
                     // Case 2
                     connections.remove(&key);
@@ -473,23 +473,6 @@ impl TcpHandler {
                         payload: None,
                     })
                 }
-            }
-
-            // RST in SYN-RECEIVED -> "If this connection was initiated with a passive OPEN (i.e.,
-            // came from the LISTEN state), then return this connection to LISTEN state" (RFC 9293,
-            // Section 3.10.7.4).
-            //
-            // As a purely server-side implementation, all connections begin with passive OPEN. In
-            // the current implementation, "returning to LISTEN" is effectively just removing the
-            // connection.
-            #[expect(clippy::match_same_arms, reason = "Keep all RST arms next to each other")]
-            (
-                Some(ConnState { tcp_state: TcpState::SynReceived, .. }),
-                TcpFlags::Rst | TcpFlags::RstAck,
-                _,
-            ) => {
-                connections.remove(&key);
-                None
             }
 
             // RST from an unknown (CLOSED) connection -> silently drop segment (never RST a RST)
