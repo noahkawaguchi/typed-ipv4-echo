@@ -34,9 +34,6 @@ fn pure_ack_on_established_connection_returns_none() -> Result {
     let mut connections = TcpConnections::after_handshake();
     let mut cloned_state = connections.try_get()?.clone();
 
-    cloned_state.snd_nxt.advance_by(HELLO_LEN);
-    cloned_state.rcv_nxt.advance_by(HELLO_LEN);
-
     TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE,
         ack_num: SERVER_ISN + SYN_BYTE,
@@ -45,18 +42,24 @@ fn pure_ack_on_established_connection_returns_none() -> Result {
     }
     .create_reply(&mut connections)?;
 
+    cloned_state.snd_nxt.advance_by(HELLO_LEN);
+    cloned_state.rcv_nxt.advance_by(HELLO_LEN);
+
     // ack=SERVER_ISN + 5 bytes echoed + 1
-    assert_eq!(
-        TcpHandler {
-            seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-            ack_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
-            ..CLIENT_PACKET
-        }
-        .create_reply(&mut connections)?,
-        None
-    );
+    let pure_ack = TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+        ack_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
+        ..CLIENT_PACKET
+    };
+
+    assert_eq!(pure_ack.create_reply(&mut connections)?, None);
 
     cloned_state.snd_una.advance_by(HELLO_LEN);
+    cloned_state.window_state = Some(WindowState {
+        snd_wnd: CLIENT_PACKET.window,
+        snd_wl1: pure_ack.seq_num,
+        snd_wl2: pure_ack.ack_num,
+    });
 
     assert_eq!(
         connections.try_get()?,
@@ -172,13 +175,14 @@ fn old_ack_num_does_not_regress_snd_una() -> Result {
 
     // Second packet: "Hi" (2 bytes), ack=SERVER_ISN+6 -> SND.UNA advances to SERVER_ISN+6, SND.NXT
     // becomes SERVER_ISN+8
-    let reply2 = TcpHandler {
+    let hi_packet = TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
         ack_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
         payload: payload_from("Hi"),
         ..CLIENT_PACKET
-    }
-    .create_reply(&mut connections)?;
+    };
+
+    let reply2 = hi_packet.create_reply(&mut connections)?;
 
     assert_eq!(
         reply2,
@@ -194,6 +198,12 @@ fn old_ack_num_does_not_regress_snd_una() -> Result {
     cloned_state.snd_nxt.advance_by(HI_LEN);
     cloned_state.rcv_nxt.advance_by(HI_LEN);
     cloned_state.snd_una.advance_by(HELLO_LEN);
+    cloned_state.window_state = Some(WindowState {
+        snd_wnd: CLIENT_PACKET.window,
+        snd_wl1: hi_packet.seq_num,
+        snd_wl2: hi_packet.ack_num,
+    });
+
     assert_eq!(
         connections.try_get()?,
         &cloned_state,
@@ -343,8 +353,16 @@ fn wraparound_ack_for_unsent_data_is_still_rejected() -> Result {
     // `u32::MAX` is false and let it through.
 
     let mut connections = TcpConnections::default();
-    let initial_state =
-        ConnState { snd_nxt: u32::MAX, snd_una: u32::MAX, snd_wl2: u32::MAX, ..AFTER_HANDSHAKE };
+    let initial_state = ConnState {
+        snd_nxt: u32::MAX,
+        snd_una: u32::MAX,
+        window_state: Some(WindowState {
+            snd_wnd: u16::MAX,
+            snd_wl1: CLIENT_ISN + SYN_BYTE,
+            snd_wl2: u32::MAX,
+        }),
+        ..AFTER_HANDSHAKE
+    };
     connections.insert(initial_state.clone());
 
     // ack=0 wraps 1 past SND.NXT=`u32::MAX`

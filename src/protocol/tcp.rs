@@ -17,7 +17,7 @@ use {
                 connections::ConnKey,
                 flags::TcpFlags,
                 seq_space::{AdvanceBy as _, SeqLe as _, SeqLt as _},
-                state::{ConnState, PendingSegment, TcpState},
+                state::{ConnState, PendingSegment, TcpState, WindowState},
             },
         },
         sys,
@@ -168,7 +168,7 @@ impl TcpHandler {
                     payload: None,
                 };
 
-                connections.store_isn(key, send_info.clone());
+                connections.insert_syn_rcv(key, ConnState::from_syn_ack(send_info.clone())?)?;
 
                 Some(send_info)
             }
@@ -210,16 +210,46 @@ impl TcpHandler {
                 })
             }
 
+            // ACK during SYN-RECEIVED with an unacceptable sequence number -> per RFC 9293, Section
+            // 3.10.7.4, "First, check sequence number," reply with an ACK reflecting current state
+            // and drop the segment.
+            //
+            // Due to the current simplification of not using a reassembly buffer, any SEG.SEQ other
+            // than exactly RCV.NXT is treated as unacceptable rather than held for later.
+            (
+                Some(&mut ConnState { tcp_state: TcpState::SynReceived, snd_nxt, rcv_nxt, .. }),
+                TcpFlags::Ack,
+                None,
+            ) if self.seq_num != rcv_nxt => Some(SendInfo {
+                seq_num: snd_nxt,
+                ack_num: rcv_nxt,
+                flags: TcpFlags::Ack,
+                payload: None,
+            }),
+
             // Handshake ACK (step 3) -> transition to ESTABLISHED, no reply needed
-            // Remote ack num should be the previous local ISN + 1, which also becomes snd_una
+            //
+            // As per RFC 9293, Section 3.10.7.4, "Fifth, check the ACK field," "SYN-RECEIVED
+            // STATE," if SND.UNA < SEG.ACK <= SND.NXT, enter ESTABLISHED and set SND.WND, SND.WL1,
+            // and SND.WL2 without the freshness check used for ESTABLISHED state ACKs.
             (
                 Some(conn @ ConnState { tcp_state: TcpState::SynReceived, .. }),
                 TcpFlags::Ack,
                 None,
-            ) if conn.snd_una.wrapping_add(1) == self.ack_num => {
-                conn.incoming_ack_update(self);
+            ) if self.seq_num == conn.rcv_nxt
+                && conn.snd_una.seq_lt(self.ack_num)
+                && self.ack_num.seq_le(conn.snd_nxt) =>
+            {
                 conn.tcp_state = TcpState::Established;
                 conn.rcv_nxt = self.seq_num;
+                conn.snd_una = self.ack_num;
+                conn.window_state = Some(WindowState {
+                    snd_wnd: self.window,
+                    snd_wl1: self.seq_num,
+                    snd_wl2: self.ack_num,
+                });
+                conn.pending.clear(); // Only the SYN-ACK just acknowledged could have been pending
+
                 None
             }
 
@@ -245,9 +275,9 @@ impl TcpHandler {
                 TcpFlags::Ack,
                 None,
             ) => {
-                conn.incoming_ack_update(self);
+                conn.incoming_ack_update(self)?;
 
-                match conn.drain_transmittable() {
+                match conn.drain_transmittable()? {
                     Some(to_send) => Some(Self::data_payload(conn, to_send)?),
                     None => None,
                 }
@@ -263,11 +293,11 @@ impl TcpHandler {
             ) if self.seq_num == conn.rcv_nxt => {
                 let payload_len = u32::from(self.payload_len()?);
 
-                conn.incoming_ack_update(self);
+                conn.incoming_ack_update(self)?;
                 conn.rcv_nxt.advance_by(payload_len);
                 conn.send_buffer.extend(payload.iter());
 
-                Some(match conn.drain_transmittable() {
+                Some(match conn.drain_transmittable()? {
                     Some(to_send) => Self::data_payload(conn, to_send)?,
 
                     None => SendInfo {
@@ -287,7 +317,7 @@ impl TcpHandler {
                 TcpFlags::Ack | TcpFlags::FinAck,
                 _,
             ) if self.seq_num != conn.rcv_nxt => {
-                conn.incoming_ack_update(self);
+                conn.incoming_ack_update(self)?;
 
                 Some(SendInfo {
                     seq_num: conn.snd_nxt,
@@ -311,7 +341,7 @@ impl TcpHandler {
                     payload: None,
                 };
 
-                conn.incoming_ack_update(self);
+                conn.incoming_ack_update(self)?;
 
                 conn.tcp_state = TcpState::LastAck;
                 conn.snd_nxt.advance_by(1); // Our FIN consumes one sequence number
@@ -345,7 +375,7 @@ impl TcpHandler {
                     payload: None,
                 };
 
-                conn.incoming_ack_update(self);
+                conn.incoming_ack_update(self)?;
                 conn.rcv_nxt.advance_by(payload_len);
 
                 Some(send_info)
@@ -355,7 +385,7 @@ impl TcpHandler {
             (Some(conn @ ConnState { tcp_state: TcpState::FinWait1, .. }), TcpFlags::Ack, None)
                 if self.ack_num == conn.snd_nxt =>
             {
-                conn.incoming_ack_update(self);
+                conn.incoming_ack_update(self)?;
                 conn.tcp_state = TcpState::FinWait2;
                 None
             }
@@ -375,7 +405,7 @@ impl TcpHandler {
                     payload: None,
                 };
 
-                conn.incoming_ack_update(self);
+                conn.incoming_ack_update(self)?;
 
                 if self.ack_num == conn.snd_nxt {
                     connections.remove(&key);
@@ -416,17 +446,17 @@ impl TcpHandler {
                 None
             }
 
-            // RST on synchronized connection -> RFC 9293, Section 3.10.7.4 has three cases for when
-            // the RST bit is set, protecting against a blind reset attack (as described in RFC
-            // 5961, Section 3):
+            // RST on a known connection -> RFC 9293, Section 3.10.7.4 has three cases for when the
+            // RST bit is set, protecting against a blind reset attack (as described in RFC 5961,
+            // Section 3):
             //   Case 1: SEG.SEQ outside window           -> silently drop segment
             //   Case 2: SEG.SEQ == RCV.NXT               -> reset connection, no reply
             //   Case 3: SEG.SEQ in window but != RCV.NXT -> no connection reset, send challenge ACK
             (
-                Some(&mut ConnState { tcp_state, snd_nxt, rcv_nxt, .. }),
+                Some(&mut ConnState { snd_nxt, rcv_nxt, .. }),
                 TcpFlags::Rst | TcpFlags::RstAck,
                 _,
-            ) if tcp_state != TcpState::SynReceived => {
+            ) => {
                 if self.seq_num == rcv_nxt {
                     // Case 2
                     connections.remove(&key);
@@ -445,23 +475,6 @@ impl TcpHandler {
                         payload: None,
                     })
                 }
-            }
-
-            // RST in SYN-RECEIVED -> "If this connection was initiated with a passive OPEN (i.e.,
-            // came from the LISTEN state), then return this connection to LISTEN state" (RFC 9293,
-            // Section 3.10.7.4).
-            //
-            // As a purely server-side implementation, all connections begin with passive OPEN. In
-            // the current implementation, "returning to LISTEN" is effectively just removing the
-            // connection.
-            #[expect(clippy::match_same_arms, reason = "Keep all RST arms next to each other")]
-            (
-                Some(ConnState { tcp_state: TcpState::SynReceived, .. }),
-                TcpFlags::Rst | TcpFlags::RstAck,
-                _,
-            ) => {
-                connections.remove(&key);
-                None
             }
 
             // RST from an unknown (CLOSED) connection -> silently drop segment (never RST a RST)

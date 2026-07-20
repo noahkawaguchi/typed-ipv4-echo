@@ -1,7 +1,10 @@
 use {
-    crate::protocol::tcp::{
-        SendInfo, TcpHandler,
-        seq_space::{SeqLe as _, SeqLt as _},
+    crate::{
+        Result,
+        protocol::tcp::{
+            SendInfo, TcpFlags, TcpHandler,
+            seq_space::{SeqLe as _, SeqLt as _},
+        },
     },
     std::{
         collections::VecDeque,
@@ -10,36 +13,23 @@ use {
     },
 };
 
-/// The state of a connection in the table, including its TCP state and other locally stored data.
-/// Definitions below from RFC 9293, sections annotated inline.
+/// The state of a connection in the table, including its TCP state, buffered data, and other
+/// locally stored information.
 #[cfg_attr(test, derive(Debug, Clone))]
 pub(super) struct ConnState {
     pub(super) tcp_state: TcpState,
 
-    /// "SND.NXT = next sequence number to be sent" (3.4).
+    /// "SND.NXT = next sequence number to be sent" (RFC 9293, Section 3.4).
     pub(super) snd_nxt: u32,
 
-    /// "RCV.NXT = next sequence number expected on an incoming segment" (3.4).
+    /// "RCV.NXT = next sequence number expected on an incoming segment" (RFC 9293, Section 3.4).
     pub(super) rcv_nxt: u32,
 
-    /// "SND.UNA = oldest unacknowledged sequence number" (3.4).
+    /// "SND.UNA = oldest unacknowledged sequence number" (RFC 9293, Section 3.4).
     pub(super) snd_una: u32,
 
-    /// SND.WND or send window. "This represents the sequence numbers that the remote (receiving)
-    /// TCP endpoint is willing to receive" (4).
-    pub(super) snd_wnd: u16,
-
-    /// SND.WL1. "segment sequence number used for last window update" (3.3.1).
-    ///
-    /// Purely used for internal bookkeeping alongside `snd_wl2` to determine whether a window
-    /// value is fresh or stale/reordered.
-    pub(super) snd_wl1: u32,
-
-    /// SND.WL2. "segment acknowledgment number used for last window update" (3.3.1).
-    ///
-    /// Purely used for internal bookkeeping alongside `snd_wl1` to determine whether a window
-    /// value is fresh or stale/reordered.
-    pub(super) snd_wl2: u32,
+    /// SND.WND, SND.WL1, and SND.WL2. Should be `None` until establishment, then always `Some`.
+    pub(super) window_state: Option<WindowState>,
 
     /// Unacked segments sent by the server, kept for retransmission purposes.
     pub(super) pending: Vec<PendingSegment>,
@@ -49,6 +39,34 @@ pub(super) struct ConnState {
 }
 
 impl ConnState {
+    /// Creates a new `Self` in the state right after receiving a SYN and sending a SYN-ACK.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if `send_info.flags` is not SYN-ACK.
+    pub(super) fn from_syn_ack(send_info: SendInfo) -> Result<Self> {
+        (send_info.flags == TcpFlags::SynAck)
+            .then(|| Self {
+                // State after the initial two-way exchange
+                tcp_state: TcpState::SynReceived,
+                // SYN-ACK consumes one sequence number
+                snd_nxt: send_info.seq_num.wrapping_add(1),
+                // Our SYN-ACK's `ack_num` is the client's ISN + 1
+                rcv_nxt: send_info.ack_num,
+                // Our SYN-ACK is unacknowledged (this is our ISN)
+                snd_una: send_info.seq_num,
+                // Window-related values are set at connection establishment once the peer has
+                // provided a defined SEG.ACK
+                window_state: None,
+                pending: vec![PendingSegment::new(send_info, 1)],
+                send_buffer: VecDeque::new(),
+            })
+            .ok_or_else(|| {
+                "Attempted to create a new `ConnState` when sending something other than SYN-ACK"
+                    .into()
+            })
+    }
+
     /// Per RFC 9293, Section 3.10.7.4, "Fifth, check the ACK field," "ESTABLISHED STATE," processes
     /// an incoming segment's acknowledgment against the send-side state, updating SND.WND, SND.WL1,
     /// SND.WL2, SND.UNA, and the retransmission queue as necessary.
@@ -56,18 +74,24 @@ impl ConnState {
     /// Ignores ACKs that are old (before SND.UNA) or for data not yet sent (past SND.NXT). For
     /// updates to SND.UNA and the retransmission queue, ignores duplicate ACKs
     /// (SND.UNA == SEG.ACK).
-    pub(super) fn incoming_ack_update(&mut self, seg: &TcpHandler) {
+    pub(super) fn incoming_ack_update(&mut self, seg: &TcpHandler) -> Result {
+        let Some(window_state) = &self.window_state else {
+            return Err("`incoming_ack_update` called with uninitialized window state".into());
+        };
+
         if self.snd_una.seq_le(seg.ack_num) && seg.ack_num.seq_le(self.snd_nxt) {
             // Include duplicate ACKs: SND.UNA <= SEG.ACK <= SND.NXT
             //     and
             // Guard against an old/reordered segment clobbering the window with stale data:
             //     SND.WL1 < SEG.SEQ or (SND.WL1 == SEG.SEQ and SND.WL2 <= SEG.ACK)
-            if self.snd_wl1.seq_lt(seg.seq_num)
-                || (self.snd_wl1 == seg.seq_num && self.snd_wl2.seq_le(seg.ack_num))
+            if window_state.snd_wl1.seq_lt(seg.seq_num)
+                || (window_state.snd_wl1 == seg.seq_num && window_state.snd_wl2.seq_le(seg.ack_num))
             {
-                self.snd_wnd = seg.window;
-                self.snd_wl1 = seg.seq_num;
-                self.snd_wl2 = seg.ack_num;
+                self.window_state = Some(WindowState {
+                    snd_wnd: seg.window,
+                    snd_wl1: seg.seq_num,
+                    snd_wl2: seg.ack_num,
+                });
             }
 
             // Exclude duplicate ACKs: SND.UNA < SEG.ACK <= SND.NXT
@@ -79,19 +103,23 @@ impl ConnState {
                     .retain(|pending_seg| seg.ack_num.seq_lt(pending_seg.end_seq));
             }
         }
+
+        Ok(())
     }
 
     /// Removes and returns as many bytes as the peer's currently advertised window allows from the
-    /// front of the send buffer, or `None` if nothing can be sent right now because the buffer is
-    /// empty or the window is full. Does not mutate any other state.
-    pub(super) fn drain_transmittable(&mut self) -> Option<Rc<[u8]>> {
-        let sent_but_not_acked = self.snd_nxt.wrapping_sub(self.snd_una);
-        let available = u32::from(self.snd_wnd).saturating_sub(sent_but_not_acked);
-        let n = usize::try_from(available)
-            .unwrap_or(usize::MAX)
-            .min(self.send_buffer.len());
+    /// front of the send buffer, or returns `Ok(None)` if nothing can be sent right now because the
+    /// buffer is empty or the window is full. Does not mutate any other state.
+    pub(super) fn drain_transmittable(&mut self) -> Result<Option<Rc<[u8]>>> {
+        let Some(window_state) = &self.window_state else {
+            return Err("`drain_transmittable` called with uninitialized window state".into());
+        };
 
-        (n > 0).then(|| self.send_buffer.drain(..n).collect())
+        let sent_but_not_acked = self.snd_nxt.wrapping_sub(self.snd_una);
+        let available = u32::from(window_state.snd_wnd).saturating_sub(sent_but_not_acked);
+        let n = usize::try_from(available)?.min(self.send_buffer.len());
+
+        Ok((n > 0).then(|| self.send_buffer.drain(..n).collect()))
     }
 }
 
@@ -100,16 +128,13 @@ impl PartialEq for ConnState {
     fn eq(
         &self,
         &Self {
-            // Include all fields except `snd_wl1`/`snd_wl2` (internal freshness bookkeeping for
-            // `snd_wnd`) and `pending` (timing dependent), explicitly destructured to catch any
-            // fields added later
+            // Include all fields except `pending` (timing dependent), explicitly destructured to
+            // catch any fields added later
             tcp_state,
             snd_nxt,
             rcv_nxt,
             snd_una,
-            snd_wnd,
-            snd_wl1: _,
-            snd_wl2: _,
+            ref window_state,
             pending: _,
             ref send_buffer,
         }: &Self,
@@ -118,7 +143,7 @@ impl PartialEq for ConnState {
             && self.snd_nxt == snd_nxt
             && self.rcv_nxt == rcv_nxt
             && self.snd_una == snd_una
-            && self.snd_wnd == snd_wnd
+            && &self.window_state == window_state
             && &self.send_buffer == send_buffer
     }
 }
@@ -165,6 +190,28 @@ pub(super) enum TcpState {
     ///
     /// Reached via passive close, after acknowledging the remote peer's FIN with our own.
     LastAck,
+}
+
+/// The SND.WND, SND.WL1, and SND.WL2 values of a connection.
+#[cfg_attr(test, derive(Debug, Copy, Clone, PartialEq, Eq))]
+#[expect(clippy::struct_field_names, reason = "Match RFC terminology")]
+pub(super) struct WindowState {
+    /// SND.WND or send window. "This represents the sequence numbers that the remote (receiving)
+    /// TCP endpoint is willing to receive" (RFC 9293, Section 4).
+    pub(super) snd_wnd: u16,
+
+    /// SND.WL1. "segment sequence number used for last window update" (RFC 9293, Section 3.3.1).
+    ///
+    /// Purely used for internal bookkeeping alongside `snd_wl2` to determine whether a window
+    /// value is fresh or stale/reordered.
+    pub(super) snd_wl1: u32,
+
+    /// SND.WL2. "segment acknowledgment number used for last window update" (RFC 9293, Section
+    /// 3.3.1).
+    ///
+    /// Purely used for internal bookkeeping alongside `snd_wl1` to determine whether a window
+    /// value is fresh or stale/reordered.
+    pub(super) snd_wl2: u32,
 }
 
 /// A sent segment that consumed sequence numbers and hasn't yet been acknowledged.

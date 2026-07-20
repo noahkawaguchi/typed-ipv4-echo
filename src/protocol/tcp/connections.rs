@@ -1,5 +1,6 @@
 use {
     crate::{
+        Result,
         addr_pairs::{Ipv4AddrPair, PortPair},
         protocol::tcp::{
             SendInfo, TcpFlags, TcpHandler,
@@ -8,7 +9,7 @@ use {
         },
     },
     std::{
-        collections::{HashMap, VecDeque},
+        collections::HashMap,
         net::Ipv4Addr,
         time::{Duration, Instant},
     },
@@ -42,27 +43,19 @@ impl TcpConnections {
         self.table.get_mut(key)
     }
 
-    pub(super) fn store_isn(&mut self, key: ConnKey, send_info: SendInfo) {
-        self.table.insert(
-            key,
-            ConnState {
-                // State after initial two-way exchange
-                tcp_state: TcpState::SynReceived,
-                // SYN-ACK consumes one sequence number
-                snd_nxt: send_info.seq_num.wrapping_add(1),
-                // Set at connection establishment
-                rcv_nxt: 0,
-                // The SYN-ACK we're sending is unacknowledged (this is the ISN)
-                snd_una: send_info.seq_num,
-                // Window-related values are set at connection establishment once the peer's window
-                // is actually known
-                snd_wnd: 0,
-                snd_wl1: 0,
-                snd_wl2: 0,
-                pending: vec![PendingSegment::new(send_info, 1)],
-                send_buffer: VecDeque::new(),
-            },
-        );
+    /// Adds a new SYN-RECEIVED connection to the table.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the connection's TCP state is not SYN-RECEIVED.
+    pub(super) fn insert_syn_rcv(&mut self, key: ConnKey, state: ConnState) -> Result {
+        (state.tcp_state == TcpState::SynReceived)
+            .then(|| {
+                self.table.insert(key, state);
+            })
+            .ok_or_else(|| {
+                "Attempted to insert a connection with a state other than SYN-RECEIVED".into()
+            })
     }
 
     pub(super) fn remove(&mut self, key: &ConnKey) { self.table.remove(key); }
@@ -188,21 +181,39 @@ impl TcpConnections {
         self.table.insert(KEY, conn);
     }
 
-    /// Inserts a SYN-RECEIVED connection into the table using `KEY`, `CLIENT_ISN`, and
-    /// `SERVER_ISN`.
+    /// Creates a default-initialized `Self` and inserts a new SYN-RECEIVED connection using `KEY`,
+    /// `CLIENT_ISN`, and `SERVER_ISN` as if we had just responded to the peer's SYN with SYN-ACK.
     #[cfg(test)]
-    pub(super) fn insert_syn_recv(&mut self) {
-        use crate::protocol::tcp::tests::{CLIENT_ISN, KEY, SERVER_ISN, SYN_BYTE};
+    pub(super) fn with_syn_rcv() -> Self {
+        use {
+            crate::protocol::tcp::tests::{CLIENT_ISN, KEY, SERVER_ISN, SYN_BYTE},
+            std::collections::VecDeque,
+        };
 
-        self.store_isn(
+        let mut connections = Self::default();
+
+        connections.table.insert(
             KEY,
-            SendInfo {
-                seq_num: SERVER_ISN,
-                ack_num: CLIENT_ISN + SYN_BYTE,
-                flags: TcpFlags::SynAck,
-                payload: None,
+            ConnState {
+                tcp_state: TcpState::SynReceived,
+                snd_nxt: SERVER_ISN + SYN_BYTE,
+                rcv_nxt: CLIENT_ISN + SYN_BYTE,
+                snd_una: SERVER_ISN,
+                window_state: None,
+                pending: vec![PendingSegment::new(
+                    SendInfo {
+                        seq_num: SERVER_ISN,
+                        ack_num: CLIENT_ISN + SYN_BYTE,
+                        flags: TcpFlags::SynAck,
+                        payload: None,
+                    },
+                    SYN_BYTE,
+                )],
+                send_buffer: VecDeque::new(),
             },
         );
+
+        connections
     }
 
     /// Creates a default-initialized `Self` and inserts a default-initialized ESTABLISHED

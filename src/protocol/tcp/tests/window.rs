@@ -12,7 +12,8 @@ fn new_ack_adopts_window_from_segment() -> Result {
     let mut cloned_state = connections.try_get()?.clone();
 
     assert_ne!(
-        cloned_state.snd_wnd, NEW_WND,
+        cloned_state.window_state.map(|win| win.snd_wnd),
+        Some(NEW_WND),
         "The initial send window must differ from the updated one for the test to be meaningful"
     );
 
@@ -32,19 +33,21 @@ fn new_ack_adopts_window_from_segment() -> Result {
     assert_eq!(connections.try_get()?, &cloned_state, "State confirmation before window update");
 
     // Pure ACK of that echo, ack=SERVER_ISN+6 (now "new"), advertising a new window
-    assert_eq!(
-        TcpHandler {
-            seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-            ack_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
-            window: NEW_WND,
-            ..CLIENT_PACKET
-        }
-        .create_reply(&mut connections)?,
-        None
-    );
+    let window_update = TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+        ack_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
+        window: NEW_WND,
+        ..CLIENT_PACKET
+    };
+
+    assert_eq!(window_update.create_reply(&mut connections)?, None);
 
     cloned_state.snd_una.advance_by(HELLO_LEN);
-    cloned_state.snd_wnd = NEW_WND;
+    cloned_state.window_state = Some(WindowState {
+        snd_wnd: NEW_WND,
+        snd_wl1: window_update.seq_num,
+        snd_wl2: window_update.ack_num,
+    });
 
     assert_eq!(
         connections.try_get()?,
@@ -84,18 +87,20 @@ fn stale_segment_does_not_clobber_send_window() -> Result {
     // Pure ACK with seq=CLIENT_ISN+6, fresher than the handshake's SND.WL1=CLIENT_ISN+1, so this
     // legitimately updates SND.WND/SND.WL1/SND.WL2 as if it were the last segment to do so before
     // the stale duplicate below arrives
-    assert_eq!(
-        TcpHandler {
-            seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-            ack_num: SERVER_ISN + SYN_BYTE,
-            window: 1000,
-            ..CLIENT_PACKET
-        }
-        .create_reply(&mut connections)?,
-        None
-    );
+    let fresh_window_update = TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+        ack_num: SERVER_ISN + SYN_BYTE,
+        window: 1000,
+        ..CLIENT_PACKET
+    };
 
-    cloned_state.snd_wnd = 1000;
+    assert_eq!(fresh_window_update.create_reply(&mut connections)?, None);
+
+    cloned_state.window_state = Some(WindowState {
+        snd_wnd: 1000,
+        snd_wl1: fresh_window_update.seq_num,
+        snd_wl2: fresh_window_update.ack_num,
+    });
 
     assert_eq!(connections.try_get()?, &cloned_state, "First window update should be adopted");
 
@@ -148,51 +153,62 @@ fn same_seq_but_fresher_ack_updates_window() -> Result {
     cloned_state.rcv_nxt.advance_by(HELLO_LEN);
     assert_eq!(connections.try_get()?, &cloned_state);
 
-    TcpHandler {
+    let hi_packet = TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
         ack_num: SERVER_ISN + SYN_BYTE,
         payload: payload_from("Hi"),
         ..CLIENT_PACKET
-    }
-    .create_reply(&mut connections)?;
+    };
+
+    hi_packet.create_reply(&mut connections)?;
 
     cloned_state.snd_nxt.advance_by(HI_LEN);
     cloned_state.rcv_nxt.advance_by(HI_LEN);
+    cloned_state.window_state = Some(WindowState {
+        snd_wnd: CLIENT_PACKET.window,
+        snd_wl1: hi_packet.seq_num,
+        snd_wl2: hi_packet.ack_num,
+    });
+
     assert_eq!(connections.try_get()?, &cloned_state);
 
     // First pure ACK with seq=CLIENT_ISN+8 is fresher than the handshake's SND.WL1=CLIENT_ISN+1, so
     // this legitimately sets SND.WL1=CLIENT_ISN+8, SND.WL2=SERVER_ISN+6
-    assert_eq!(
-        TcpHandler {
-            seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
-            ack_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
-            window: 1000,
-            ..CLIENT_PACKET
-        }
-        .create_reply(&mut connections)?,
-        None
-    );
+    let window_update_1 = TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
+        ack_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
+        window: 1000,
+        ..CLIENT_PACKET
+    };
+
+    assert_eq!(window_update_1.create_reply(&mut connections)?, None);
 
     cloned_state.snd_una.advance_by(HELLO_LEN);
-    cloned_state.snd_wnd = 1000;
+    cloned_state.window_state = Some(WindowState {
+        snd_wnd: 1000,
+        snd_wl1: window_update_1.seq_num,
+        snd_wl2: window_update_1.ack_num,
+    });
 
     assert_eq!(connections.try_get()?, &cloned_state, "First window update should be adopted");
 
     // Second pure ACK with identical seq_num (no new data sent), but a strictly higher ack_num and
     // a different window
-    assert_eq!(
-        TcpHandler {
-            seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
-            ack_num: SERVER_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
-            window: 2000,
-            ..CLIENT_PACKET
-        }
-        .create_reply(&mut connections)?,
-        None
-    );
+    let window_update_2 = TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
+        ack_num: SERVER_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
+        window: 2000,
+        ..CLIENT_PACKET
+    };
+
+    assert_eq!(window_update_2.create_reply(&mut connections)?, None);
 
     cloned_state.snd_una.advance_by(HI_LEN);
-    cloned_state.snd_wnd = 2000;
+    cloned_state.window_state = Some(WindowState {
+        snd_wnd: 2000,
+        snd_wl1: window_update_2.seq_num,
+        snd_wl2: window_update_2.ack_num,
+    });
 
     assert_eq!(
         connections.try_get()?,
@@ -217,7 +233,8 @@ fn duplicate_ack_updates_window() -> Result {
     let mut cloned_state = connections.try_get()?.clone();
 
     assert_ne!(
-        cloned_state.snd_wnd, NEW_WND,
+        cloned_state.window_state.map(|win| win.snd_wnd),
+        Some(NEW_WND),
         "The initial send window must differ from the updated one for the test to be meaningful"
     );
 
@@ -239,18 +256,20 @@ fn duplicate_ack_updates_window() -> Result {
     // Duplicate ACK where ack_num=SERVER_ISN+1 still equals SND.UNA (nothing new acknowledged), but
     // seq_num=CLIENT_ISN+6 is fresher than the stored SND.WL1=CLIENT_ISN+1, so this must still
     // update SND.WND to the new window
-    assert_eq!(
-        TcpHandler {
-            seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-            ack_num: SERVER_ISN + SYN_BYTE,
-            window: NEW_WND,
-            ..CLIENT_PACKET
-        }
-        .create_reply(&mut connections)?,
-        None
-    );
+    let dup_ack_fresh_seq = TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+        ack_num: SERVER_ISN + SYN_BYTE,
+        window: NEW_WND,
+        ..CLIENT_PACKET
+    };
 
-    cloned_state.snd_wnd = NEW_WND;
+    assert_eq!(dup_ack_fresh_seq.create_reply(&mut connections)?, None);
+
+    cloned_state.window_state = Some(WindowState {
+        snd_wnd: NEW_WND,
+        snd_wl1: dup_ack_fresh_seq.seq_num,
+        snd_wl2: dup_ack_fresh_seq.ack_num,
+    });
 
     assert_eq!(
         connections.try_get()?,

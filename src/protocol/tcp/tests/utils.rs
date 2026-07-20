@@ -37,9 +37,11 @@ pub const AFTER_HANDSHAKE: ConnState = ConnState {
     snd_nxt: SERVER_ISN + SYN_BYTE,
     rcv_nxt: CLIENT_ISN + SYN_BYTE,
     snd_una: SERVER_ISN + SYN_BYTE,
-    snd_wnd: u16::MAX,
-    snd_wl1: CLIENT_ISN + SYN_BYTE,
-    snd_wl2: SERVER_ISN + SYN_BYTE,
+    window_state: Some(WindowState {
+        snd_wnd: u16::MAX,
+        snd_wl1: CLIENT_ISN + SYN_BYTE,
+        snd_wl2: SERVER_ISN + SYN_BYTE,
+    }),
     pending: Vec::new(),
     send_buffer: VecDeque::new(),
 };

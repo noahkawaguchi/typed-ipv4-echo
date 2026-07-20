@@ -1,9 +1,21 @@
 use super::*;
 
+/// Creates a `ConnState` that is the same as `AFTER_HANDSHAKE` except for a custom `snd_wnd`.
+fn after_handshake_with_snd_wnd(snd_wnd: u16) -> ConnState {
+    ConnState {
+        window_state: Some(WindowState {
+            snd_wnd,
+            snd_wl1: CLIENT_ISN + SYN_BYTE,
+            snd_wl2: SERVER_ISN + SYN_BYTE,
+        }),
+        ..AFTER_HANDSHAKE
+    }
+}
+
 #[test]
 fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result {
     let mut connections = TcpConnections::default();
-    let mut expected_state = ConnState { snd_wnd: 3, ..AFTER_HANDSHAKE };
+    let mut expected_state = after_handshake_with_snd_wnd(3);
     connections.insert(expected_state.clone());
 
     let reply = TcpHandler {
@@ -42,7 +54,7 @@ fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result {
 #[test]
 fn window_opening_via_ack_drains_buffered_remainder() -> Result {
     let mut connections = TcpConnections::default();
-    let mut expected_state = ConnState { snd_wnd: 3, ..AFTER_HANDSHAKE };
+    let mut expected_state = after_handshake_with_snd_wnd(3);
     connections.insert(expected_state.clone());
 
     // "Hello" (5 bytes), window only allows 3 -> "Hel" sent, "lo" buffered
@@ -62,13 +74,14 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
     assert_eq!(connections.try_get()?, &expected_state, "State confirmation before window update");
 
     // Client acks the 3 sent bytes and advertises a bigger window -> should drain "lo"
-    let reply = TcpHandler {
+    let window_update = TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
         ack_num: SERVER_ISN + SYN_BYTE + 3,
         window: 10,
         ..CLIENT_PACKET
-    }
-    .create_reply(&mut connections)?;
+    };
+
+    let reply = window_update.create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
@@ -82,8 +95,12 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
     );
 
     expected_state.snd_una.advance_by(3);
-    expected_state.snd_wnd = 10;
     expected_state.snd_nxt.advance_by(2);
+    expected_state.window_state = Some(WindowState {
+        snd_wnd: 10,
+        snd_wl1: window_update.seq_num,
+        snd_wl2: window_update.ack_num,
+    });
     expected_state.send_buffer.clear();
 
     assert_eq!(
@@ -98,7 +115,7 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
 #[test]
 fn zero_window_buffers_entire_payload_and_gets_bare_ack() -> Result {
     let mut connections = TcpConnections::default();
-    let mut expected_state = ConnState { snd_wnd: 0, ..AFTER_HANDSHAKE };
+    let mut expected_state = after_handshake_with_snd_wnd(0);
     connections.insert(expected_state.clone());
 
     let reply = TcpHandler {
