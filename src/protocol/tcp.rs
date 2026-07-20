@@ -193,22 +193,23 @@ impl TcpHandler {
                 Some(send_info)
             }
 
-            // Stray SYN on a synchronized connection -> send a challenge ACK, do not reset the
-            // connection (RFC 9293, Section 3.10.7.4).
+            // Stray SYN or SYN-ACK on a synchronized connection -> send a challenge ACK, do not
+            // reset the connection (RFC 9293, Section 3.10.7.4).
             //
             // Out-of-window SYN is caught at the general "First, check sequence number," while
             // in-window SYN is caught at "Fourth, check the SYN bit," but both have the same
-            // result.
-            (Some(&mut ConnState { tcp_state, snd_nxt, rcv_nxt, .. }), TcpFlags::Syn, _)
-                if tcp_state != TcpState::SynReceived =>
-            {
-                Some(SendInfo {
-                    seq_num: snd_nxt,
-                    ack_num: rcv_nxt,
-                    flags: TcpFlags::Ack,
-                    payload: None,
-                })
-            }
+            // result. The ACK field and ACK bit are checked fifth, so SYN and SYN-ACK are treated
+            // the same here.
+            (
+                Some(&mut ConnState { tcp_state, snd_nxt, rcv_nxt, .. }),
+                TcpFlags::Syn | TcpFlags::SynAck,
+                _,
+            ) if tcp_state != TcpState::SynReceived => Some(SendInfo {
+                seq_num: snd_nxt,
+                ack_num: rcv_nxt,
+                flags: TcpFlags::Ack,
+                payload: None,
+            }),
 
             // ACK during SYN-RECEIVED with an unacceptable sequence number -> per RFC 9293, Section
             // 3.10.7.4, "First, check sequence number," reply with an ACK reflecting current state

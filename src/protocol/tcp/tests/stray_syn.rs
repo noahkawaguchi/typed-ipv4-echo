@@ -102,3 +102,42 @@ fn stray_syn_in_fin_wait_1_gets_challenge_ack() -> Result {
 
     Ok(())
 }
+
+#[test]
+fn stray_syn_ack_gets_challenge_ack() -> Result {
+    // The same RFC 9293, Section 3.10.7.4 SYN rule as above applies to SYN-ACK as well, not just
+    // SYN, since SYN is checked fourth and ACK is checked fifth. As a server with only passive
+    // OPEN, a SYN-ACK would never come from a real client, but this behavior should still be
+    // verified for robustness and correctness reasons.
+
+    // snd_nxt=SERVER_ISN+1, rcv_nxt=CLIENT_ISN+1
+    let mut connections = TcpConnections::after_handshake();
+    let initial_state = connections.try_get()?.clone();
+
+    // seq=CLIENT_ISN+1 == rcv_nxt, inside the receive window, reaches "Fourth, check the SYN bit"
+    let reply = TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE,
+        ack_num: SERVER_ISN + SYN_BYTE,
+        flags: TcpFlags::SynAck,
+        ..CLIENT_PACKET
+    }
+    .create_reply(&mut connections)?;
+
+    assert_eq!(
+        reply,
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE,
+            ..SERVER_REPLY
+        }),
+        "Stray SYN-ACK must produce a challenge ACK, not a RST"
+    );
+
+    assert_eq!(
+        connections.try_get()?,
+        &initial_state,
+        "Stray SYN-ACK must not destroy the connection"
+    );
+
+    Ok(())
+}
