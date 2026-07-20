@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn stray_syn_out_of_window_on_established_gets_challenge_ack() -> Result {
+fn stray_syn_out_of_window_gets_challenge_ack() -> Result {
     // RFC 9293, Section 3.10.7.4, "First, check sequence number": a segment outside the receive
     // window gets a challenge ACK (<SEQ=SND.NXT><ACK=RCV.NXT><CTL=ACK>) and is dropped. "Fourth,
     // check the SYN bit" is not reached.
@@ -35,7 +35,7 @@ fn stray_syn_out_of_window_on_established_gets_challenge_ack() -> Result {
 }
 
 #[test]
-fn stray_syn_in_window_on_established_gets_challenge_ack() -> Result {
+fn stray_syn_in_window_gets_challenge_ack() -> Result {
     // RFC 9293, Section 3.10.7.4, "Fourth, check the SYN bit": for synchronized states, RFC 5961
     // (incorporated into RFC 9293) recommends a challenge ACK irrespective of the sequence number,
     // and the connection must not be reset.
@@ -69,7 +69,7 @@ fn stray_syn_in_window_on_established_gets_challenge_ack() -> Result {
 }
 
 #[test]
-fn stray_syn_in_window_on_fin_wait_1_gets_challenge_ack() -> Result {
+fn stray_syn_in_fin_wait_1_gets_challenge_ack() -> Result {
     // The same RFC 9293, Section 3.10.7.4 SYN rule as above applies to all synchronized states
     // listed there, not just ESTABLISHED.
 
@@ -79,6 +79,7 @@ fn stray_syn_in_window_on_fin_wait_1_gets_challenge_ack() -> Result {
     let initial_state = connections.try_get()?.clone();
     assert_eq!(initial_state.tcp_state, TcpState::FinWait1);
 
+    // seq=CLIENT_ISN+1 == rcv_nxt, inside the receive window, reaches "Fourth, check the SYN bit"
     let reply =
         TcpHandler { seq_num: CLIENT_ISN + SYN_BYTE, flags: TcpFlags::Syn, ..CLIENT_PACKET }
             .create_reply(&mut connections)?;
@@ -96,7 +97,7 @@ fn stray_syn_in_window_on_fin_wait_1_gets_challenge_ack() -> Result {
     assert_eq!(
         connections.try_get()?,
         &initial_state,
-        "In-window stray SYN must not destroy the connection"
+        "Stray SYN in FIN-WAIT-1 must not destroy the connection"
     );
 
     Ok(())
