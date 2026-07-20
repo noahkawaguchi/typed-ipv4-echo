@@ -73,18 +73,21 @@ fn fin_ack_acks_prior_data_and_advances_snd_una() -> Result {
 
     // Client's FIN-ACK arrives in order (seq=CLIENT_ISN+6) and acks the echoed "Hello"
     // (ack=SERVER_ISN+6)
-    TcpHandler {
+    let client_fin_ack = TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
         ack_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
         flags: TcpFlags::FinAck,
         ..CLIENT_PACKET
-    }
-    .create_reply(&mut connections)?;
+    };
+
+    client_fin_ack.create_reply(&mut connections)?;
 
     cloned_state.tcp_state = TcpState::LastAck;
-    cloned_state.snd_una.advance_by(HELLO_LEN);
     cloned_state.snd_nxt.advance_by(FIN_BYTE);
     cloned_state.rcv_nxt.advance_by(FIN_BYTE);
+    cloned_state.snd_una.advance_by(HELLO_LEN);
+    cloned_state.snd_wl1 = Some(client_fin_ack.seq_num);
+    cloned_state.snd_wl2 = Some(client_fin_ack.ack_num);
 
     let final_state = connections.try_get()?;
 
@@ -110,19 +113,18 @@ fn out_of_order_fin_ack_gets_duplicate_ack_without_closing() -> Result {
     // a duplicate ACK reflecting the current rcv_nxt with no change to local state.
 
     let mut connections = TcpConnections::after_handshake(); // rcv_nxt = CLIENT_ISN+1
-    let initial_state = connections.try_get()?.clone();
+    let mut cloned_state = connections.try_get()?.clone();
 
     // FIN-ACK arrives at seq=CLIENT_ISN+6, but rcv_nxt is still CLIENT_ISN+1 (a 5-byte gap)
-    let reply = TcpHandler {
+    let client_fin_ack = TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
         ack_num: SERVER_ISN + SYN_BYTE,
         flags: TcpFlags::FinAck,
         ..CLIENT_PACKET
-    }
-    .create_reply(&mut connections)?;
+    };
 
     assert_eq!(
-        reply,
+        client_fin_ack.create_reply(&mut connections)?,
         Some(TcpHandler {
             seq_num: SERVER_ISN + SYN_BYTE,
             ack_num: CLIENT_ISN + SYN_BYTE,
@@ -132,9 +134,12 @@ fn out_of_order_fin_ack_gets_duplicate_ack_without_closing() -> Result {
          FIN-ACK in response"
     );
 
+    cloned_state.snd_wl1 = Some(client_fin_ack.seq_num);
+    cloned_state.snd_wl2 = Some(client_fin_ack.ack_num);
+
     assert_eq!(
         connections.try_get()?,
-        &initial_state,
+        &cloned_state,
         "Connection must remain established, out-of-order FIN-ACK must not start closing"
     );
 
@@ -216,18 +221,19 @@ fn fin_wait_1_to_fin_wait_2_on_ack_of_our_fin() -> Result {
     let mut cloned_state = connections.try_get()?.clone();
 
     // Client acknowledges our FIN (ack=SERVER_ISN+2), no FIN of its own yet
-    assert_eq!(
-        TcpHandler {
-            seq_num: CLIENT_ISN + SYN_BYTE,
-            ack_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
-            ..CLIENT_PACKET
-        }
-        .create_reply(&mut connections)?,
-        None
-    );
+    let ack_of_fin = TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE,
+        ack_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
+        ..CLIENT_PACKET
+    };
+
+    assert_eq!(ack_of_fin.create_reply(&mut connections)?, None);
 
     cloned_state.tcp_state = TcpState::FinWait2;
     cloned_state.snd_una.advance_by(FIN_BYTE);
+    cloned_state.snd_wl1 = Some(ack_of_fin.seq_num);
+    cloned_state.snd_wl2 = Some(ack_of_fin.ack_num);
+
     assert_eq!(connections.try_get()?, &cloned_state);
 
     Ok(())
@@ -240,17 +246,19 @@ fn fin_wait_2_closes_on_fin_ack_from_peer() -> Result {
     let mut cloned_state = connections.try_get()?.clone();
 
     // Our FIN is acknowledged -> FIN-WAIT-2
-    let ack_reply = TcpHandler {
+    let ack_of_fin = TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE,
         ack_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
         ..CLIENT_PACKET
-    }
-    .create_reply(&mut connections)?;
+    };
 
-    assert_eq!(ack_reply, None);
+    assert_eq!(ack_of_fin.create_reply(&mut connections)?, None);
 
     cloned_state.tcp_state = TcpState::FinWait2;
     cloned_state.snd_una.advance_by(FIN_BYTE);
+    cloned_state.snd_wl1 = Some(ack_of_fin.seq_num);
+    cloned_state.snd_wl2 = Some(ack_of_fin.ack_num);
+
     assert_eq!(connections.try_get()?, &cloned_state);
 
     // Client's FIN arrives in order
@@ -348,15 +356,19 @@ fn data_after_our_fin_in_fin_wait_2_is_acked_without_echo() -> Result {
     let mut cloned_state = connections.try_get()?.clone();
 
     // Our FIN is acknowledged -> FIN-WAIT-2
-    TcpHandler {
+    let ack_of_fin = TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE,
         ack_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
         ..CLIENT_PACKET
-    }
-    .create_reply(&mut connections)?;
+    };
+
+    assert_eq!(ack_of_fin.create_reply(&mut connections)?, None);
 
     cloned_state.tcp_state = TcpState::FinWait2;
     cloned_state.snd_una.advance_by(FIN_BYTE);
+    cloned_state.snd_wl1 = Some(ack_of_fin.seq_num);
+    cloned_state.snd_wl2 = Some(ack_of_fin.ack_num);
+
     assert_eq!(connections.try_get()?, &cloned_state);
 
     let reply = TcpHandler {

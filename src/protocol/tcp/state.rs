@@ -117,16 +117,15 @@ impl PartialEq for ConnState {
     fn eq(
         &self,
         &Self {
-            // Include all fields except `snd_wl1`/`snd_wl2` (internal freshness bookkeeping for
-            // `snd_wnd`) and `pending` (timing dependent), explicitly destructured to catch any
-            // fields added later
+            // Include all fields except `pending` (timing dependent), explicitly destructured to
+            // catch any fields added later
             tcp_state,
             snd_nxt,
             rcv_nxt,
             snd_una,
             snd_wnd,
-            snd_wl1: _,
-            snd_wl2: _,
+            snd_wl1,
+            snd_wl2,
             pending: _,
             ref send_buffer,
         }: &Self,
@@ -136,6 +135,8 @@ impl PartialEq for ConnState {
             && self.rcv_nxt == rcv_nxt
             && self.snd_una == snd_una
             && self.snd_wnd == snd_wnd
+            && self.snd_wl1 == snd_wl1
+            && self.snd_wl2 == snd_wl2
             && &self.send_buffer == send_buffer
     }
 }

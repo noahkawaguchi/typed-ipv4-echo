@@ -84,21 +84,21 @@ fn handshake_ack_establishes_connection_and_returns_none() -> Result {
     connections.insert_syn_recv();
     let mut cloned_state = connections.try_get()?.clone();
 
-    assert_eq!(
-        TcpHandler {
-            seq_num: CLIENT_ISN + SYN_BYTE,
-            ack_num: SERVER_ISN + SYN_BYTE,
-            ..CLIENT_PACKET
-        }
-        .create_reply(&mut connections)?,
-        None
-    );
+    let handshake_ack = TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE,
+        ack_num: SERVER_ISN + SYN_BYTE,
+        ..CLIENT_PACKET
+    };
+
+    assert_eq!(handshake_ack.create_reply(&mut connections)?, None);
 
     // Reproduce the state changes that should happen at connection establishment
     cloned_state.tcp_state = TcpState::Established;
     cloned_state.rcv_nxt = CLIENT_ISN + SYN_BYTE;
     cloned_state.snd_una.advance_by(SYN_BYTE);
     cloned_state.snd_wnd = Some(u16::MAX);
+    cloned_state.snd_wl1 = Some(handshake_ack.seq_num);
+    cloned_state.snd_wl2 = Some(handshake_ack.ack_num);
 
     assert_eq!(connections.try_get()?, &cloned_state);
 

@@ -62,13 +62,14 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
     assert_eq!(connections.try_get()?, &expected_state, "State confirmation before window update");
 
     // Client acks the 3 sent bytes and advertises a bigger window -> should drain "lo"
-    let reply = TcpHandler {
+    let window_update = TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
         ack_num: SERVER_ISN + SYN_BYTE + 3,
         window: 10,
         ..CLIENT_PACKET
-    }
-    .create_reply(&mut connections)?;
+    };
+
+    let reply = window_update.create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
@@ -82,8 +83,10 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
     );
 
     expected_state.snd_una.advance_by(3);
-    expected_state.snd_wnd = Some(10);
     expected_state.snd_nxt.advance_by(2);
+    expected_state.snd_wnd = Some(10);
+    expected_state.snd_wl1 = Some(window_update.seq_num);
+    expected_state.snd_wl2 = Some(window_update.ack_num);
     expected_state.send_buffer.clear();
 
     assert_eq!(
