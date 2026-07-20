@@ -1,7 +1,7 @@
 use std::fmt;
 
-#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(test, derive(Debug))]
 #[repr(u8)]
 pub(super) enum TcpFlags {
     Syn = Self::SYN_BIT,

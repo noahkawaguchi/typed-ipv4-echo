@@ -2,7 +2,7 @@ use {
     crate::{
         Result,
         protocol::tcp::{
-            SendInfo, TcpHandler,
+            SendInfo, TcpFlags, TcpHandler,
             seq_space::{SeqLe as _, SeqLt as _},
         },
     },
@@ -39,6 +39,34 @@ pub(super) struct ConnState {
 }
 
 impl ConnState {
+    /// Creates a new `Self` in the state right after receiving a SYN and sending a SYN-ACK.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if `send_info.flags` is not SYN-ACK.
+    pub(super) fn from_syn_ack(send_info: SendInfo) -> Result<Self> {
+        (send_info.flags == TcpFlags::SynAck)
+            .then(|| Self {
+                // State after the initial two-way exchange
+                tcp_state: TcpState::SynReceived,
+                // SYN-ACK consumes one sequence number
+                snd_nxt: send_info.seq_num.wrapping_add(1),
+                // Our SYN-ACK's `ack_num` is the client's ISN + 1
+                rcv_nxt: send_info.ack_num,
+                // Our SYN-ACK is unacknowledged (this is our ISN)
+                snd_una: send_info.seq_num,
+                // Window-related values are set at connection establishment once the peer has
+                // provided a defined SEG.ACK
+                window_state: None,
+                pending: vec![PendingSegment::new(send_info, 1)],
+                send_buffer: VecDeque::new(),
+            })
+            .ok_or_else(|| {
+                "Attempted to create a new `ConnState` when sending something other than SYN-ACK"
+                    .into()
+            })
+    }
+
     /// Per RFC 9293, Section 3.10.7.4, "Fifth, check the ACK field," "ESTABLISHED STATE," processes
     /// an incoming segment's acknowledgment against the send-side state, updating SND.WND, SND.WL1,
     /// SND.WL2, SND.UNA, and the retransmission queue as necessary.

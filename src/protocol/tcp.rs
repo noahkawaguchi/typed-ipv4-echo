@@ -168,7 +168,7 @@ impl TcpHandler {
                     payload: None,
                 };
 
-                connections.store_isn(key, send_info.clone());
+                connections.insert_syn_rcv(key, ConnState::from_syn_ack(send_info.clone())?)?;
 
                 Some(send_info)
             }

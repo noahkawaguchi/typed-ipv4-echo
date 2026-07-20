@@ -75,8 +75,7 @@ fn rst_in_established_with_out_of_window_seq_is_silently_dropped() -> Result {
 
 #[test]
 fn rst_in_syn_received_at_rcv_nxt_cleans_up_connection_and_returns_none() -> Result {
-    let mut connections = TcpConnections::default();
-    connections.insert_syn_recv();
+    let mut connections = TcpConnections::with_syn_rcv();
 
     assert_eq!(client_rst(CLIENT_ISN + SYN_BYTE).create_reply(&mut connections)?, None);
     assert_matches!(connections.try_get(), Err(_), "Connection should be removed after RST");
@@ -90,8 +89,7 @@ fn rst_in_syn_received_with_out_of_window_seq_is_silently_dropped() -> Result {
     // protection to SYN-RECEIVED the same as any other state. SEG.SEQ outside the receive window
     // must be silently ignored, not treated as a valid reset.
 
-    let mut connections = TcpConnections::default();
-    connections.insert_syn_recv(); // rcv_nxt=CLIENT_ISN+SYN_BYTE
+    let mut connections = TcpConnections::with_syn_rcv(); // rcv_nxt=CLIENT_ISN+SYN_BYTE
     let initial_state = connections.try_get()?.clone();
 
     // seq_num=CLIENT_ISN-10 is just below rcv_nxt=CLIENT_ISN+1, so this RST is outside the receive
@@ -117,8 +115,8 @@ fn rst_in_syn_received_within_window_but_not_at_rcv_nxt_gets_challenge_ack() -> 
     // protection to SYN-RECEIVED the same as any other state. SEG.SEQ in the receive window but not
     // exactly RCV.NXT must get a challenge ACK, not treated as a valid reset.
 
-    let mut connections = TcpConnections::default();
-    connections.insert_syn_recv(); // rcv_nxt=CLIENT_ISN+SYN_BYTE, snd_nxt=SERVER_ISN+SYN_BYTE
+    // rcv_nxt=CLIENT_ISN+SYN_BYTE, snd_nxt=SERVER_ISN+SYN_BYTE
+    let mut connections = TcpConnections::with_syn_rcv();
     let initial_state = connections.try_get()?.clone();
 
     // seq_num=CLIENT_ISN+4 is inside the receive window [CLIENT_ISN+1, CLIENT_ISN+1+RCV.WND), but
