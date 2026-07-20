@@ -17,7 +17,7 @@ use {
                 connections::ConnKey,
                 flags::TcpFlags,
                 seq_space::{AdvanceBy as _, SeqLe as _, SeqLt as _},
-                state::{ConnState, PendingSegment, TcpState},
+                state::{ConnState, PendingSegment, TcpState, WindowState},
             },
         },
         sys,
@@ -243,9 +243,11 @@ impl TcpHandler {
                 conn.tcp_state = TcpState::Established;
                 conn.rcv_nxt = self.seq_num;
                 conn.snd_una = self.ack_num;
-                conn.snd_wnd = Some(self.window);
-                conn.snd_wl1 = Some(self.seq_num);
-                conn.snd_wl2 = Some(self.ack_num);
+                conn.window_state = Some(WindowState {
+                    snd_wnd: self.window,
+                    snd_wl1: self.seq_num,
+                    snd_wl2: self.ack_num,
+                });
                 conn.pending.clear(); // Only the SYN-ACK just acknowledged could have been pending
 
                 None

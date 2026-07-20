@@ -13,42 +13,23 @@ use {
     },
 };
 
-/// The state of a connection in the table, including its TCP state and other locally stored data.
-/// Definitions below from RFC 9293, sections annotated inline.
+/// The state of a connection in the table, including its TCP state, buffered data, and other
+/// locally stored information.
 #[cfg_attr(test, derive(Debug, Clone))]
 pub(super) struct ConnState {
     pub(super) tcp_state: TcpState,
 
-    /// "SND.NXT = next sequence number to be sent" (3.4).
+    /// "SND.NXT = next sequence number to be sent" (RFC 9293, Section 3.4).
     pub(super) snd_nxt: u32,
 
-    /// "RCV.NXT = next sequence number expected on an incoming segment" (3.4).
+    /// "RCV.NXT = next sequence number expected on an incoming segment" (RFC 9293, Section 3.4).
     pub(super) rcv_nxt: u32,
 
-    /// "SND.UNA = oldest unacknowledged sequence number" (3.4).
+    /// "SND.UNA = oldest unacknowledged sequence number" (RFC 9293, Section 3.4).
     pub(super) snd_una: u32,
 
-    /// SND.WND or send window. "This represents the sequence numbers that the remote (receiving)
-    /// TCP endpoint is willing to receive" (4).
-    ///
-    /// Should be `None` until establishment, then always `Some`.
-    pub(super) snd_wnd: Option<u16>,
-
-    /// SND.WL1. "segment sequence number used for last window update" (3.3.1).
-    ///
-    /// Purely used for internal bookkeeping alongside `snd_wl2` to determine whether a window
-    /// value is fresh or stale/reordered.
-    ///
-    /// Should be `None` until establishment, then always `Some`.
-    pub(super) snd_wl1: Option<u32>,
-
-    /// SND.WL2. "segment acknowledgment number used for last window update" (3.3.1).
-    ///
-    /// Purely used for internal bookkeeping alongside `snd_wl1` to determine whether a window
-    /// value is fresh or stale/reordered.
-    ///
-    /// Should be `None` until establishment, then always `Some`.
-    pub(super) snd_wl2: Option<u32>,
+    /// SND.WND, SND.WL1, and SND.WL2. Should be `None` until establishment, then always `Some`.
+    pub(super) window_state: Option<WindowState>,
 
     /// Unacked segments sent by the server, kept for retransmission purposes.
     pub(super) pending: Vec<PendingSegment>,
@@ -66,7 +47,7 @@ impl ConnState {
     /// updates to SND.UNA and the retransmission queue, ignores duplicate ACKs
     /// (SND.UNA == SEG.ACK).
     pub(super) fn incoming_ack_update(&mut self, seg: &TcpHandler) -> Result {
-        let Some((snd_wl1, snd_wl2)) = self.snd_wl1.zip(self.snd_wl2) else {
+        let Some(window_state) = &self.window_state else {
             return Err("`incoming_ack_update` called with uninitialized window state".into());
         };
 
@@ -75,12 +56,14 @@ impl ConnState {
             //     and
             // Guard against an old/reordered segment clobbering the window with stale data:
             //     SND.WL1 < SEG.SEQ or (SND.WL1 == SEG.SEQ and SND.WL2 <= SEG.ACK)
-            if snd_wl1.seq_lt(seg.seq_num)
-                || (snd_wl1 == seg.seq_num && snd_wl2.seq_le(seg.ack_num))
+            if window_state.snd_wl1.seq_lt(seg.seq_num)
+                || (window_state.snd_wl1 == seg.seq_num && window_state.snd_wl2.seq_le(seg.ack_num))
             {
-                self.snd_wnd = Some(seg.window);
-                self.snd_wl1 = Some(seg.seq_num);
-                self.snd_wl2 = Some(seg.ack_num);
+                self.window_state = Some(WindowState {
+                    snd_wnd: seg.window,
+                    snd_wl1: seg.seq_num,
+                    snd_wl2: seg.ack_num,
+                });
             }
 
             // Exclude duplicate ACKs: SND.UNA < SEG.ACK <= SND.NXT
@@ -100,12 +83,12 @@ impl ConnState {
     /// front of the send buffer, or returns `Ok(None)` if nothing can be sent right now because the
     /// buffer is empty or the window is full. Does not mutate any other state.
     pub(super) fn drain_transmittable(&mut self) -> Result<Option<Rc<[u8]>>> {
-        let Some(snd_wnd) = self.snd_wnd else {
+        let Some(window_state) = &self.window_state else {
             return Err("`drain_transmittable` called with uninitialized window state".into());
         };
 
         let sent_but_not_acked = self.snd_nxt.wrapping_sub(self.snd_una);
-        let available = u32::from(snd_wnd).saturating_sub(sent_but_not_acked);
+        let available = u32::from(window_state.snd_wnd).saturating_sub(sent_but_not_acked);
         let n = usize::try_from(available)?.min(self.send_buffer.len());
 
         Ok((n > 0).then(|| self.send_buffer.drain(..n).collect()))
@@ -123,9 +106,7 @@ impl PartialEq for ConnState {
             snd_nxt,
             rcv_nxt,
             snd_una,
-            snd_wnd,
-            snd_wl1,
-            snd_wl2,
+            ref window_state,
             pending: _,
             ref send_buffer,
         }: &Self,
@@ -134,9 +115,7 @@ impl PartialEq for ConnState {
             && self.snd_nxt == snd_nxt
             && self.rcv_nxt == rcv_nxt
             && self.snd_una == snd_una
-            && self.snd_wnd == snd_wnd
-            && self.snd_wl1 == snd_wl1
-            && self.snd_wl2 == snd_wl2
+            && &self.window_state == window_state
             && &self.send_buffer == send_buffer
     }
 }
@@ -183,6 +162,28 @@ pub(super) enum TcpState {
     ///
     /// Reached via passive close, after acknowledging the remote peer's FIN with our own.
     LastAck,
+}
+
+/// The SND.WND, SND.WL1, and SND.WL2 values of a connection.
+#[cfg_attr(test, derive(Debug, Copy, Clone, PartialEq, Eq))]
+#[expect(clippy::struct_field_names, reason = "Match RFC terminology")]
+pub(super) struct WindowState {
+    /// SND.WND or send window. "This represents the sequence numbers that the remote (receiving)
+    /// TCP endpoint is willing to receive" (RFC 9293, Section 4).
+    pub(super) snd_wnd: u16,
+
+    /// SND.WL1. "segment sequence number used for last window update" (RFC 9293, Section 3.3.1).
+    ///
+    /// Purely used for internal bookkeeping alongside `snd_wl2` to determine whether a window
+    /// value is fresh or stale/reordered.
+    pub(super) snd_wl1: u32,
+
+    /// SND.WL2. "segment acknowledgment number used for last window update" (RFC 9293, Section
+    /// 3.3.1).
+    ///
+    /// Purely used for internal bookkeeping alongside `snd_wl1` to determine whether a window
+    /// value is fresh or stale/reordered.
+    pub(super) snd_wl2: u32,
 }
 
 /// A sent segment that consumed sequence numbers and hasn't yet been acknowledged.

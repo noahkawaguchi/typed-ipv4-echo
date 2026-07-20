@@ -56,9 +56,7 @@ impl TcpConnections {
                 snd_una: send_info.seq_num,
                 // Window-related values are set at connection establishment once the peer has
                 // provided a defined SEG.ACK
-                snd_wnd: None,
-                snd_wl1: None,
-                snd_wl2: None,
+                window_state: None,
                 pending: vec![PendingSegment::new(send_info, 1)],
                 send_buffer: VecDeque::new(),
             },

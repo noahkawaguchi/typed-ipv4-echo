@@ -12,7 +12,7 @@ fn new_ack_adopts_window_from_segment() -> Result {
     let mut cloned_state = connections.try_get()?.clone();
 
     assert_ne!(
-        cloned_state.snd_wnd,
+        cloned_state.window_state.map(|win| win.snd_wnd),
         Some(NEW_WND),
         "The initial send window must differ from the updated one for the test to be meaningful"
     );
@@ -43,9 +43,11 @@ fn new_ack_adopts_window_from_segment() -> Result {
     assert_eq!(window_update.create_reply(&mut connections)?, None);
 
     cloned_state.snd_una.advance_by(HELLO_LEN);
-    cloned_state.snd_wnd = Some(NEW_WND);
-    cloned_state.snd_wl1 = Some(window_update.seq_num);
-    cloned_state.snd_wl2 = Some(window_update.ack_num);
+    cloned_state.window_state = Some(WindowState {
+        snd_wnd: NEW_WND,
+        snd_wl1: window_update.seq_num,
+        snd_wl2: window_update.ack_num,
+    });
 
     assert_eq!(
         connections.try_get()?,
@@ -94,9 +96,11 @@ fn stale_segment_does_not_clobber_send_window() -> Result {
 
     assert_eq!(fresh_window_update.create_reply(&mut connections)?, None);
 
-    cloned_state.snd_wnd = Some(1000);
-    cloned_state.snd_wl1 = Some(fresh_window_update.seq_num);
-    cloned_state.snd_wl2 = Some(fresh_window_update.ack_num);
+    cloned_state.window_state = Some(WindowState {
+        snd_wnd: 1000,
+        snd_wl1: fresh_window_update.seq_num,
+        snd_wl2: fresh_window_update.ack_num,
+    });
 
     assert_eq!(connections.try_get()?, &cloned_state, "First window update should be adopted");
 
@@ -160,8 +164,11 @@ fn same_seq_but_fresher_ack_updates_window() -> Result {
 
     cloned_state.snd_nxt.advance_by(HI_LEN);
     cloned_state.rcv_nxt.advance_by(HI_LEN);
-    cloned_state.snd_wl1 = Some(hi_packet.seq_num);
-    cloned_state.snd_wl2 = Some(hi_packet.ack_num);
+    cloned_state.window_state = Some(WindowState {
+        snd_wnd: CLIENT_PACKET.window,
+        snd_wl1: hi_packet.seq_num,
+        snd_wl2: hi_packet.ack_num,
+    });
 
     assert_eq!(connections.try_get()?, &cloned_state);
 
@@ -177,9 +184,11 @@ fn same_seq_but_fresher_ack_updates_window() -> Result {
     assert_eq!(window_update_1.create_reply(&mut connections)?, None);
 
     cloned_state.snd_una.advance_by(HELLO_LEN);
-    cloned_state.snd_wnd = Some(1000);
-    cloned_state.snd_wl1 = Some(window_update_1.seq_num);
-    cloned_state.snd_wl2 = Some(window_update_1.ack_num);
+    cloned_state.window_state = Some(WindowState {
+        snd_wnd: 1000,
+        snd_wl1: window_update_1.seq_num,
+        snd_wl2: window_update_1.ack_num,
+    });
 
     assert_eq!(connections.try_get()?, &cloned_state, "First window update should be adopted");
 
@@ -195,9 +204,11 @@ fn same_seq_but_fresher_ack_updates_window() -> Result {
     assert_eq!(window_update_2.create_reply(&mut connections)?, None);
 
     cloned_state.snd_una.advance_by(HI_LEN);
-    cloned_state.snd_wnd = Some(2000);
-    cloned_state.snd_wl1 = Some(window_update_2.seq_num);
-    cloned_state.snd_wl2 = Some(window_update_2.ack_num);
+    cloned_state.window_state = Some(WindowState {
+        snd_wnd: 2000,
+        snd_wl1: window_update_2.seq_num,
+        snd_wl2: window_update_2.ack_num,
+    });
 
     assert_eq!(
         connections.try_get()?,
@@ -222,7 +233,7 @@ fn duplicate_ack_updates_window() -> Result {
     let mut cloned_state = connections.try_get()?.clone();
 
     assert_ne!(
-        cloned_state.snd_wnd,
+        cloned_state.window_state.map(|win| win.snd_wnd),
         Some(NEW_WND),
         "The initial send window must differ from the updated one for the test to be meaningful"
     );
@@ -254,9 +265,11 @@ fn duplicate_ack_updates_window() -> Result {
 
     assert_eq!(dup_ack_fresh_seq.create_reply(&mut connections)?, None);
 
-    cloned_state.snd_wnd = Some(NEW_WND);
-    cloned_state.snd_wl1 = Some(dup_ack_fresh_seq.seq_num);
-    cloned_state.snd_wl2 = Some(dup_ack_fresh_seq.ack_num);
+    cloned_state.window_state = Some(WindowState {
+        snd_wnd: NEW_WND,
+        snd_wl1: dup_ack_fresh_seq.seq_num,
+        snd_wl2: dup_ack_fresh_seq.ack_num,
+    });
 
     assert_eq!(
         connections.try_get()?,

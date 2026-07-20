@@ -96,9 +96,11 @@ fn handshake_ack_establishes_connection_and_returns_none() -> Result {
     cloned_state.tcp_state = TcpState::Established;
     cloned_state.rcv_nxt = CLIENT_ISN + SYN_BYTE;
     cloned_state.snd_una.advance_by(SYN_BYTE);
-    cloned_state.snd_wnd = Some(u16::MAX);
-    cloned_state.snd_wl1 = Some(handshake_ack.seq_num);
-    cloned_state.snd_wl2 = Some(handshake_ack.ack_num);
+    cloned_state.window_state = Some(WindowState {
+        snd_wnd: CLIENT_PACKET.window,
+        snd_wl1: handshake_ack.seq_num,
+        snd_wl2: handshake_ack.ack_num,
+    });
 
     assert_eq!(connections.try_get()?, &cloned_state);
 
