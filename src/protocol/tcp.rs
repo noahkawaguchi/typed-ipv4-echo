@@ -129,8 +129,8 @@ impl TcpHandler {
             window: u16::from_be_bytes([tcp_header[14], tcp_header[15]]),
             payload: TcpPayload::try_from_iter(
                 data.get(offset_bytes.into()..)
-                    .unwrap_or_default()
-                    .iter()
+                    .into_iter()
+                    .flatten()
                     .copied(),
             )?,
         })

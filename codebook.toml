@@ -50,6 +50,7 @@ words = [
     "signum",
     "sigset",
     "snd",
+    "struct's",
     "subslice",
     "syscall",
     "unacked",

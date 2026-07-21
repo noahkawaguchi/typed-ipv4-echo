@@ -1,6 +1,6 @@
 use {
     crate::Result,
-    std::{num::NonZeroU16, rc::Rc},
+    std::{iter, num::NonZeroU16, rc::Rc},
 };
 
 /// A payload of bytes guaranteed to have a length in the range of `NonZeroU16`.
@@ -25,40 +25,25 @@ impl TcpPayload {
     /// Returns `Err` if the length of `iter` is greater than `u16::MAX`.
     pub(super) fn try_from_iter<I>(iter: I) -> Result<Option<Self>, &'static str>
     where
-        I: ExactSizeIterator<Item = u8>,
+        I: IntoIterator<Item = u8>,
     {
-        // `ExactSizeIterator` is a safe trait, so it's possible for `.len()` to be implemented
-        // incorrectly. However, since this should be unlikely, check the claimed length before
-        // allocating to avoid the unnecessary allocation, and then check the actual length after
-        // allocating to guarantee the invariant.
+        // Use of `ExactSizeIterator` rejected here because, as a safe trait, its `.len()` could be
+        // implemented incorrectly, and the full data is about to collected anyway, so a check on
+        // the actual length of the data would still be necessary to guarantee this struct's
+        // invariant. The too long case is essentially impossible with normal IP traffic, while
+        // avoiding allocating every time for the expected and common empty case can be detected
+        // with plain `IntoIterator`, which provides a more flexible API.
 
-        Self::try_payload_len(iter.len())?
-            .map(|claimed_len| {
-                let data = iter.collect::<Rc<_>>();
+        let mut it = iter.into_iter();
 
-                if let Ok(Some(len)) = Self::try_payload_len(data.len())
-                    && len == claimed_len
-                {
-                    Ok(Self { data, len })
-                } else {
-                    Err("Attempted to create a `TcpPayload` from an incorrectly implemented \
-                         ExactSizeIterator")
-                }
-            })
-            .transpose()
-    }
+        let Some(first) = it.next() else { return Ok(None) };
 
-    /// Attempts to convert a `usize` into a `NonZeroU16`, returning `Ok(None)` if `unknown_len` is
-    /// zero.
-    ///
-    /// # Errors
-    ///
-    /// Returns `Err` if `unknown_len` is greater than `u16::MAX`.
-    fn try_payload_len(unknown_len: usize) -> Result<Option<NonZeroU16>, &'static str> {
-        u16::try_from(unknown_len)
+        let data = iter::once(first).chain(it).collect::<Rc<_>>();
+
+        u16::try_from(data.len())
             .map_err(|_| {
                 "Attempted to create a `TcpPayload` from an iterator longer than `u16::MAX`"
             })
-            .map(|maybe_zero_len| NonZeroU16::try_from(maybe_zero_len).ok())
+            .map(|maybe_zero_len| NonZeroU16::new(maybe_zero_len).map(|len| Self { data, len }))
     }
 }
