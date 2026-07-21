@@ -115,10 +115,10 @@ impl ConnState {
         };
 
         let sent_but_not_acked = self.snd_nxt.wrapping_sub(self.snd_una);
-        let available = u32::from(window_state.snd_wnd).saturating_sub(sent_but_not_acked);
-        let n = usize::try_from(available)?.min(self.send_buffer.len());
+        let space_in_window = u32::from(window_state.snd_wnd).saturating_sub(sent_but_not_acked);
+        let bytes_to_send = usize::try_from(space_in_window)?.min(self.send_buffer.len());
 
-        TcpPayload::try_from_iter(self.send_buffer.drain(..n))
+        TcpPayload::try_from_iter(self.send_buffer.drain(..bytes_to_send))
     }
 }
 
