@@ -22,7 +22,7 @@ fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result {
         seq_num: CLIENT_ISN + SYN_BYTE,
         ack_num: SERVER_ISN + SYN_BYTE,
         window: 3,
-        payload: payload_from("Hello"),
+        payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -32,7 +32,7 @@ fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result {
         Some(TcpHandler {
             seq_num: SERVER_ISN + SYN_BYTE,
             ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-            payload: payload_from("Hel"),
+            payload: payload_from("Hel")?,
             ..SERVER_REPLY
         }),
         "Only the first 3 bytes fit in the advertised window of 3"
@@ -62,7 +62,7 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
         seq_num: CLIENT_ISN + SYN_BYTE,
         ack_num: SERVER_ISN + SYN_BYTE,
         window: 3,
-        payload: payload_from("Hello"),
+        payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -88,7 +88,7 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
         Some(TcpHandler {
             seq_num: SERVER_ISN + SYN_BYTE + 3,
             ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-            payload: payload_from("lo"),
+            payload: payload_from("lo")?,
             ..SERVER_REPLY
         }),
         "The buffered remainder should drain once the window opens, piggybacked on the next ACK"
@@ -122,7 +122,7 @@ fn zero_window_buffers_entire_payload_and_gets_bare_ack() -> Result {
         seq_num: CLIENT_ISN + SYN_BYTE,
         ack_num: SERVER_ISN + SYN_BYTE,
         window: 0,
-        payload: payload_from("Hello"),
+        payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;

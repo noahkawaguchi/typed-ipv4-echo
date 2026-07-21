@@ -2,13 +2,12 @@ use {
     crate::{
         Result,
         protocol::tcp::{
-            SendInfo, TcpFlags, TcpHandler,
+            SendInfo, TcpFlags, TcpHandler, TcpPayload,
             seq_space::{SeqLe as _, SeqLt as _},
         },
     },
     std::{
         collections::VecDeque,
-        rc::Rc,
         time::{Duration, Instant},
     },
 };
@@ -110,7 +109,7 @@ impl ConnState {
     /// Removes and returns as many bytes as the peer's currently advertised window allows from the
     /// front of the send buffer, or returns `Ok(None)` if nothing can be sent right now because the
     /// buffer is empty or the window is full. Does not mutate any other state.
-    pub(super) fn drain_transmittable(&mut self) -> Result<Option<Rc<[u8]>>> {
+    pub(super) fn drain_transmittable(&mut self) -> Result<Option<TcpPayload>> {
         let Some(window_state) = &self.window_state else {
             return Err("`drain_transmittable` called with uninitialized window state".into());
         };
@@ -119,7 +118,7 @@ impl ConnState {
         let available = u32::from(window_state.snd_wnd).saturating_sub(sent_but_not_acked);
         let n = usize::try_from(available)?.min(self.send_buffer.len());
 
-        Ok((n > 0).then(|| self.send_buffer.drain(..n).collect()))
+        TcpPayload::try_from_iter(self.send_buffer.drain(..n))
     }
 }
 

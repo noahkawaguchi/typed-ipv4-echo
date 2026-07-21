@@ -63,7 +63,7 @@ fn data_packet_before_complete_handshake_gets_rst() -> Result {
     let reply = TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE,
         ack_num: SERVER_ISN + SYN_BYTE,
-        payload: payload_from("Hello"),
+        payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
