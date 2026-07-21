@@ -20,7 +20,7 @@ impl TcpPayload {
     /// # Errors
     ///
     /// Returns `Err` if the length of `iter` is greater than `u16::MAX`.
-    pub(super) fn try_from_iter<I>(iter: I) -> Result<Option<Self>>
+    pub(super) fn try_from_iter<I>(iter: I) -> Result<Option<Self>, &'static str>
     where
         I: ExactSizeIterator<Item = u8>,
     {
@@ -28,7 +28,7 @@ impl TcpPayload {
 
         u16::try_from(it.len())
             .map_err(|_| {
-                "Attempted to create a `TcpPayload` from an iterator longer than `u16::MAX`".into()
+                "Attempted to create a `TcpPayload` from an iterator longer than `u16::MAX`"
             })
             .map(|maybe_zero_len| {
                 NonZeroU16::try_from(maybe_zero_len)

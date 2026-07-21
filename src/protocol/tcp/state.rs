@@ -43,7 +43,7 @@ impl ConnState {
     /// # Errors
     ///
     /// Returns `Err` if `send_info.flags` is not SYN-ACK.
-    pub(super) fn from_syn_ack(send_info: SendInfo) -> Result<Self> {
+    pub(super) fn from_syn_ack(send_info: SendInfo) -> Result<Self, &'static str> {
         (send_info.flags == TcpFlags::SynAck)
             .then(|| Self {
                 // State after the initial two-way exchange
@@ -60,10 +60,9 @@ impl ConnState {
                 pending: vec![PendingSegment::new(send_info, 1)],
                 send_buffer: VecDeque::new(),
             })
-            .ok_or_else(|| {
-                "Attempted to create a new `ConnState` when sending something other than SYN-ACK"
-                    .into()
-            })
+            .ok_or(
+                "Attempted to create a new `ConnState` when sending something other than SYN-ACK",
+            )
     }
 
     /// Per RFC 9293, Section 3.10.7.4, "Fifth, check the ACK field," "ESTABLISHED STATE," processes
@@ -73,9 +72,9 @@ impl ConnState {
     /// Ignores ACKs that are old (before SND.UNA) or for data not yet sent (past SND.NXT). For
     /// updates to SND.UNA and the retransmission queue, ignores duplicate ACKs
     /// (SND.UNA == SEG.ACK).
-    pub(super) fn incoming_ack_update(&mut self, seg: &TcpHandler) -> Result {
+    pub(super) fn incoming_ack_update(&mut self, seg: &TcpHandler) -> Result<(), &'static str> {
         let Some(window_state) = &self.window_state else {
-            return Err("`incoming_ack_update` called with uninitialized window state".into());
+            return Err("`incoming_ack_update` called with uninitialized window state");
         };
 
         if self.snd_una.seq_le(seg.ack_num) && seg.ack_num.seq_le(self.snd_nxt) {
@@ -118,7 +117,7 @@ impl ConnState {
         let space_in_window = u32::from(window_state.snd_wnd).saturating_sub(sent_but_not_acked);
         let bytes_to_send = usize::try_from(space_in_window)?.min(self.send_buffer.len());
 
-        TcpPayload::try_from_iter(self.send_buffer.drain(..bytes_to_send))
+        TcpPayload::try_from_iter(self.send_buffer.drain(..bytes_to_send)).map_err(Into::into)
     }
 }
 
