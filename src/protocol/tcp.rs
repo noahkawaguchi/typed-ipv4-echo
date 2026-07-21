@@ -288,7 +288,7 @@ impl TcpHandler {
 
                 conn.incoming_ack_update(self)?;
                 conn.rcv_nxt.advance_by(payload_len);
-                conn.send_buffer.extend(payload.iter());
+                conn.send_buffer.extend(payload.as_bytes().iter());
 
                 Some(match conn.drain_transmittable()? {
                     Some(to_send) => Self::data_payload(conn, to_send),
@@ -514,7 +514,7 @@ impl Encode for TcpHandler {
                 usize::from(TCP_HDR_MIN_LEN)
                     ..usize::from(TCP_HDR_MIN_LEN).try_add(usize::from(u16::from(data.len())))?,
             )?
-            .copy_from_slice(data);
+            .copy_from_slice(data.as_bytes());
         }
 
         // TCP segment length: minimum TCP header length (20 bytes) + payload length (0+ bytes)
@@ -549,7 +549,12 @@ impl fmt::Display for TcpHandler {
             self.seq_num,
             self.ack_num,
             self.flags,
-            payload_to_string(self.payload.as_deref().unwrap_or_default()),
+            payload_to_string(
+                self.payload
+                    .as_ref()
+                    .map(TcpPayload::as_bytes)
+                    .unwrap_or_default()
+            ),
         )
     }
 }

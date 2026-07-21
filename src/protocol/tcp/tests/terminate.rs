@@ -64,7 +64,7 @@ fn fin_ack_acks_prior_data_and_advances_snd_una() -> Result {
                 pending.len(),
                 pending
                     .first()
-                    .and_then(|seg| seg.send_info.payload.as_deref()),
+                    .and_then(|seg| seg.send_info.payload.as_ref().map(TcpPayload::as_bytes)),
             )
         },
         (1, Some("Hello".as_ref())),

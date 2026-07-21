@@ -1,6 +1,6 @@
 use {
     crate::Result,
-    std::{num::NonZeroU16, ops::Deref, rc::Rc},
+    std::{num::NonZeroU16, rc::Rc},
 };
 
 /// A payload of bytes guaranteed to have a length in the range of `NonZeroU16`.
@@ -14,6 +14,9 @@ pub(super) struct TcpPayload {
 impl TcpPayload {
     /// Returns the number of bytes in the payload.
     pub(super) const fn len(&self) -> NonZeroU16 { self.len }
+
+    /// Returns a byte slice of the payload's data.
+    pub(super) fn as_bytes(&self) -> &[u8] { &self.data }
 
     /// Attempts to create a `Self` from `iter`, returning `Ok(None)` if `iter` is empty.
     ///
@@ -58,10 +61,4 @@ impl TcpPayload {
             })
             .map(|maybe_zero_len| NonZeroU16::try_from(maybe_zero_len).ok())
     }
-}
-
-impl Deref for TcpPayload {
-    type Target = [u8];
-
-    fn deref(&self) -> &Self::Target { &self.data }
 }
