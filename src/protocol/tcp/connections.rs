@@ -111,24 +111,21 @@ impl TcpConnections {
         for key in due_keys {
             let Some(conn) = self.table.get_mut(&key) else { continue };
 
-            if conn
-                .pending
-                .iter()
-                .any(|seg| seg.time_due(self.initial_rto) <= now && seg.retries >= self.max_retries)
-            {
+            if conn.pending.iter().any(|seg| {
+                seg.time_due(self.initial_rto) <= now && seg.exhausted_retries(self.max_retries)
+            }) {
                 self.table.remove(&key);
                 continue;
             }
 
-            retransmissions.extend(conn.pending.iter_mut().filter_map(|segment| {
-                (segment.time_due(self.initial_rto) <= now).then(|| {
-                    segment.retries = segment.retries.saturating_add(1);
-                    segment.last_sent_at = now;
+            retransmissions.extend(conn.pending.iter_mut().filter_map(|seg| {
+                (seg.time_due(self.initial_rto) <= now).then(|| {
+                    seg.record_resent(now);
 
                     TcpHandler::from_pairs_and_info(
                         Ipv4AddrPair { src: key.server_ip, dst: key.client_ip },
                         PortPair { src: key.server_port, dst: key.client_port },
-                        segment.send_info.clone(),
+                        seg.info().clone(),
                     )
                 })
             }));

@@ -216,18 +216,18 @@ pub(super) struct WindowState {
 #[cfg_attr(test, derive(Debug, Clone))]
 pub(super) struct PendingSegment {
     /// The values and data the segment was sent with, frozen at send time.
-    pub(super) send_info: SendInfo,
+    send_info: SendInfo,
 
     /// The sequence number one past the last byte/flag consumed by the segment (`seq_num +
     /// consumed`, e.g. `seq_num + 1` for a SYN/FIN, `seq_num + payload.len()` for data). Compared
     /// against an incoming `ack_num` to tell whether the segment has been fully acknowledged.
-    pub(super) end_seq: u32,
+    end_seq: u32,
 
     /// The last time at which the segment was sent.
-    pub(super) last_sent_at: Instant,
+    last_sent_at: Instant,
 
     /// The number of times the segment has been retransmitted.
-    pub(super) retries: u8,
+    retries: u8,
 }
 
 impl PendingSegment {
@@ -261,5 +261,19 @@ impl PendingSegment {
         self.last_sent_at
             .checked_add(rto)
             .unwrap_or_else(Instant::now)
+    }
+
+    /// Returns a reference to the segment's `SendInfo`.
+    pub(super) const fn info(&self) -> &SendInfo { &self.send_info }
+
+    /// Returns whether the segment has been retried at least `max_retries` times.
+    pub(super) const fn exhausted_retries(&self, max_retries: u8) -> bool {
+        self.retries >= max_retries
+    }
+
+    /// Records that the segment is being resent `now`.
+    pub(super) const fn record_resent(&mut self, now: Instant) {
+        self.retries = self.retries.saturating_add(1);
+        self.last_sent_at = now;
     }
 }
