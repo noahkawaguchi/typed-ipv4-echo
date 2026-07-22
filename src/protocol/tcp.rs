@@ -3,6 +3,7 @@ pub use connections::TcpConnections;
 mod connections;
 mod flags;
 mod payload;
+mod pending_segment;
 mod seq_space;
 mod state;
 
@@ -18,8 +19,9 @@ use {
                 connections::ConnKey,
                 flags::TcpFlags,
                 payload::TcpPayload,
+                pending_segment::PendingSegment,
                 seq_space::{AdvanceBy as _, SeqLe as _, SeqLt as _},
-                state::{ConnState, PendingSegment, TcpState, WindowState},
+                state::{ConnState, TcpState, WindowState},
             },
         },
         sys,
@@ -166,7 +168,7 @@ impl TcpHandler {
             server_port: self.ports.dst,
         };
 
-        Ok(match (connections.get_mut(&key), self.flags, self.payload.as_ref()) {
+        Ok(match (connections.get_mut(&key), self.flags, &self.payload) {
             // SYN packet (step 1 of handshake)
             // Reply with SYN-ACK (step 2), no payload echo
             (None, TcpFlags::Syn, _) => {
@@ -198,7 +200,7 @@ impl TcpHandler {
                     payload: None,
                 };
 
-                pending.push(PendingSegment::new(send_info.clone(), 1));
+                pending.push(PendingSegment::new(send_info.clone()));
 
                 Some(send_info)
             }
@@ -284,7 +286,7 @@ impl TcpHandler {
                 TcpFlags::Ack,
                 Some(payload),
             ) if self.seq_num == conn.rcv_nxt => {
-                let payload_len = u32::from(self.payload_len());
+                let payload_len = u32::from(payload.len().get());
 
                 conn.incoming_ack_update(self)?;
                 conn.rcv_nxt.advance_by(payload_len);
@@ -328,7 +330,7 @@ impl TcpHandler {
                 conn.snd_nxt.advance_by(1); // Our FIN consumes one sequence number
                 conn.rcv_nxt.advance_by(1); // Peer's FIN consumes one sequence number
 
-                conn.pending.push(PendingSegment::new(send_info.clone(), 1));
+                conn.pending.push(PendingSegment::new(send_info.clone()));
 
                 Some(send_info)
             }
@@ -345,9 +347,9 @@ impl TcpHandler {
             (
                 Some(conn @ ConnState { tcp_state: TcpState::FinWait1 | TcpState::FinWait2, .. }),
                 TcpFlags::Ack,
-                Some(_),
+                Some(payload),
             ) if self.seq_num == conn.rcv_nxt => {
-                let payload_len = u32::from(self.payload_len());
+                let payload_len = u32::from(payload.len().get());
                 conn.rcv_nxt.advance_by(payload_len);
 
                 let send_info = SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt);
@@ -467,14 +469,10 @@ impl TcpHandler {
         };
 
         conn.snd_nxt.advance_by(send_len);
-        conn.pending
-            .push(PendingSegment::new(send_info.clone(), send_len));
+        conn.pending.push(PendingSegment::new(send_info.clone()));
 
         send_info
     }
-
-    /// Returns the number of bytes in the payload, or 0 if the payload is `None`.
-    fn payload_len(&self) -> u16 { self.payload.as_ref().map_or(0, |p| p.len().get()) }
 }
 
 impl Encode for TcpHandler {
@@ -508,23 +506,31 @@ impl Encode for TcpHandler {
         // Urgent pointer
         buf.try_get_mut(18..20)?.copy_from_slice(&[0x00, 0x00]);
 
-        // Copy payload into reply if echoing
-        if let Some(data) = self.payload.as_ref() {
-            buf.try_get_mut(
-                usize::from(TCP_HDR_MIN_LEN)
-                    ..usize::from(TCP_HDR_MIN_LEN).try_add(usize::from(data.len().get()))?,
-            )?
-            .copy_from_slice(data.as_bytes());
-        }
+        // Copy payload into reply if echoing and determine segment length
+        // TCP segment length = minimum TCP header length (20 bytes) + payload length (0+ bytes)
+        let tcp_seg_len = u16::from(TCP_HDR_MIN_LEN).try_add(
+            self.payload
+                .as_ref()
+                .map(|payload| -> Result<u16, String> {
+                    let payload_len = payload.len().get();
 
-        // TCP segment length: minimum TCP header length (20 bytes) + payload length (0+ bytes)
-        let tcp_segment_len = u16::from(TCP_HDR_MIN_LEN).try_add(self.payload_len())?;
+                    buf.try_get_mut(
+                        usize::from(TCP_HDR_MIN_LEN)
+                            ..usize::from(TCP_HDR_MIN_LEN).try_add(usize::from(payload_len))?,
+                    )?
+                    .copy_from_slice(payload.as_bytes());
+
+                    Ok(payload_len)
+                })
+                .transpose()?
+                .unwrap_or_default(),
+        )?;
 
         // Zero out checksum field before calculating checksum
         buf.try_get_mut(16..18)?.copy_from_slice(&[0x00, 0x00]);
 
         let tcp_checksum = pseudo_header_checksum(
-            buf.try_get(..usize::from(tcp_segment_len))?,
+            buf.try_get(..usize::from(tcp_seg_len))?,
             self.ip_pair,
             self.proto(),
         )?;
@@ -532,7 +538,7 @@ impl Encode for TcpHandler {
         buf.try_get_mut(16..18)?
             .copy_from_slice(&tcp_checksum.to_be_bytes());
 
-        Ok(tcp_segment_len)
+        Ok(tcp_seg_len)
     }
 
     fn proto(&self) -> Protocol { Protocol::Tcp }

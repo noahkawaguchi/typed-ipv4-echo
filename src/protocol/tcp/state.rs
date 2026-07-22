@@ -3,13 +3,11 @@ use {
         Result,
         protocol::tcp::{
             SendInfo, TcpFlags, TcpHandler, TcpPayload,
+            pending_segment::PendingSegment,
             seq_space::{SeqLe as _, SeqLt as _},
         },
     },
-    std::{
-        collections::VecDeque,
-        time::{Duration, Instant},
-    },
+    std::collections::VecDeque,
 };
 
 /// The state of a connection in the table, including its TCP state, buffered data, and other
@@ -57,7 +55,7 @@ impl ConnState {
                 // Window-related values are set at connection establishment once the peer has
                 // provided a defined SEG.ACK
                 window_state: None,
-                pending: vec![PendingSegment::new(send_info, 1)],
+                pending: vec![PendingSegment::new(send_info)],
                 send_buffer: VecDeque::new(),
             })
             .ok_or(
@@ -98,7 +96,7 @@ impl ConnState {
 
                 // ACKs are cumulative, so only keep pending segments not fully covered by SEG.ACK
                 self.pending
-                    .retain(|pending_seg| seg.ack_num.seq_lt(pending_seg.end_seq));
+                    .retain(|pending_seg| !pending_seg.is_covered_by(seg.ack_num));
             }
         }
 
@@ -210,39 +208,4 @@ pub(super) struct WindowState {
     /// Purely used for internal bookkeeping alongside `snd_wl1` to determine whether a window
     /// value is fresh or stale/reordered.
     pub(super) snd_wl2: u32,
-}
-
-/// A sent segment that consumed sequence numbers and hasn't yet been acknowledged.
-#[cfg_attr(test, derive(Debug, Clone))]
-pub(super) struct PendingSegment {
-    /// The values and data the segment was sent with, frozen at send time.
-    pub(super) send_info: SendInfo,
-
-    /// The sequence number one past the last byte/flag consumed by the segment (`seq_num +
-    /// consumed`, e.g. `seq_num + 1` for a SYN/FIN, `seq_num + payload.len()` for data). Compared
-    /// against an incoming `ack_num` to tell whether the segment has been fully acknowledged.
-    pub(super) end_seq: u32,
-
-    /// The last time at which the segment was sent.
-    pub(super) last_sent_at: Instant,
-
-    /// The number of times the segment has been retransmitted.
-    pub(super) retries: u8,
-}
-
-impl PendingSegment {
-    /// Creates a new unacked segment eligible for retransmission, covering
-    /// `send_info.seq_num..send_info.seq_num + consumed`.
-    pub(super) fn new(send_info: SendInfo, consumed: u32) -> Self {
-        let end_seq = send_info.seq_num.wrapping_add(consumed);
-        Self { send_info, end_seq, last_sent_at: Instant::now(), retries: 0 }
-    }
-
-    /// Returns whether `self` has been sitting unacknowledged long enough to be due for
-    /// retransmission as of `now` (i.e. `rto` elapsed since it was last sent).
-    pub(super) fn is_due(&self, rto: Duration, now: Instant) -> bool {
-        self.last_sent_at
-            .checked_add(rto)
-            .is_some_and(|deadline| deadline <= now)
-    }
 }

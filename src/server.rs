@@ -16,10 +16,12 @@ use {
     },
 };
 
-/// How long to wait before retransmitting an unacked segment.
-const RETRANSMIT_TIMEOUT: Duration = Duration::from_secs(1);
+/// The initial retransmission timeout, i.e. how long to wait before retransmitting an unacked
+/// segment the first time before exponential backoff.
+const INITIAL_RTO: Duration = Duration::from_millis(500);
 
-/// How many times to retransmit an unacked segment before giving up and dropping the connection.
+/// The number of times to retransmit an unacked segment before giving up and dropping the
+/// connection.
 const MAX_RETRANSMITS: u8 = 5;
 
 fn divider() { println!("\n{}\n", "=".repeat(60)) }
@@ -35,7 +37,7 @@ pub fn run(
     shutdown_check: impl Fn() -> bool,
     shutdown_grace_period: Duration,
 ) -> Result {
-    let mut tcp_connections = TcpConnections::new(RETRANSMIT_TIMEOUT, MAX_RETRANSMITS);
+    let mut tcp_connections = TcpConnections::new(INITIAL_RTO, MAX_RETRANSMITS);
 
     let mut read_buf = [0u8; ETHERNET_MTU];
     let mut write_buf = [0u8; ETHERNET_MTU];
