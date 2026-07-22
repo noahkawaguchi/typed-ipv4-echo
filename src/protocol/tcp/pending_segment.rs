@@ -74,3 +74,27 @@ impl PendingSegment {
     #[cfg(test)]
     pub(super) const fn peek_info(&self) -> &SendInfo { &self.send_info }
 }
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::*,
+        crate::{Result, protocol::tcp::tests::payload_from},
+    };
+
+    #[test]
+    fn reports_due_now_on_overflow() -> Result {
+        assert!(
+            PendingSegment::new(SendInfo {
+                seq_num: 42,
+                ack_num: 24,
+                flags: TcpFlags::Ack,
+                payload: payload_from("Hello")?
+            })
+            .time_due(Duration::MAX)
+                <= Instant::now()
+        );
+
+        Ok(())
+    }
+}
