@@ -198,7 +198,7 @@ impl TcpHandler {
                     payload: None,
                 };
 
-                pending.push(PendingSegment::new(send_info.clone(), 1));
+                pending.push(PendingSegment::new(send_info.clone()));
 
                 Some(send_info)
             }
@@ -328,7 +328,7 @@ impl TcpHandler {
                 conn.snd_nxt.advance_by(1); // Our FIN consumes one sequence number
                 conn.rcv_nxt.advance_by(1); // Peer's FIN consumes one sequence number
 
-                conn.pending.push(PendingSegment::new(send_info.clone(), 1));
+                conn.pending.push(PendingSegment::new(send_info.clone()));
 
                 Some(send_info)
             }
@@ -467,8 +467,7 @@ impl TcpHandler {
         };
 
         conn.snd_nxt.advance_by(send_len);
-        conn.pending
-            .push(PendingSegment::new(send_info.clone(), send_len));
+        conn.pending.push(PendingSegment::new(send_info.clone()));
 
         send_info
     }

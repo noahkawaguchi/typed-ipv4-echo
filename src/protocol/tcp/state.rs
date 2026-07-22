@@ -57,7 +57,7 @@ impl ConnState {
                 // Window-related values are set at connection establishment once the peer has
                 // provided a defined SEG.ACK
                 window_state: None,
-                pending: vec![PendingSegment::new(send_info, 1)],
+                pending: vec![PendingSegment::new(send_info)],
                 send_buffer: VecDeque::new(),
             })
             .ok_or(
@@ -231,10 +231,19 @@ pub(super) struct PendingSegment {
 }
 
 impl PendingSegment {
-    /// Creates a new unacked segment eligible for retransmission, covering
-    /// `send_info.seq_num..send_info.seq_num + consumed`.
-    pub(super) fn new(send_info: SendInfo, consumed: u32) -> Self {
-        let end_seq = send_info.seq_num.wrapping_add(consumed);
+    /// Creates a new unacked segment eligible for retransmission, covering the sequence numbers
+    /// consumed by the segment.
+    pub(super) fn new(send_info: SendInfo) -> Self {
+        let end_seq = send_info
+            .seq_num
+            // Any SYN/FIN consumes a single phantom byte
+            .wrapping_add(u32::from(matches!(
+                send_info.flags,
+                TcpFlags::Syn | TcpFlags::SynAck | TcpFlags::FinAck
+            )))
+            // A payload consumes the number of bytes in the payload
+            .wrapping_add(u32::from(send_info.payload.as_ref().map_or(0, |p| p.len().get())));
+
         Self { send_info, end_seq, last_sent_at: Instant::now(), retries: 0 }
     }
 

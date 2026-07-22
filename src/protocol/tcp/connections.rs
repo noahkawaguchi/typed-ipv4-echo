@@ -159,7 +159,7 @@ impl TcpConnections {
                 // Consume one sequence number in SND.NXT for the FIN about to be sent
                 conn.snd_nxt.advance_by(1);
 
-                conn.pending.push(PendingSegment::new(send_info.clone(), 1));
+                conn.pending.push(PendingSegment::new(send_info.clone()));
 
                 Some(TcpHandler::from_pairs_and_info(
                     Ipv4AddrPair { src: key.server_ip, dst: key.client_ip },
@@ -206,15 +206,12 @@ impl TcpConnections {
                 rcv_nxt: CLIENT_ISN + SYN_BYTE,
                 snd_una: SERVER_ISN,
                 window_state: None,
-                pending: vec![PendingSegment::new(
-                    SendInfo {
-                        seq_num: SERVER_ISN,
-                        ack_num: CLIENT_ISN + SYN_BYTE,
-                        flags: TcpFlags::SynAck,
-                        payload: None,
-                    },
-                    SYN_BYTE,
-                )],
+                pending: vec![PendingSegment::new(SendInfo {
+                    seq_num: SERVER_ISN,
+                    ack_num: CLIENT_ISN + SYN_BYTE,
+                    flags: TcpFlags::SynAck,
+                    payload: None,
+                })],
                 send_buffer: VecDeque::new(),
             },
         );
