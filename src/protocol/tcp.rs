@@ -457,7 +457,7 @@ impl TcpHandler {
 
     /// Creates a `SendInfo` for the payload `to_send`, using and then updating the state of `conn`.
     fn data_payload(conn: &mut ConnState, to_send: TcpPayload) -> SendInfo {
-        let send_len = u32::from(u16::from(to_send.len()));
+        let send_len = u32::from(to_send.len().get());
 
         let send_info = SendInfo {
             seq_num: conn.snd_nxt,
@@ -474,7 +474,7 @@ impl TcpHandler {
     }
 
     /// Returns the number of bytes in the payload, or 0 if the payload is `None`.
-    fn payload_len(&self) -> u16 { self.payload.as_ref().map_or(0, |p| p.len().into()) }
+    fn payload_len(&self) -> u16 { self.payload.as_ref().map_or(0, |p| p.len().get()) }
 }
 
 impl Encode for TcpHandler {
@@ -512,7 +512,7 @@ impl Encode for TcpHandler {
         if let Some(data) = self.payload.as_ref() {
             buf.try_get_mut(
                 usize::from(TCP_HDR_MIN_LEN)
-                    ..usize::from(TCP_HDR_MIN_LEN).try_add(usize::from(u16::from(data.len())))?,
+                    ..usize::from(TCP_HDR_MIN_LEN).try_add(usize::from(data.len().get()))?,
             )?
             .copy_from_slice(data.as_bytes());
         }
