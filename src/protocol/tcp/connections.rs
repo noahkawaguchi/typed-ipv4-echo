@@ -101,7 +101,7 @@ impl TcpConnections {
             .filter_map(|(&key, conn)| {
                 conn.pending
                     .iter()
-                    .any(|seg| seg.is_due(self.initial_rto, now))
+                    .any(|seg| seg.time_due(self.initial_rto) <= now)
                     .then_some(key)
             })
             .collect::<Vec<_>>();
@@ -114,14 +114,14 @@ impl TcpConnections {
             if conn
                 .pending
                 .iter()
-                .any(|seg| seg.is_due(self.initial_rto, now) && seg.retries >= self.max_retries)
+                .any(|seg| seg.time_due(self.initial_rto) <= now && seg.retries >= self.max_retries)
             {
                 self.table.remove(&key);
                 continue;
             }
 
             retransmissions.extend(conn.pending.iter_mut().filter_map(|segment| {
-                segment.is_due(self.initial_rto, now).then(|| {
+                (segment.time_due(self.initial_rto) <= now).then(|| {
                     segment.retries = segment.retries.saturating_add(1);
                     segment.last_sent_at = now;
 

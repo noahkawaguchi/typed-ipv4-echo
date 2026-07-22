@@ -262,10 +262,4 @@ impl PendingSegment {
             .checked_add(rto)
             .unwrap_or_else(Instant::now)
     }
-
-    /// Returns whether `self` has been sitting unacknowledged long enough to be due for
-    /// retransmission as of `now`, i.e. `initial_rto * 2^retries` elapsed since it was last sent.
-    pub(super) fn is_due(&self, initial_rto: Duration, now: Instant) -> bool {
-        self.time_due(initial_rto) <= now
-    }
 }
