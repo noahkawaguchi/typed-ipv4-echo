@@ -238,11 +238,25 @@ impl PendingSegment {
         Self { send_info, end_seq, last_sent_at: Instant::now(), retries: 0 }
     }
 
-    /// Returns whether `self` has been sitting unacknowledged long enough to be due for
-    /// retransmission as of `now` (i.e. `rto` elapsed since it was last sent).
-    pub(super) fn is_due(&self, rto: Duration, now: Instant) -> bool {
+    /// Returns the time at which the segment is due for retransmission using exponential backoff,
+    /// or `Instant::now()` if `Instant` overflowed.
+    pub(super) fn time_due(&self, initial_rto: Duration) -> Instant {
+        // Make the RTO saturate at `Duration::MAX`, or "about 584,942,417,355 years" (std library
+        // docs), leaving plenty of room for any real RTO.
+        let rto = initial_rto.saturating_mul(2u32.saturating_pow(self.retries.into()));
+
+        // In practice, adding `Duration::MAX` should overflow any `Instant`, but this is not
+        // guaranteed since `Instant` is opaque. Therefore, check for overflow separately.
+        //
+        // Return due now on overflow so that a pending segment cannot get stuck never being due.
         self.last_sent_at
             .checked_add(rto)
-            .is_some_and(|deadline| deadline <= now)
+            .unwrap_or_else(Instant::now)
+    }
+
+    /// Returns whether `self` has been sitting unacknowledged long enough to be due for
+    /// retransmission as of `now`, i.e. `initial_rto * 2^retries` elapsed since it was last sent.
+    pub(super) fn is_due(&self, initial_rto: Duration, now: Instant) -> bool {
+        self.time_due(initial_rto) <= now
     }
 }

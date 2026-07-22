@@ -28,13 +28,19 @@ pub(super) struct ConnKey {
 #[cfg_attr(test, derive(Default))]
 pub struct TcpConnections {
     table: HashMap<ConnKey, ConnState>,
-    rto: Duration,
+
+    /// The initial retransmission timeout, i.e. how long to wait before retransmitting an unacked
+    /// segment the first time before exponential backoff.
+    initial_rto: Duration,
+
+    /// The number of times to retransmit an unacked segment before giving up and dropping the
+    /// connection.
     max_retries: u8,
 }
 
 impl TcpConnections {
-    pub fn new(rto: Duration, max_retries: u8) -> Self {
-        Self { table: HashMap::new(), rto, max_retries }
+    pub fn new(initial_rto: Duration, max_retries: u8) -> Self {
+        Self { table: HashMap::new(), initial_rto, max_retries }
     }
 
     pub fn len(&self) -> usize { self.table.len() }
@@ -79,7 +85,7 @@ impl TcpConnections {
         self.table
             .values()
             .flat_map(|conn| &conn.pending)
-            .filter_map(|seg| seg.last_sent_at.checked_add(self.rto))
+            .map(|seg| seg.time_due(self.initial_rto))
             .min()
     }
 
@@ -95,7 +101,7 @@ impl TcpConnections {
             .filter_map(|(&key, conn)| {
                 conn.pending
                     .iter()
-                    .any(|seg| seg.is_due(self.rto, now))
+                    .any(|seg| seg.is_due(self.initial_rto, now))
                     .then_some(key)
             })
             .collect::<Vec<_>>();
@@ -108,14 +114,14 @@ impl TcpConnections {
             if conn
                 .pending
                 .iter()
-                .any(|seg| seg.is_due(self.rto, now) && seg.retries >= self.max_retries)
+                .any(|seg| seg.is_due(self.initial_rto, now) && seg.retries >= self.max_retries)
             {
                 self.table.remove(&key);
                 continue;
             }
 
             retransmissions.extend(conn.pending.iter_mut().filter_map(|segment| {
-                segment.is_due(self.rto, now).then(|| {
+                segment.is_due(self.initial_rto, now).then(|| {
                     segment.retries = segment.retries.saturating_add(1);
                     segment.last_sent_at = now;
 

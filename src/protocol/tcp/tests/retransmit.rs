@@ -1,4 +1,7 @@
-use {super::*, std::time::Duration};
+use {
+    super::*,
+    std::{thread, time::Duration},
+};
 
 #[test]
 fn syn_ack_is_resent_while_due() -> Result {
@@ -182,6 +185,41 @@ fn gives_up_after_max_retransmits() -> Result {
 
     assert!(resent.is_empty(), "Should give up instead of retransmitting again");
     assert_matches!(connections.try_get(), Err(_), "Connection should be removed");
+
+    Ok(())
+}
+
+#[test]
+fn retransmissions_back_off_exponentially() -> Result {
+    let mut connections = TcpConnections::new(Duration::from_millis(10), 3);
+    connections.insert(AFTER_HANDSHAKE);
+
+    TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE,
+        ack_num: SERVER_ISN + SYN_BYTE,
+        payload: payload_from("Hello")?,
+        ..CLIENT_PACKET
+    }
+    .create_reply(&mut connections)?;
+
+    assert!(connections.make_retransmissions().is_empty(), "Before first timeout");
+
+    thread::sleep(Duration::from_millis(10));
+    assert_eq!(connections.make_retransmissions().len(), 1, "Retransmit 1 after 10ms timeout");
+
+    thread::sleep(Duration::from_millis(10));
+    assert!(connections.make_retransmissions().is_empty(), "10ms into 20ms timeout");
+
+    thread::sleep(Duration::from_millis(10));
+    assert_eq!(connections.make_retransmissions().len(), 1, "Retransmit 2 after 20ms timeout");
+
+    thread::sleep(Duration::from_millis(20));
+    assert!(connections.make_retransmissions().is_empty(), "20ms into 40ms timeout");
+
+    thread::sleep(Duration::from_millis(20));
+    assert_eq!(connections.make_retransmissions().len(), 1, "Retransmit 3 after 40ms timeout");
+
+    assert!(connections.make_retransmissions().is_empty(), "Give up after 3 retransmissions");
 
     Ok(())
 }
