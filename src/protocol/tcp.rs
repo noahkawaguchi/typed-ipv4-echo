@@ -168,7 +168,7 @@ impl TcpHandler {
             server_port: self.ports.dst,
         };
 
-        Ok(match (connections.get_mut(&key), self.flags, self.payload.as_ref()) {
+        Ok(match (connections.get_mut(&key), self.flags, &self.payload) {
             // SYN packet (step 1 of handshake)
             // Reply with SYN-ACK (step 2), no payload echo
             (None, TcpFlags::Syn, _) => {
