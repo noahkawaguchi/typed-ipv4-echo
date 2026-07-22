@@ -64,7 +64,7 @@ fn fin_ack_acks_prior_data_and_advances_snd_una() -> Result {
                 pending.len(),
                 pending
                     .first()
-                    .and_then(|seg| seg.info().payload.as_ref().map(TcpPayload::as_bytes)),
+                    .and_then(|seg| seg.peek_info().payload.as_ref().map(TcpPayload::as_bytes)),
             )
         },
         (1, Some("Hello".as_ref())),
@@ -100,7 +100,7 @@ fn fin_ack_acks_prior_data_and_advances_snd_una() -> Result {
     );
 
     assert_eq!(
-        (final_state.pending.len(), final_state.pending.first().map(|seg| seg.info().flags)),
+        (final_state.pending.len(), final_state.pending.first().map(|seg| seg.peek_info().flags)),
         (1, Some(TcpFlags::FinAck)),
         "The fully acked \"Hello\" echo should be pruned from `pending`, leaving only the FIN-ACK"
     );

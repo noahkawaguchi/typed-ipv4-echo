@@ -120,12 +120,10 @@ impl TcpConnections {
 
             retransmissions.extend(conn.pending.iter_mut().filter_map(|seg| {
                 (seg.time_due(self.initial_rto) <= now).then(|| {
-                    seg.record_resent(now);
-
                     TcpHandler::from_pairs_and_info(
                         Ipv4AddrPair { src: key.server_ip, dst: key.client_ip },
                         PortPair { src: key.server_port, dst: key.client_port },
-                        seg.info().clone(),
+                        seg.retransmit_info(now),
                     )
                 })
             }));

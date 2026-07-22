@@ -54,9 +54,6 @@ impl PendingSegment {
             .unwrap_or_else(Instant::now)
     }
 
-    /// Returns a reference to the segment's `SendInfo`.
-    pub(super) const fn info(&self) -> &SendInfo { &self.send_info }
-
     /// Returns whether the segment is fully covered by `ack_num`.
     pub(super) fn is_covered_by(&self, ack_num: u32) -> bool { self.end_seq.seq_le(ack_num) }
 
@@ -65,9 +62,15 @@ impl PendingSegment {
         self.retries >= max_retries
     }
 
-    /// Records that the segment is being resent `now`.
-    pub(super) const fn record_resent(&mut self, now: Instant) {
+    /// Clones the segment's `SendInfo` for retransmission and records that it is being
+    /// retransmitted `now`.
+    pub(super) fn retransmit_info(&mut self, now: Instant) -> SendInfo {
         self.retries = self.retries.saturating_add(1);
         self.last_sent_at = now;
+        self.send_info.clone()
     }
+
+    /// Returns a reference to the segment's `SendInfo` without recording a retransmission.
+    #[cfg(test)]
+    pub(super) const fn peek_info(&self) -> &SendInfo { &self.send_info }
 }
