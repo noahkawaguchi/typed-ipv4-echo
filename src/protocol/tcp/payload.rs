@@ -47,3 +47,37 @@ impl TcpPayload {
             .map(|maybe_zero_len| NonZeroU16::new(maybe_zero_len).map(|len| Self { data, len }))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use {super::*, std::assert_matches};
+
+    /// A byte array with the maximum valid length.
+    static MAX_ARRAY: [u8; u16::MAX as usize] = [b'H'; u16::MAX as usize];
+
+    #[test]
+    fn creates_valid_payload_when_length_in_range() -> Result {
+        for data in ["H".as_ref(), "Hello".as_ref(), MAX_ARRAY.as_ref()] {
+            assert_eq!(
+                TcpPayload::try_from_iter(data.iter().copied()),
+                Ok(Some(TcpPayload {
+                    data: Rc::from(data),
+                    len: NonZeroU16::try_from(u16::try_from(data.len())?)?
+                }))
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn ok_none_for_empty() { assert_eq!(TcpPayload::try_from_iter([]), Ok(None)) }
+
+    #[test]
+    fn err_for_too_large() {
+        assert_matches!(
+            TcpPayload::try_from_iter(MAX_ARRAY.into_iter().chain([b'e'])),
+            Err(e) if e.contains("longer than")
+        );
+    }
+}
