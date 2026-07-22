@@ -48,14 +48,16 @@ impl TcpConnections {
     /// # Errors
     ///
     /// Returns `Err` if the connection's TCP state is not SYN-RECEIVED.
-    pub(super) fn insert_syn_rcv(&mut self, key: ConnKey, state: ConnState) -> Result {
+    pub(super) fn insert_syn_rcv(
+        &mut self,
+        key: ConnKey,
+        state: ConnState,
+    ) -> Result<(), &'static str> {
         (state.tcp_state == TcpState::SynReceived)
             .then(|| {
                 self.table.insert(key, state);
             })
-            .ok_or_else(|| {
-                "Attempted to insert a connection with a state other than SYN-RECEIVED".into()
-            })
+            .ok_or("Attempted to insert a connection with a state other than SYN-RECEIVED")
     }
 
     pub(super) fn remove(&mut self, key: &ConnKey) { self.table.remove(key); }
@@ -165,12 +167,10 @@ impl TcpConnections {
     /// Attempts to retrieve the connection in the table under `KEY`, returning `Err` if not
     /// present.
     #[cfg(test)]
-    pub(super) fn try_get(&self) -> Result<&ConnState, String> {
+    pub(super) fn try_get(&self) -> Result<&ConnState, &'static str> {
         use crate::protocol::tcp::tests::KEY;
 
-        self.table
-            .get(&KEY)
-            .ok_or_else(|| String::from("Connection not found"))
+        self.table.get(&KEY).ok_or("Connection not found")
     }
 
     /// Inserts `conn` into the connection table using `KEY`.

@@ -72,5 +72,8 @@ pub const SERVER_REPLY: TcpHandler = TcpHandler {
     payload: None,
 };
 
-/// Converts a `&str` into an `Option<Rc<[u8]>>`, with an empty string mapping to `None`.
-pub fn payload_from(s: &str) -> Option<Rc<[u8]>> { (!s.is_empty()).then(|| Rc::from(s.as_bytes())) }
+/// Attempts to convert a `&str` into an `Option<TcpPayload>`, with an empty string mapping to
+/// `Ok(None)`.
+pub fn payload_from(s: &str) -> Result<Option<TcpPayload>, &'static str> {
+    TcpPayload::try_from_iter(s.as_bytes().iter().copied())
+}

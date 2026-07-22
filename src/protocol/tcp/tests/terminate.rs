@@ -48,7 +48,7 @@ fn fin_ack_acks_prior_data_and_advances_snd_una() -> Result {
     TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE,
         ack_num: SERVER_ISN + SYN_BYTE,
-        payload: payload_from("Hello"),
+        payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -64,7 +64,7 @@ fn fin_ack_acks_prior_data_and_advances_snd_una() -> Result {
                 pending.len(),
                 pending
                     .first()
-                    .and_then(|seg| seg.send_info.payload.as_deref()),
+                    .and_then(|seg| seg.send_info.payload.as_ref().map(TcpPayload::as_bytes)),
             )
         },
         (1, Some("Hello".as_ref())),
@@ -340,7 +340,7 @@ fn data_after_our_fin_in_fin_wait_1_is_acked_without_echo() -> Result {
     let reply = TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE,
         ack_num: SERVER_ISN + SYN_BYTE,
-        payload: payload_from("Hello"),
+        payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -389,7 +389,7 @@ fn data_after_our_fin_in_fin_wait_2_is_acked_without_echo() -> Result {
     let reply = TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE,
         ack_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
-        payload: payload_from("Hello"),
+        payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;

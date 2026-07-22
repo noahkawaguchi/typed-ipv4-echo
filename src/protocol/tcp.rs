@@ -2,6 +2,7 @@ pub use connections::TcpConnections;
 
 mod connections;
 mod flags;
+mod payload;
 mod seq_space;
 mod state;
 
@@ -16,6 +17,7 @@ use {
             tcp::{
                 connections::ConnKey,
                 flags::TcpFlags,
+                payload::TcpPayload,
                 seq_space::{AdvanceBy as _, SeqLe as _, SeqLt as _},
                 state::{ConnState, PendingSegment, TcpState, WindowState},
             },
@@ -23,7 +25,7 @@ use {
         sys,
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
-    std::{fmt, num::TryFromIntError, rc::Rc},
+    std::fmt,
 };
 
 /// The minimum number of bytes in a TCP header (no options).
@@ -59,7 +61,7 @@ pub struct TcpHandler {
     /// that the sender of this segment is willing to accept."
     window: u16,
 
-    payload: Option<Rc<[u8]>>,
+    payload: Option<TcpPayload>,
 }
 
 /// Fields that differ when determining a segment to send.
@@ -69,7 +71,7 @@ struct SendInfo {
     seq_num: u32,
     ack_num: u32,
     flags: TcpFlags,
-    payload: Option<Rc<[u8]>>,
+    payload: Option<TcpPayload>,
 }
 
 impl SendInfo {
@@ -125,10 +127,12 @@ impl TcpHandler {
             offset_bytes,
             flags: tcp_header[13].try_into()?,
             window: u16::from_be_bytes([tcp_header[14], tcp_header[15]]),
-            payload: data
-                .get(offset_bytes.into()..)
-                // Use `None` for empty payloads to avoid allocating
-                .and_then(|p| (!p.is_empty()).then(|| Rc::from(p))),
+            payload: TcpPayload::try_from_iter(
+                data.get(offset_bytes.into()..)
+                    .into_iter()
+                    .flatten()
+                    .copied(),
+            )?,
         })
     }
 
@@ -268,11 +272,8 @@ impl TcpHandler {
                 None,
             ) => {
                 conn.incoming_ack_update(self)?;
-
-                match conn.drain_transmittable()? {
-                    Some(to_send) => Some(Self::data_payload(conn, to_send)?),
-                    None => None,
-                }
+                conn.drain_transmittable()?
+                    .map(|to_send| Self::data_payload(conn, to_send))
             }
 
             // In-order data packet on an established connection -> ACK receipt of data, advancing
@@ -283,14 +284,14 @@ impl TcpHandler {
                 TcpFlags::Ack,
                 Some(payload),
             ) if self.seq_num == conn.rcv_nxt => {
-                let payload_len = u32::from(self.payload_len()?);
+                let payload_len = u32::from(self.payload_len());
 
                 conn.incoming_ack_update(self)?;
                 conn.rcv_nxt.advance_by(payload_len);
-                conn.send_buffer.extend(payload.iter());
+                conn.send_buffer.extend(payload.as_bytes().iter());
 
                 Some(match conn.drain_transmittable()? {
-                    Some(to_send) => Self::data_payload(conn, to_send)?,
+                    Some(to_send) => Self::data_payload(conn, to_send),
                     None => SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt),
                 })
             }
@@ -346,7 +347,7 @@ impl TcpHandler {
                 TcpFlags::Ack,
                 Some(_),
             ) if self.seq_num == conn.rcv_nxt => {
-                let payload_len = u32::from(self.payload_len()?);
+                let payload_len = u32::from(self.payload_len());
                 conn.rcv_nxt.advance_by(payload_len);
 
                 let send_info = SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt);
@@ -455,8 +456,8 @@ impl TcpHandler {
     }
 
     /// Creates a `SendInfo` for the payload `to_send`, using and then updating the state of `conn`.
-    fn data_payload(conn: &mut ConnState, to_send: Rc<[u8]>) -> Result<SendInfo, TryFromIntError> {
-        let send_len = u32::try_from(to_send.len())?;
+    fn data_payload(conn: &mut ConnState, to_send: TcpPayload) -> SendInfo {
+        let send_len = u32::from(to_send.len().get());
 
         let send_info = SendInfo {
             seq_num: conn.snd_nxt,
@@ -469,13 +470,11 @@ impl TcpHandler {
         conn.pending
             .push(PendingSegment::new(send_info.clone(), send_len));
 
-        Ok(send_info)
+        send_info
     }
 
     /// Returns the number of bytes in the payload, or 0 if the payload is `None`.
-    fn payload_len(&self) -> Result<u16, TryFromIntError> {
-        self.payload.as_ref().map_or(0, |p| p.len()).try_into()
-    }
+    fn payload_len(&self) -> u16 { self.payload.as_ref().map_or(0, |p| p.len().get()) }
 }
 
 impl Encode for TcpHandler {
@@ -512,13 +511,14 @@ impl Encode for TcpHandler {
         // Copy payload into reply if echoing
         if let Some(data) = self.payload.as_ref() {
             buf.try_get_mut(
-                usize::from(TCP_HDR_MIN_LEN)..usize::from(TCP_HDR_MIN_LEN).try_add(data.len())?,
+                usize::from(TCP_HDR_MIN_LEN)
+                    ..usize::from(TCP_HDR_MIN_LEN).try_add(usize::from(data.len().get()))?,
             )?
-            .copy_from_slice(data);
+            .copy_from_slice(data.as_bytes());
         }
 
         // TCP segment length: minimum TCP header length (20 bytes) + payload length (0+ bytes)
-        let tcp_segment_len = u16::from(TCP_HDR_MIN_LEN).try_add(self.payload_len()?)?;
+        let tcp_segment_len = u16::from(TCP_HDR_MIN_LEN).try_add(self.payload_len())?;
 
         // Zero out checksum field before calculating checksum
         buf.try_get_mut(16..18)?.copy_from_slice(&[0x00, 0x00]);
@@ -549,7 +549,12 @@ impl fmt::Display for TcpHandler {
             self.seq_num,
             self.ack_num,
             self.flags,
-            payload_to_string(self.payload.as_deref().unwrap_or_default()),
+            payload_to_string(
+                self.payload
+                    .as_ref()
+                    .map(TcpPayload::as_bytes)
+                    .unwrap_or_default()
+            ),
         )
     }
 }

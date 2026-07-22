@@ -60,7 +60,7 @@ fn data_echo_is_resent_unchanged() -> Result {
     TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE,
         ack_num: SERVER_ISN + SYN_BYTE,
-        payload: payload_from("Hello"),
+        payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -74,7 +74,7 @@ fn data_echo_is_resent_unchanged() -> Result {
         TcpHandler {
             seq_num: SERVER_ISN + SYN_BYTE,
             ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-            payload: payload_from("Hello"),
+            payload: payload_from("Hello")?,
             ..SERVER_REPLY
         }
     );
@@ -118,7 +118,7 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result {
     TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE,
         ack_num: SERVER_ISN + SYN_BYTE,
-        payload: payload_from("Hello"),
+        payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -128,7 +128,7 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result {
     TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
         ack_num: SERVER_ISN + SYN_BYTE,
-        payload: payload_from("Hi"),
+        payload: payload_from("Hi")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -143,7 +143,7 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result {
         TcpHandler {
             seq_num: SERVER_ISN + SYN_BYTE,
             ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-            payload: payload_from("Hello"),
+            payload: payload_from("Hello")?,
             ..SERVER_REPLY
         }
     );
@@ -153,7 +153,7 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result {
         TcpHandler {
             seq_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
             ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
-            payload: payload_from("Hi"),
+            payload: payload_from("Hi")?,
             ..SERVER_REPLY
         }
     );
