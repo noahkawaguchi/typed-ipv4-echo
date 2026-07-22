@@ -3,9 +3,9 @@ use {
         Result,
         addr_pairs::{Ipv4AddrPair, PortPair},
         protocol::tcp::{
-            SendInfo, TcpFlags, TcpHandler,
+            PendingSegment, SendInfo, TcpFlags, TcpHandler,
             seq_space::AdvanceBy as _,
-            state::{ConnState, PendingSegment, TcpState},
+            state::{ConnState, TcpState},
         },
     },
     std::{

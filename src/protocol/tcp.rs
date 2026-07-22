@@ -3,6 +3,7 @@ pub use connections::TcpConnections;
 mod connections;
 mod flags;
 mod payload;
+mod pending_segment;
 mod seq_space;
 mod state;
 
@@ -18,8 +19,9 @@ use {
                 connections::ConnKey,
                 flags::TcpFlags,
                 payload::TcpPayload,
+                pending_segment::PendingSegment,
                 seq_space::{AdvanceBy as _, SeqLe as _, SeqLt as _},
-                state::{ConnState, PendingSegment, TcpState, WindowState},
+                state::{ConnState, TcpState, WindowState},
             },
         },
         sys,
