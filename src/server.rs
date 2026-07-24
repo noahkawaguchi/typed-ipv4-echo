@@ -251,3 +251,22 @@ where
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    mod packet_handling;
+    mod propagate;
+    mod shutdown;
+    mod utils;
+
+    use {
+        super::*,
+        std::{assert_matches, cell::Cell},
+        utils::*,
+    };
+
+    /// A zero grace period, meaning the very next iteration's poll timeout is already past the
+    /// deadline (real time always advances between the two `Instant::now()` calls), allowing tests
+    /// to force the "grace period elapsed" exit deterministically without sleeping.
+    const IMMEDIATE_GRACE_PERIOD: Duration = Duration::ZERO;
+}

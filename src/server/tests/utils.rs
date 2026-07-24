@@ -1,0 +1,109 @@
+use {
+    super::*,
+    crate::try_ops::TryGetMut as _,
+    std::{cell::RefCell, collections::VecDeque, fs::File, os::fd::BorrowedFd},
+};
+
+/// A `Read + Write + AsFd` test double. `read()` calls are scripted in advance and return an error
+/// if the script runs out, while `write()` calls are recorded (and optionally scripted to fail) so
+/// tests can assert on what would have gone out over the wire.
+pub struct MockDevice {
+    reads: VecDeque<io::Result<Vec<u8>>>,
+    writes: Vec<Vec<u8>>,
+    write_error: Option<io::ErrorKind>,
+
+    /// Backing fd only to satisfy `AsFd`. `poll_readable` is always injected in tests, so this fd
+    /// is never actually polled or read from the OS.
+    dummy_fd: File,
+}
+
+impl MockDevice {
+    /// Creates a new `Self` that returns the next item in `reads` in order for each `read()` call.
+    pub fn new(reads: impl IntoIterator<Item = io::Result<Vec<u8>>>) -> io::Result<Self> {
+        Ok(Self {
+            reads: reads.into_iter().collect(),
+            writes: Vec::new(),
+            write_error: None,
+            dummy_fd: File::open("/dev/null")?,
+        })
+    }
+
+    /// Makes every subsequent `write()` call fail with `kind` instead of succeeding.
+    pub fn fail_writes(mut self, kind: io::ErrorKind) -> Self {
+        self.write_error = Some(kind);
+        self
+    }
+
+    pub fn writes(&self) -> &[Vec<u8>] { &self.writes }
+}
+
+impl Read for MockDevice {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let data = self
+            .reads
+            .pop_front()
+            .ok_or_else(|| io::Error::other("Ran out of scripted reads"))??;
+
+        buf.try_get_mut(..data.len())
+            .map_err(io::Error::other)?
+            .copy_from_slice(&data);
+
+        Ok(data.len())
+    }
+}
+
+impl Write for MockDevice {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if let Some(kind) = self.write_error {
+            return Err(kind.into());
+        }
+
+        self.writes.push(buf.to_vec());
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> { Ok(()) }
+}
+
+impl AsFd for MockDevice {
+    fn as_fd(&self) -> BorrowedFd<'_> { self.dummy_fd.as_fd() }
+}
+
+/// A scripted sequence of `poll_readable` results, consumed one per call (via interior mutability
+/// since `poll_readable` must be `Fn`, not `FnMut`). Returns `Err` if the script runs out.
+pub struct PollScript(RefCell<VecDeque<io::Result<bool>>>);
+
+impl PollScript {
+    pub fn new(items: impl IntoIterator<Item = io::Result<bool>>) -> Self {
+        Self(RefCell::new(items.into_iter().collect()))
+    }
+
+    pub fn next(&self) -> io::Result<bool> {
+        self.0
+            .try_borrow_mut()
+            .map_err(io::Error::other)?
+            .pop_front()
+            .unwrap_or_else(|| Err(io::Error::other("Poll script exhausted")))
+    }
+}
+
+/// Builds and runs a test server, bypassing regular construction so tests can seed
+/// `tcp_connections` with pre-established connections.
+pub fn run_test_server(
+    tcp_connections: TcpConnections,
+    device: &mut MockDevice,
+    poll_readable: impl Fn(&MockDevice, Option<Duration>) -> io::Result<bool>,
+    shutdown_check: impl Fn() -> bool,
+    shutdown_grace_period: Duration,
+) -> Result {
+    Server {
+        write_buf: [0u8; ETHERNET_MTU],
+        tcp_connections,
+        device,
+        poll_readable,
+        shutdown_check,
+        shutdown_grace_period,
+        shutdown_deadline: None,
+    }
+    .run()
+}
