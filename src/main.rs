@@ -29,5 +29,11 @@ fn main() -> Result {
     println!("Attached to TUN device {tun_name}");
 
     println!("Waiting for packets... (Ctrl+C to stop)");
-    server::run(&mut tun, || shutdown.load(), SHUTDOWN_GRACE_PERIOD)
+
+    server::run(
+        &mut tun,
+        |fd, timeout| sys::poll::readable(fd, timeout),
+        || shutdown.load(),
+        SHUTDOWN_GRACE_PERIOD,
+    )
 }

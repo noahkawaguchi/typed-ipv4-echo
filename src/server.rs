@@ -6,7 +6,6 @@ use {
             TcpConnections,
             handler::{Encode, ProtocolHandler},
         },
-        sys,
         try_ops::TryGet as _,
     },
     std::{
@@ -29,18 +28,25 @@ fn divider() { println!("\n{}\n", "=".repeat(60)) }
 /// Reads and writes IPv4 packets to and from `device`, maintaining TCP connection state and echoing
 /// payloads as necessary.
 ///
-/// When polling `device` is interrupted and `shutdown_check` returns `true`, actively closes all
-/// established TCP connections and waits up to `shutdown_grace_period` for them to finish before
-/// returning.
-pub fn run(
-    device: &mut (impl Read + Write + AsFd),
-    shutdown_check: impl Fn() -> bool,
+/// When polling `device` with `poll_readable` is interrupted and `shutdown_check` returns `true`,
+/// actively closes all established TCP connections and waits up to `shutdown_grace_period` for them
+/// to finish before returning.
+pub fn run<D, P, S>(
+    device: &mut D,
+    poll_readable: P,
+    shutdown_check: S,
     shutdown_grace_period: Duration,
-) -> Result {
+) -> Result
+where
+    D: Read + Write + AsFd,
+    P: Fn(&D, Option<Duration>) -> io::Result<bool>,
+    S: Fn() -> bool,
+{
     Server {
         write_buf: [0u8; ETHERNET_MTU],
         tcp_connections: TcpConnections::new(INITIAL_RTO, MAX_RETRANSMITS),
         device,
+        poll_readable,
         shutdown_check,
         shutdown_grace_period,
         shutdown_deadline: None,
@@ -48,10 +54,11 @@ pub fn run(
     .run()
 }
 
-struct Server<'a, D, S> {
+struct Server<'a, D, P, S> {
     write_buf: [u8; ETHERNET_MTU],
     tcp_connections: TcpConnections,
     device: &'a mut D,
+    poll_readable: P,
     shutdown_check: S,
     shutdown_grace_period: Duration,
 
@@ -60,9 +67,10 @@ struct Server<'a, D, S> {
     shutdown_deadline: Option<Instant>,
 }
 
-impl<D, S> Server<'_, D, S>
+impl<D, P, S> Server<'_, D, P, S>
 where
     D: Read + Write + AsFd,
+    P: Fn(&D, Option<Duration>) -> io::Result<bool>,
     S: Fn() -> bool,
 {
     fn run(&mut self) -> Result {
@@ -79,7 +87,7 @@ where
                 .min()
                 .map(|deadline| deadline.saturating_duration_since(Instant::now()));
 
-            match sys::poll::readable(&self.device, timeout) {
+            match (self.poll_readable)(self.device, timeout) {
                 // If `poll()` was interrupted and returned `EINTR`, a shutdown signal has been
                 // received
                 Err(e) if e.kind() == io::ErrorKind::Interrupted && (self.shutdown_check)() => {
