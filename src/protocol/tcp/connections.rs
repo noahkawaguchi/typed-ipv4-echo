@@ -217,7 +217,7 @@ impl TcpConnections {
     /// Creates a default-initialized `Self` and inserts a default-initialized ESTABLISHED
     /// connection using `KEY` as if the initial three-way handshake had just completed.
     #[cfg(test)]
-    pub(super) fn after_handshake() -> Self {
+    pub(crate) fn after_handshake() -> Self {
         use crate::protocol::tcp::tests::{AFTER_HANDSHAKE, KEY};
 
         let mut connections = Self::default();
