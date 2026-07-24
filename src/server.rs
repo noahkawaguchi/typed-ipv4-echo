@@ -58,30 +58,21 @@ pub fn run(
             .map(|deadline| deadline.saturating_duration_since(Instant::now()));
 
         match sys::poll::readable(&device, timeout) {
-            // If `poll()` was interrupted and returned `EINTR`, a shutdown signal has been
-            // received. The first time this happens, actively close all established connections and
-            // start the shutdown grace period.
+            // If `poll()` was interrupted and returned `EINTR`, a shutdown signal has been received
             Err(e) if e.kind() == io::ErrorKind::Interrupted && shutdown_check() => {
-                if let Some(deadline) = shutdown_deadline {
-                    // SIGINT while already draining -> just print the time left
-                    println!(
-                        "\nDraining connections, {}ms left",
-                        deadline
-                            .saturating_duration_since(Instant::now())
-                            .as_millis()
-                    );
-                } else {
-                    shutdown_deadline = match start_active_close(
-                        device,
-                        &mut write_buf,
-                        &mut tcp_connections,
-                        shutdown_grace_period,
-                    )? {
-                        Some(deadline) => Some(deadline),
-                        None => break Ok(()),
-                    }
+                if handle_shutdown_interrupt(
+                    device,
+                    &mut write_buf,
+                    &mut tcp_connections,
+                    shutdown_grace_period,
+                    &mut shutdown_deadline,
+                )? {
+                    break Ok(());
                 }
             }
+
+            // Interrupted by a signal unrelated to shutdown -> just re-poll
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
 
             Err(e) => break Err(e.into()),
 
@@ -104,8 +95,23 @@ pub fn run(
 
             Ok(true) => {
                 let n = match device.read(&mut read_buf) {
-                    // If `read()` was interrupted and returned `EINTR`, immediately continue to
-                    // re-poll and check the shutdown deadline
+                    // If `read()` was interrupted and returned `EINTR`, react to the shutdown
+                    // signal in the same way as for a `poll()` interruption
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted && shutdown_check() => {
+                        if handle_shutdown_interrupt(
+                            device,
+                            &mut write_buf,
+                            &mut tcp_connections,
+                            shutdown_grace_period,
+                            &mut shutdown_deadline,
+                        )? {
+                            break Ok(());
+                        }
+
+                        continue;
+                    }
+
+                    // Interrupted by a signal unrelated to shutdown -> just re-poll
                     Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
                     Err(e) => break Err(e.into()),
                     Ok(n) => n,
@@ -150,6 +156,38 @@ pub fn run(
             }
         }
     }
+}
+
+/// Reacts to an `EINTR` caused by the shutdown signal. If not already draining (i.e. this is the
+/// first time the signal has been received), begins active close and sets `shutdown_deadline`. If
+/// draining has already started, prints the time left. Returns whether to proceed to shutdown
+/// immediately.
+fn handle_shutdown_interrupt(
+    device: &mut impl Write,
+    write_buf: &mut [u8; ETHERNET_MTU],
+    tcp_connections: &mut TcpConnections,
+    shutdown_grace_period: Duration,
+    shutdown_deadline: &mut Option<Instant>,
+) -> Result<bool> {
+    Ok(if let Some(deadline) = *shutdown_deadline {
+        // Already draining -> just print the time left
+        println!(
+            "\nDraining connections, {}ms left",
+            deadline
+                .saturating_duration_since(Instant::now())
+                .as_millis()
+        );
+
+        false
+    } else if let Some(deadline) =
+        start_active_close(device, write_buf, tcp_connections, shutdown_grace_period)?
+    {
+        // Draining is starting now -> set the deadline
+        *shutdown_deadline = Some(deadline);
+        false
+    } else {
+        true // Nothing to wait for -> shut down
+    })
 }
 
 /// Sends FIN-ACK to all established connections, initiating active close.
