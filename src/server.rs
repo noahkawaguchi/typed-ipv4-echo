@@ -37,212 +37,214 @@ pub fn run(
     shutdown_check: impl Fn() -> bool,
     shutdown_grace_period: Duration,
 ) -> Result {
-    let mut tcp_connections = TcpConnections::new(INITIAL_RTO, MAX_RETRANSMITS);
+    Server {
+        write_buf: [0u8; ETHERNET_MTU],
+        tcp_connections: TcpConnections::new(INITIAL_RTO, MAX_RETRANSMITS),
+        device,
+        shutdown_check,
+        shutdown_grace_period,
+        shutdown_deadline: None,
+    }
+    .run()
+}
 
-    let mut read_buf = [0u8; ETHERNET_MTU];
-    let mut write_buf = [0u8; ETHERNET_MTU];
+struct Server<'a, D, S> {
+    write_buf: [u8; ETHERNET_MTU],
+    tcp_connections: TcpConnections,
+    device: &'a mut D,
+    shutdown_check: S,
+    shutdown_grace_period: Duration,
 
-    // Deadline that bounds how long to wait for established connections to finish closing before
-    // exiting unconditionally. Set once a shutdown signal starts active close.
-    let mut shutdown_deadline = None;
+    /// Deadline that bounds how long to wait for established connections to finish closing before
+    /// exiting unconditionally. Set once a shutdown signal starts active close.
+    shutdown_deadline: Option<Instant>,
+}
 
-    divider();
+impl<D, S> Server<'_, D, S>
+where
+    D: Read + Write + AsFd,
+    S: Fn() -> bool,
+{
+    fn run(&mut self) -> Result {
+        let mut read_buf = [0u8; ETHERNET_MTU];
 
-    loop {
-        // Block with a `None` timeout if there's no shutdown deadline and no segment pending
-        // retransmission
-        let timeout = [shutdown_deadline, tcp_connections.next_retransmit_deadline()]
-            .into_iter()
-            .flatten()
-            .min()
-            .map(|deadline| deadline.saturating_duration_since(Instant::now()));
+        divider();
 
-        match sys::poll::readable(&device, timeout) {
-            // If `poll()` was interrupted and returned `EINTR`, a shutdown signal has been received
-            Err(e) if e.kind() == io::ErrorKind::Interrupted && shutdown_check() => {
-                if handle_shutdown_interrupt(
-                    device,
-                    &mut write_buf,
-                    &mut tcp_connections,
-                    shutdown_grace_period,
-                    &mut shutdown_deadline,
-                )? {
+        loop {
+            // Block with a `None` timeout if there's no shutdown deadline and no segment pending
+            // retransmission
+            let timeout = [self.shutdown_deadline, self.tcp_connections.next_retransmit_deadline()]
+                .into_iter()
+                .flatten()
+                .min()
+                .map(|deadline| deadline.saturating_duration_since(Instant::now()));
+
+            match sys::poll::readable(&self.device, timeout) {
+                // If `poll()` was interrupted and returned `EINTR`, a shutdown signal has been
+                // received
+                Err(e) if e.kind() == io::ErrorKind::Interrupted && (self.shutdown_check)() => {
+                    if self.handle_shutdown_interrupt()? {
+                        break Ok(());
+                    }
+                }
+
+                // Interrupted by a signal unrelated to shutdown -> just re-poll
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+
+                Err(e) => break Err(e.into()),
+
+                Ok(false)
+                    if self
+                        .shutdown_deadline
+                        .is_some_and(|deadline| deadline <= Instant::now()) =>
+                {
+                    println!(
+                        "Grace period elapsed with {} remaining connection(s), exiting",
+                        self.tcp_connections.len()
+                    );
+
                     break Ok(());
                 }
-            }
 
-            // Interrupted by a signal unrelated to shutdown -> just re-poll
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-
-            Err(e) => break Err(e.into()),
-
-            Ok(false) if shutdown_deadline.is_some_and(|deadline| Instant::now() >= deadline) => {
-                println!(
-                    "Grace period elapsed with {} remaining connection(s), exiting",
-                    tcp_connections.len()
-                );
-
-                break Ok(());
-            }
-
-            // A retransmit deadline elapsed -> retransmit all expired segments
-            Ok(false) => {
-                for reply_handler in tcp_connections.make_retransmissions() {
-                    println!("\n ==== Packet sent (retransmission) ====");
-                    send_packet(device, &mut write_buf, &reply_handler)?;
+                // A retransmit deadline elapsed -> retransmit all expired segments
+                Ok(false) => {
+                    for reply_handler in self.tcp_connections.make_retransmissions() {
+                        println!("\n ==== Packet sent (retransmission) ====");
+                        self.send_packet(&reply_handler)?;
+                    }
                 }
-            }
 
-            Ok(true) => {
-                let n = match device.read(&mut read_buf) {
-                    // If `read()` was interrupted and returned `EINTR`, react to the shutdown
-                    // signal in the same way as for a `poll()` interruption
-                    Err(e) if e.kind() == io::ErrorKind::Interrupted && shutdown_check() => {
-                        if handle_shutdown_interrupt(
-                            device,
-                            &mut write_buf,
-                            &mut tcp_connections,
-                            shutdown_grace_period,
-                            &mut shutdown_deadline,
-                        )? {
-                            break Ok(());
+                // The device became readable within the timeout -> regular read and reply
+                Ok(true) => {
+                    let n = match self.device.read(&mut read_buf) {
+                        // If `read()` was interrupted and returned `EINTR`, react to the shutdown
+                        // signal in the same way as for a `poll()` interruption
+                        Err(e)
+                            if e.kind() == io::ErrorKind::Interrupted
+                                && (self.shutdown_check)() =>
+                        {
+                            if self.handle_shutdown_interrupt()? {
+                                break Ok(());
+                            }
+
+                            continue;
                         }
 
-                        continue;
-                    }
+                        // Interrupted by a signal unrelated to shutdown -> just re-poll
+                        Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                        Err(e) => break Err(e.into()),
+                        Ok(n) => n,
+                    };
 
-                    // Interrupted by a signal unrelated to shutdown -> just re-poll
-                    Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                    Err(e) => break Err(e.into()),
-                    Ok(n) => n,
-                };
+                    match Ipv4Header::parse(read_buf.try_get(..n)?) {
+                        Err(e) => eprintln!("Skipping packet: {e}"),
 
-                match Ipv4Header::parse(read_buf.try_get(..n)?) {
-                    Err(e) => eprintln!("Skipping packet: {e}"),
+                        Ok((ipv4_header, ipv4_payload)) => {
+                            println!(" ==== Packet received ====");
+                            println!("{ipv4_header}");
 
-                    Ok((ipv4_header, ipv4_payload)) => {
-                        println!(" ==== Packet received ====");
-                        println!("{ipv4_header}");
+                            match ProtocolHandler::parse(
+                                ipv4_payload,
+                                ipv4_header.protocol,
+                                ipv4_header.ip_pair,
+                            ) {
+                                Err(e) => eprintln!("Skipping packet: {e}"),
 
-                        match ProtocolHandler::parse(
-                            ipv4_payload,
-                            ipv4_header.protocol,
-                            ipv4_header.ip_pair,
-                        ) {
-                            Err(e) => eprintln!("Skipping packet: {e}"),
+                                Ok(handler) => {
+                                    println!("{handler}");
+                                    println!("\n ==== Packet sent ====");
 
-                            Ok(handler) => {
-                                println!("{handler}");
-                                println!("\n ==== Packet sent ====");
-
-                                match handler.create_reply(&mut tcp_connections)? {
-                                    None => println!("<no reply>"),
-
-                                    Some(reply_handler) => {
-                                        send_packet(device, &mut write_buf, &reply_handler)?;
+                                    match handler.create_reply(&mut self.tcp_connections)? {
+                                        None => println!("<no reply>"),
+                                        Some(reply_handler) => self.send_packet(&reply_handler)?,
                                     }
                                 }
                             }
                         }
                     }
-                }
 
-                divider();
+                    divider();
 
-                if shutdown_deadline.is_some() && !tcp_connections.closing_in_progress() {
-                    println!("All connections closed within grace period, exiting");
-                    break Ok(());
+                    if self.shutdown_deadline.is_some()
+                        && !self.tcp_connections.closing_in_progress()
+                    {
+                        println!("All connections closed within grace period, exiting");
+                        break Ok(());
+                    }
                 }
             }
         }
     }
-}
 
-/// Reacts to an `EINTR` caused by the shutdown signal. If not already draining (i.e. this is the
-/// first time the signal has been received), begins active close and sets `shutdown_deadline`. If
-/// draining has already started, prints the time left. Returns whether to proceed to shutdown
-/// immediately.
-fn handle_shutdown_interrupt(
-    device: &mut impl Write,
-    write_buf: &mut [u8; ETHERNET_MTU],
-    tcp_connections: &mut TcpConnections,
-    shutdown_grace_period: Duration,
-    shutdown_deadline: &mut Option<Instant>,
-) -> Result<bool> {
-    Ok(if let Some(deadline) = *shutdown_deadline {
-        // Already draining -> just print the time left
-        println!(
-            "\nDraining connections, {}ms left",
-            deadline
-                .saturating_duration_since(Instant::now())
-                .as_millis()
-        );
+    /// Reacts to an `EINTR` caused by the shutdown signal. If not already draining (i.e. this is
+    /// the first time the signal has been received), begins active close and sets the shutdown
+    /// deadline. If draining has already started, prints the time left. Returns whether to proceed
+    /// to shutdown immediately.
+    fn handle_shutdown_interrupt(&mut self) -> Result<bool> {
+        Ok(if let Some(deadline) = self.shutdown_deadline {
+            // Already draining -> just print the time left
+            println!(
+                "\nDraining connections, {}ms left",
+                deadline
+                    .saturating_duration_since(Instant::now())
+                    .as_millis()
+            );
 
-        false
-    } else if let Some(deadline) =
-        start_active_close(device, write_buf, tcp_connections, shutdown_grace_period)?
-    {
-        // Draining is starting now -> set the deadline
-        *shutdown_deadline = Some(deadline);
-        false
-    } else {
-        true // Nothing to wait for -> shut down
-    })
-}
-
-/// Sends FIN-ACK to all established connections, initiating active close.
-///
-/// Returns the shutdown deadline to wait until, or `Ok(None)` if there were no established
-/// connections to close (nothing to wait for).
-fn start_active_close(
-    device: &mut impl Write,
-    write_buf: &mut [u8; ETHERNET_MTU],
-    tcp_connections: &mut TcpConnections,
-    shutdown_grace_period: Duration,
-) -> Result<Option<Instant>> {
-    println!("\nShutdown signal received, closing established connections...");
-
-    for reply_handler in tcp_connections.close_established() {
-        println!("\n ==== Packet sent ====");
-        send_packet(device, write_buf, &reply_handler)?;
-    }
-
-    divider();
-
-    if !tcp_connections.closing_in_progress() {
-        println!("No established connections, exiting");
-        return Ok(None);
-    }
-
-    Instant::now()
-        .checked_add(shutdown_grace_period)
-        .ok_or_else(|| {
-            format!(
-                "Overflowed `Instant` adding {} seconds to now",
-                shutdown_grace_period.as_secs()
-            )
+            false
+        } else if let Some(deadline) = self.start_active_close()? {
+            // Draining is starting now -> set the deadline
+            self.shutdown_deadline = Some(deadline);
+            false
+        } else {
+            true // Nothing to wait for -> shut down
         })
-        .map(Some)
-        .map_err(Into::into)
-}
+    }
 
-/// Writes `handler`'s protocol-specific header and payload into `write_buf`, prefixed with an IPv4
-/// header, then writes the resulting packet to `device` and prints its string representation to
-/// stdout.
-fn send_packet(
-    device: &mut impl Write,
-    write_buf: &mut [u8; ETHERNET_MTU],
-    handler: &impl Encode,
-) -> Result {
-    let proto_len = handler.write_into(&mut write_buf[Ipv4Header::REPLY_HDR_LEN..])?;
+    /// Sends FIN-ACK to all established connections, initiating active close. Returns the shutdown
+    /// deadline to wait until, or `Ok(None)` if there were no established connections to close
+    /// (nothing to wait for).
+    fn start_active_close(&mut self) -> Result<Option<Instant>> {
+        println!("\nShutdown signal received, closing established connections...");
 
-    let ipv4_header = Ipv4Header::try_new(handler.proto(), handler.get_ip_pair(), proto_len)?;
-    ipv4_header.write_into(write_buf);
+        for reply_handler in self.tcp_connections.close_established() {
+            println!("\n ==== Packet sent ====");
+            self.send_packet(&reply_handler)?;
+        }
 
-    device.write_all(write_buf.try_get(..ipv4_header.total_len.into())?)?;
+        divider();
 
-    println!("{ipv4_header}");
-    println!("{handler}");
+        if !self.tcp_connections.closing_in_progress() {
+            println!("No established connections, exiting");
+            return Ok(None);
+        }
 
-    Ok(())
+        Instant::now()
+            .checked_add(self.shutdown_grace_period)
+            .ok_or_else(|| {
+                format!(
+                    "Overflowed `Instant` adding {} seconds to now",
+                    self.shutdown_grace_period.as_secs()
+                )
+            })
+            .map(Some)
+            .map_err(Into::into)
+    }
+
+    /// Writes `handler`'s protocol-specific header and payload into the write buffer, prefixed with
+    /// an IPv4 header, then writes the resulting packet to `device` and prints its string
+    /// representation to stdout.
+    fn send_packet(&mut self, handler: &impl Encode) -> Result {
+        let proto_len = handler.write_into(&mut self.write_buf[Ipv4Header::REPLY_HDR_LEN..])?;
+
+        let ipv4_header = Ipv4Header::try_new(handler.proto(), handler.get_ip_pair(), proto_len)?;
+        ipv4_header.write_into(&mut self.write_buf);
+
+        self.device
+            .write_all(self.write_buf.try_get(..ipv4_header.total_len.into())?)?;
+
+        println!("{ipv4_header}");
+        println!("{handler}");
+
+        Ok(())
+    }
 }
