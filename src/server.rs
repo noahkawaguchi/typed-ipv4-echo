@@ -269,4 +269,9 @@ mod tests {
     /// deadline (real time always advances between the two `Instant::now()` calls), allowing tests
     /// to force the "grace period elapsed" exit deterministically without sleeping.
     const IMMEDIATE_GRACE_PERIOD: Duration = Duration::ZERO;
+
+    /// A grace period of one year, more than long enough that it cannot plausibly elapse between
+    /// two nearby `Instant::now()` calls. Deliberately not `Duration::MAX` because adding that to
+    /// `Instant::now()` overflows and is itself a different error case.
+    const ONE_YEAR_GRACE_PERIOD: Duration = Duration::from_hours(24 * 365);
 }

@@ -10,7 +10,7 @@ use {
 pub struct MockDevice {
     reads: VecDeque<io::Result<Vec<u8>>>,
     writes: Vec<Vec<u8>>,
-    write_error: Option<io::ErrorKind>,
+    write_error: Option<String>,
 
     /// Backing fd only to satisfy `AsFd`. `poll_readable` is always injected in tests, so this fd
     /// is never actually polled or read from the OS.
@@ -28,9 +28,9 @@ impl MockDevice {
         })
     }
 
-    /// Makes every subsequent `write()` call fail with `kind` instead of succeeding.
-    pub fn fail_writes(mut self, kind: io::ErrorKind) -> Self {
-        self.write_error = Some(kind);
+    /// Makes every subsequent `write()` call fail with `io::Error::other(message)`.
+    pub fn fail_writes(mut self, message: impl Into<String>) -> Self {
+        self.write_error = Some(message.into());
         self
     }
 
@@ -54,8 +54,8 @@ impl Read for MockDevice {
 
 impl Write for MockDevice {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if let Some(kind) = self.write_error {
-            return Err(kind.into());
+        if let Some(message) = &self.write_error {
+            return Err(io::Error::other(message.clone()));
         }
 
         self.writes.push(buf.to_vec());
