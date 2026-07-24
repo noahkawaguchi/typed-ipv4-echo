@@ -162,9 +162,14 @@ where
                                     println!("{handler}");
                                     println!("\n ==== Packet sent ====");
 
-                                    match handler.create_reply(&mut self.tcp_connections)? {
-                                        None => println!("<no reply>"),
-                                        Some(reply_handler) => self.send_packet(&reply_handler)?,
+                                    match handler.create_reply(&mut self.tcp_connections) {
+                                        Err(e) => eprintln!("Error creating reply: {e}"),
+
+                                        Ok(None) => println!("<no reply>"),
+
+                                        Ok(Some(reply_handler)) => {
+                                            self.send_packet(&reply_handler)?;
+                                        }
                                     }
                                 }
                             }
