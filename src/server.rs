@@ -176,13 +176,12 @@ where
         }
     }
 
-    /// Reacts to an `EINTR` caused by the shutdown signal. If not already draining (i.e. this is
-    /// the first time the signal has been received), begins active close and sets the shutdown
-    /// deadline. If draining has already started, prints the time left. Returns whether to proceed
-    /// to shutdown immediately.
+    /// Reacts to an `EINTR` caused by the shutdown signal. If already draining, prints the time
+    /// left. If not already draining, begins active close, sending a FIN-ACK to all established
+    /// connections and setting the shutdown deadline. Returns whether to proceed to shutdown
+    /// immediately.
     fn handle_shutdown_interrupt(&mut self) -> Result<bool> {
         Ok(if let Some(deadline) = self.shutdown_deadline {
-            // Already draining -> just print the time left
             println!(
                 "\nDraining connections, {}ms left",
                 deadline
@@ -191,43 +190,34 @@ where
             );
 
             false
-        } else if let Some(deadline) = self.start_active_close()? {
-            // Draining is starting now -> set the deadline
-            self.shutdown_deadline = Some(deadline);
-            false
         } else {
-            true // Nothing to wait for -> shut down
+            println!("\nShutdown signal received, closing established connections...");
+
+            for reply_handler in self.tcp_connections.close_established() {
+                println!("\n ==== Packet sent ====");
+                self.send_packet(&reply_handler)?;
+            }
+
+            divider();
+
+            if self.tcp_connections.closing_in_progress() {
+                self.shutdown_deadline = Some(
+                    Instant::now()
+                        .checked_add(self.shutdown_grace_period)
+                        .ok_or_else(|| {
+                            format!(
+                                "Overflowed `Instant` adding {} seconds to now",
+                                self.shutdown_grace_period.as_secs()
+                            )
+                        })?,
+                );
+
+                false
+            } else {
+                println!("No established connections, exiting");
+                true
+            }
         })
-    }
-
-    /// Sends FIN-ACK to all established connections, initiating active close. Returns the shutdown
-    /// deadline to wait until, or `Ok(None)` if there were no established connections to close
-    /// (nothing to wait for).
-    fn start_active_close(&mut self) -> Result<Option<Instant>> {
-        println!("\nShutdown signal received, closing established connections...");
-
-        for reply_handler in self.tcp_connections.close_established() {
-            println!("\n ==== Packet sent ====");
-            self.send_packet(&reply_handler)?;
-        }
-
-        divider();
-
-        if !self.tcp_connections.closing_in_progress() {
-            println!("No established connections, exiting");
-            return Ok(None);
-        }
-
-        Instant::now()
-            .checked_add(self.shutdown_grace_period)
-            .ok_or_else(|| {
-                format!(
-                    "Overflowed `Instant` adding {} seconds to now",
-                    self.shutdown_grace_period.as_secs()
-                )
-            })
-            .map(Some)
-            .map_err(Into::into)
     }
 
     /// Writes `handler`'s protocol-specific header and payload into the write buffer, prefixed with
