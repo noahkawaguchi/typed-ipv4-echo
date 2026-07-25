@@ -279,4 +279,25 @@ mod tests {
     /// two nearby `Instant::now()` calls. Deliberately not `Duration::MAX` because adding that to
     /// `Instant::now()` overflows and is itself a different error case.
     const ONE_YEAR_GRACE_PERIOD: Duration = Duration::from_hours(24 * 365);
+
+    /// Builds and runs a test server, bypassing regular construction so tests can seed
+    /// `tcp_connections` with pre-established connections.
+    fn run_test_server(
+        tcp_connections: TcpConnections,
+        device: &mut MockDevice,
+        poll_readable: impl Fn(&MockDevice, Option<Duration>) -> io::Result<bool>,
+        shutdown_check: impl Fn() -> bool,
+        shutdown_grace_period: Duration,
+    ) -> Result {
+        Server {
+            write_buf: [0u8; ETHERNET_MTU],
+            tcp_connections,
+            device,
+            poll_readable,
+            shutdown_check,
+            shutdown_grace_period,
+            shutdown_deadline: None,
+        }
+        .run()
+    }
 }
