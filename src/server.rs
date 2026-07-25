@@ -186,47 +186,6 @@ where
         }
     }
 
-    /// Computes how long to block when polling, which is the time remaining until the earlier of
-    /// the shutdown deadline and the next pending retransmission, or if nether is set, returns
-    /// `None` to block indefinitely.
-    fn poll_timeout(&self, now: Instant) -> Option<Duration> {
-        [self.shutdown_deadline, self.tcp_connections.next_retransmit_deadline()]
-            .into_iter()
-            .flatten()
-            .min()
-            .map(|deadline| deadline.saturating_duration_since(now))
-    }
-
-    /// Returns whether `now` has reached or passed the shutdown deadline if there is one, or
-    /// `false` if there is no deadline.
-    fn grace_period_elapsed(&self, now: Instant) -> bool {
-        self.shutdown_deadline
-            .is_some_and(|deadline| deadline <= now)
-    }
-
-    /// Returns whether a shutdown is in progress and there are no connections currently mid-close.
-    fn shutting_down_and_no_connections_closing(&self) -> bool {
-        self.shutdown_deadline.is_some() && !self.tcp_connections.closing_in_progress()
-    }
-
-    /// Decides how to react to a shutdown signal. If not already draining, initiates active close.
-    fn decide_shutdown(&mut self, now: Instant) -> Result<ShutdownDecision, String> {
-        Ok(if let Some(deadline) = self.shutdown_deadline {
-            ShutdownDecision::AlreadyDraining { time_left: deadline.saturating_duration_since(now) }
-        } else {
-            let to_send = self.tcp_connections.close_established();
-
-            if self.tcp_connections.closing_in_progress() {
-                ShutdownDecision::BeganDraining {
-                    to_send,
-                    deadline: now.try_add(self.shutdown_grace_period)?,
-                }
-            } else {
-                ShutdownDecision::NoConnections
-            }
-        })
-    }
-
     /// Reacts to an `EINTR` caused by the shutdown signal, performing I/O resulting from the
     /// shutdown decision as necessary. Returns whether to proceed to shutdown immediately.
     fn handle_shutdown_interrupt(&mut self, now: Instant) -> Result<bool> {
@@ -272,6 +231,49 @@ where
         println!("{handler}");
 
         Ok(())
+    }
+}
+
+impl<D, P, S> Server<'_, D, P, S> {
+    /// Computes how long to block when polling, which is the time remaining until the earlier of
+    /// the shutdown deadline and the next pending retransmission, or if nether is set, returns
+    /// `None` to block indefinitely.
+    fn poll_timeout(&self, now: Instant) -> Option<Duration> {
+        [self.shutdown_deadline, self.tcp_connections.next_retransmit_deadline()]
+            .into_iter()
+            .flatten()
+            .min()
+            .map(|deadline| deadline.saturating_duration_since(now))
+    }
+
+    /// Returns whether `now` has reached or passed the shutdown deadline if there is one, or
+    /// `false` if there is no deadline.
+    fn grace_period_elapsed(&self, now: Instant) -> bool {
+        self.shutdown_deadline
+            .is_some_and(|deadline| deadline <= now)
+    }
+
+    /// Returns whether a shutdown is in progress and there are no connections currently mid-close.
+    fn shutting_down_and_no_connections_closing(&self) -> bool {
+        self.shutdown_deadline.is_some() && !self.tcp_connections.closing_in_progress()
+    }
+
+    /// Decides how to react to a shutdown signal. If not already draining, initiates active close.
+    fn decide_shutdown(&mut self, now: Instant) -> Result<ShutdownDecision, String> {
+        Ok(if let Some(deadline) = self.shutdown_deadline {
+            ShutdownDecision::AlreadyDraining { time_left: deadline.saturating_duration_since(now) }
+        } else {
+            let to_send = self.tcp_connections.close_established();
+
+            if self.tcp_connections.closing_in_progress() {
+                ShutdownDecision::BeganDraining {
+                    to_send,
+                    deadline: now.try_add(self.shutdown_grace_period)?,
+                }
+            } else {
+                ShutdownDecision::NoConnections
+            }
+        })
     }
 }
 
