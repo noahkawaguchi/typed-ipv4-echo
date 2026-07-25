@@ -1,6 +1,59 @@
 use super::*;
 
 #[test]
+fn ipv4_parse_error_is_skipped() {
+    assert_matches!(
+        decision_test_server().parse_incoming(&[0u8; 5]),
+        Err(e) if e.contains("Skipping packet") && e.contains("IPv4")
+    );
+}
+
+#[test]
+fn ipv4_ok_but_tcp_parse_error_is_skipped() -> Result {
+    // Reads a valid IPv4 header claiming a 4-byte TCP payload (far too short), so IPv4 parsing
+    // succeeds while TCP parsing fails
+
+    let fixture = TcpHandler::test_syn_requesting_connection();
+    let mut buf = [0u8; ETHERNET_MTU];
+
+    let ipv4_header = Ipv4Header::try_new(fixture.proto(), fixture.get_ip_pair(), 4)?;
+    ipv4_header.write_into(&mut buf);
+
+    assert_matches!(
+        decision_test_server().parse_incoming(buf.try_get(..ipv4_header.total_len.into())?),
+        Err(e) if e.contains("Skipping packet") && e.contains("TCP")
+    );
+
+    Ok(())
+}
+
+#[test]
+fn syn_parses_and_produces_a_reply() -> Result {
+    let bytes = encode_mock_packet(&TcpHandler::test_syn_requesting_connection())?;
+
+    assert_matches!(
+        Server { tcp_connections: TcpConnections::default(), ..decision_test_server() }
+            .parse_incoming(&bytes),
+        Ok((_, ProtocolHandler::Tcp(_), Some(ProtocolHandler::Tcp(_))))
+    );
+
+    Ok(())
+}
+
+#[test]
+fn handshake_ack_parses_and_produces_no_reply() -> Result {
+    let bytes = encode_mock_packet(&TcpHandler::test_ack_completing_handshake())?;
+
+    assert_matches!(
+        Server { tcp_connections: TcpConnections::with_syn_rcv(), ..decision_test_server() }
+            .parse_incoming(&bytes),
+        Ok((_, ProtocolHandler::Tcp(_), None))
+    );
+
+    Ok(())
+}
+
+#[test]
 fn malformed_packet_is_skipped_without_propagating_or_writing() -> Result {
     // 5 bytes is too short for even a minimal (20-byte) IPv4 header, so parsing fails and the
     // packet should just be logged and skipped. The second poll call is a shutdown signal, and
