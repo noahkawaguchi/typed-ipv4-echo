@@ -1,16 +1,16 @@
 use std::{any::type_name, fmt, slice::SliceIndex};
 
-pub trait TryAdd: Sized {
+pub trait TryAdd<T>: Sized {
     /// Attempts to add `self + rhs`, returning `Err` if overflow occurred.
-    fn try_add(self, rhs: Self) -> Result<Self, String>;
+    fn try_add(self, rhs: T) -> Result<Self, String>;
 }
 
-/// Generates `TryAdd` implementations for all types passed as comma-separated arguments. Limited to
-/// primitive integer types.
-macro_rules! impl_try_add {
+/// Generates `TryAdd<Self>` implementations for all types passed as comma-separated arguments.
+/// Limited to primitive integer types.
+macro_rules! impl_try_add_self {
     ($($t:ty),+ $(,)?) => {
         $(
-            impl TryAdd for $t {
+            impl TryAdd<Self> for $t {
                 fn try_add(self, rhs: Self) -> Result<Self, String> {
                     self.checked_add(rhs).ok_or_else(|| {
                         format!("Overflowed `{}` adding {self} and {rhs}", stringify!($t))
@@ -21,7 +21,7 @@ macro_rules! impl_try_add {
     };
 }
 
-impl_try_add!(usize, u16);
+impl_try_add_self!(usize, u16);
 
 pub trait TryGet {
     /// Returns a reference to the element or subslice at `index`, or `Err` if out of bounds.
