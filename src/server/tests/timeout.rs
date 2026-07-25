@@ -7,13 +7,14 @@ fn neither_deadline_gives_no_timeout() {
 
 #[test]
 fn shutdown_deadline_alone_gives_its_duration() -> Result {
+    const GRACE_PERIOD: Duration = Duration::from_secs(10);
+
     let now = Instant::now();
-    let duration = Duration::from_secs(10);
-    let deadline = now.checked_add(duration).ok_or("overflow")?;
 
     assert_eq!(
-        Server { shutdown_deadline: Some(deadline), ..decision_test_server() }.poll_timeout(now),
-        Some(duration)
+        Server { shutdown_deadline: Some(now.try_add(GRACE_PERIOD)?), ..decision_test_server() }
+            .poll_timeout(now),
+        Some(GRACE_PERIOD)
     );
 
     Ok(())
@@ -37,16 +38,15 @@ fn pending_retransmission_alone_gives_some_timeout() {
 #[test]
 fn earlier_retransmit_deadline_taken_over_later_shutdown_deadline() -> Result {
     let now = Instant::now();
-    let in_30s = now.checked_add(Duration::from_secs(30)).ok_or("overflow")?;
 
     assert_matches!(
         Server {
             tcp_connections: TcpConnections::new(Duration::from_millis(250), 5).with_syn_rcv(),
-            shutdown_deadline: Some(in_30s),
+            shutdown_deadline: Some(now.try_add(Duration::from_secs(30))?),
             ..decision_test_server()
         }
         .poll_timeout(now),
-        Some(d) if d < Duration::from_secs(1),
+        Some(d) if d > Duration::from_millis(150) && d < Duration::from_millis(350),
         "The near-term retransmit deadline should win the `min`, not the far future shutdown \
         deadline"
     );
@@ -59,12 +59,11 @@ fn earlier_shutdown_deadline_taken_over_later_retransmit_deadline() -> Result {
     const GRACE_PERIOD: Duration = Duration::from_millis(250);
 
     let now = Instant::now();
-    let in_250ms = now.checked_add(GRACE_PERIOD).ok_or("overflow")?;
 
     assert_eq!(
         Server {
             tcp_connections: TcpConnections::new(Duration::from_secs(30), 5).with_syn_rcv(),
-            shutdown_deadline: Some(in_250ms),
+            shutdown_deadline: Some(now.try_add(GRACE_PERIOD)?),
             ..decision_test_server()
         }
         .poll_timeout(now),
@@ -77,12 +76,15 @@ fn earlier_shutdown_deadline_taken_over_later_retransmit_deadline() -> Result {
 }
 
 #[test]
-fn passed_deadline_saturates_to_zero() -> Result {
+fn past_deadline_saturates_to_zero() -> Result {
     let now = Instant::now();
-    let past = now.checked_sub(Duration::from_secs(5)).ok_or("underflow")?;
 
     assert_eq!(
-        Server { shutdown_deadline: Some(past), ..decision_test_server() }.poll_timeout(now),
+        Server {
+            shutdown_deadline: Some(now.checked_sub(Duration::from_secs(5)).ok_or("underflow")?),
+            ..decision_test_server()
+        }
+        .poll_timeout(now),
         Some(Duration::ZERO)
     );
 

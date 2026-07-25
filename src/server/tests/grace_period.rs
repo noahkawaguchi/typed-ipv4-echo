@@ -8,11 +8,13 @@ fn grace_period_not_elapsed_with_no_deadline() {
 #[test]
 fn grace_period_not_elapsed_before_deadline() -> Result {
     let now = Instant::now();
-    let deadline = now.checked_add(Duration::from_secs(10)).ok_or("overflow")?;
 
     assert!(
-        !Server { shutdown_deadline: Some(deadline), ..decision_test_server() }
-            .grace_period_elapsed(now)
+        !Server {
+            shutdown_deadline: Some(now.try_add(Duration::from_secs(10))?),
+            ..decision_test_server()
+        }
+        .grace_period_elapsed(now)
     );
 
     Ok(())
@@ -21,13 +23,16 @@ fn grace_period_not_elapsed_before_deadline() -> Result {
 #[test]
 fn grace_period_elapsed_past_deadline() -> Result {
     let now = Instant::now();
-    let deadline = now
-        .checked_sub(Duration::from_secs(10))
-        .ok_or("underflow")?;
 
     assert!(
-        Server { shutdown_deadline: Some(deadline), ..decision_test_server() }
-            .grace_period_elapsed(now)
+        Server {
+            shutdown_deadline: Some(
+                now.checked_sub(Duration::from_secs(10))
+                    .ok_or("underflow")?
+            ),
+            ..decision_test_server()
+        }
+        .grace_period_elapsed(now)
     );
 
     Ok(())

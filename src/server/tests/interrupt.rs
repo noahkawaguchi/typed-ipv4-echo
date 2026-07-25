@@ -2,13 +2,14 @@ use super::*;
 
 #[test]
 fn already_draining_reports_time_left() -> Result {
+    const GRACE_PERIOD: Duration = Duration::from_secs(10);
+
     let now = Instant::now();
-    let deadline = now.checked_add(Duration::from_secs(10)).ok_or("overflow")?;
 
     assert_eq!(
-        Server { shutdown_deadline: Some(deadline), ..decision_test_server() }
+        Server { shutdown_deadline: Some(now.try_add(GRACE_PERIOD)?), ..decision_test_server() }
             .decide_shutdown(now)?,
-        ShutdownDecision::AlreadyDraining { time_left: Duration::from_secs(10) }
+        ShutdownDecision::AlreadyDraining { time_left: GRACE_PERIOD }
     );
 
     Ok(())
@@ -16,18 +17,19 @@ fn already_draining_reports_time_left() -> Result {
 
 #[test]
 fn established_connection_begins_draining_with_fin_ack_and_deadline() -> Result {
+    const GRACE_PERIOD: Duration = Duration::from_secs(10);
+
     let now = Instant::now();
-    let expected_deadline = now.checked_add(Duration::from_secs(10)).ok_or("overflow")?;
 
     assert_matches!(
         Server {
             tcp_connections: TcpConnections::default().after_handshake(),
-            shutdown_grace_period: Duration::from_secs(10),
+            shutdown_grace_period: GRACE_PERIOD,
             ..decision_test_server()
         }
         .decide_shutdown(now)?,
         ShutdownDecision::BeganDraining { to_send, deadline }
-            if to_send.len() == 1 && deadline == expected_deadline
+            if to_send.len() == 1 && deadline == now.try_add(GRACE_PERIOD)?
     );
 
     Ok(())
