@@ -250,9 +250,7 @@ where
             }
 
             ShutdownDecision::NoConnections => {
-                println!("\nShutdown signal received, closing established connections...");
-                divider();
-                println!("No established connections, exiting");
+                println!("\nShutdown signal received with no established connections, exiting");
                 true
             }
         })
