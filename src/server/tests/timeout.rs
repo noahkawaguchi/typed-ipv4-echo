@@ -26,8 +26,11 @@ fn pending_retransmission_alone_gives_some_timeout() {
     // a near-zero bounded timeout.
 
     assert_matches!(
-        Server { tcp_connections: TcpConnections::with_syn_rcv(), ..decision_test_server() }
-            .poll_timeout(Instant::now()),
+        Server {
+            tcp_connections: TcpConnections::default().with_syn_rcv(),
+            ..decision_test_server()
+        }
+        .poll_timeout(Instant::now()),
         Some(_)
     );
 }
@@ -39,7 +42,7 @@ fn earlier_retransmit_deadline_taken_over_later_shutdown_deadline() -> Result {
 
     assert_matches!(
         Server {
-            tcp_connections: TcpConnections::with_syn_rcv(),
+            tcp_connections: TcpConnections::default().with_syn_rcv(),
             shutdown_deadline: Some(far_future),
             ..decision_test_server()
         }
@@ -79,7 +82,7 @@ fn poll_timeout_reflects_shutdown_deadline_across_a_real_run() -> Result {
     let mut device = MockDevice::new([])?;
 
     run_test_server(
-        TcpConnections::after_handshake(),
+        TcpConnections::default().after_handshake(),
         &mut device,
         |_, timeout| {
             observed_timeouts

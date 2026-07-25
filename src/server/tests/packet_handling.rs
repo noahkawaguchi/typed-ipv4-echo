@@ -45,8 +45,11 @@ fn handshake_ack_parses_and_produces_no_reply() -> Result {
     let bytes = encode_mock_packet(&TcpHandler::test_ack_completing_handshake())?;
 
     assert_matches!(
-        Server { tcp_connections: TcpConnections::with_syn_rcv(), ..decision_test_server() }
-            .parse_incoming(&bytes),
+        Server {
+            tcp_connections: TcpConnections::default().with_syn_rcv(),
+            ..decision_test_server()
+        }
+        .parse_incoming(&bytes),
         Ok((_, ProtocolHandler::Tcp(_), None))
     );
 
@@ -112,7 +115,7 @@ fn valid_ack_completing_handshake_produces_no_reply() -> Result {
 
     assert_matches!(
         run_test_server(
-            TcpConnections::with_syn_rcv(),
+            TcpConnections::default().with_syn_rcv(),
             &mut device,
             |_, _| poll.next(),
             || false,

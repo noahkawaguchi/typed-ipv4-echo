@@ -21,7 +21,7 @@ fn established_connection_begins_draining_with_fin_ack_and_deadline() -> Result 
 
     assert_matches!(
         Server {
-            tcp_connections: TcpConnections::after_handshake(),
+            tcp_connections: TcpConnections::default().after_handshake(),
             shutdown_grace_period: Duration::from_secs(10),
             ..decision_test_server()
         }
@@ -48,7 +48,7 @@ fn no_established_connections_reports_no_connections() -> Result {
 fn overflowing_deadline_errors_instead_of_panicking() {
     assert_matches!(
         Server {
-            tcp_connections: TcpConnections::after_handshake(),
+            tcp_connections: TcpConnections::default().after_handshake(),
             shutdown_grace_period: Duration::MAX,
             ..decision_test_server()
         }
@@ -67,7 +67,7 @@ fn first_interrupt_with_established_connection_sends_fin_ack_and_continues() -> 
     let mut device = MockDevice::new([])?;
 
     run_test_server(
-        TcpConnections::after_handshake(),
+        TcpConnections::default().after_handshake(),
         &mut device,
         |_, _| poll.next(),
         || true,

@@ -53,7 +53,7 @@ fn write_failure_while_sending_fin_ack_propagates() -> Result {
 
     assert_matches!(
         run_test_server(
-            TcpConnections::after_handshake(),
+            TcpConnections::default().after_handshake(),
             &mut device,
             |_, _| poll.next(),
             || true,

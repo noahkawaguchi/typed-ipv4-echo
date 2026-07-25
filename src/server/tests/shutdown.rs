@@ -10,7 +10,7 @@ fn no_deadline_no_closing() {
 
 #[test]
 fn no_deadline_some_closing() {
-    let mut tcp_connections = TcpConnections::after_handshake();
+    let mut tcp_connections = TcpConnections::default().after_handshake();
     tcp_connections.close_established();
     let server = Server { tcp_connections, ..decision_test_server() };
 
@@ -21,7 +21,7 @@ fn no_deadline_some_closing() {
 
 #[test]
 fn some_deadline_some_closing() {
-    let mut tcp_connections = TcpConnections::after_handshake();
+    let mut tcp_connections = TcpConnections::default().after_handshake();
     tcp_connections.close_established();
 
     let server = Server {
@@ -62,7 +62,7 @@ fn exits_once_connections_finish_closing() -> Result {
     let mut device = MockDevice::new([Ok(vec![0u8; 5])])?;
 
     run_test_server(
-        TcpConnections::after_handshake(),
+        TcpConnections::default().after_handshake(),
         &mut device,
         |_, _| {
             poll_calls.set(poll_calls.get() + 1);
