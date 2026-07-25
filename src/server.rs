@@ -254,9 +254,9 @@ where
 
 #[cfg(test)]
 mod tests {
+    mod interrupt;
     mod packet_handling;
     mod propagate;
-    mod shutdown;
     mod timeout;
     mod utils;
 
