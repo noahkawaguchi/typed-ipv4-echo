@@ -1,9 +1,89 @@
 use super::*;
 
 #[test]
-fn poll_timeout_reflects_shutdown_deadline() -> Result {
+fn neither_deadline_gives_no_timeout() -> Result {
+    let mut device = MockDevice::new([])?;
+    let server = decision_test_server(&mut device);
+    assert_eq!(server.poll_timeout(Instant::now()), None);
+    Ok(())
+}
+
+#[test]
+fn shutdown_deadline_alone_gives_its_duration() -> Result {
+    let mut device = MockDevice::new([])?;
+    let now = Instant::now();
+    let duration = Duration::from_secs(10);
+    let deadline = now.checked_add(duration).ok_or("overflow")?;
+
+    assert_eq!(
+        Server { shutdown_deadline: Some(deadline), ..decision_test_server(&mut device) }
+            .poll_timeout(now),
+        Some(duration)
+    );
+
+    Ok(())
+}
+
+#[test]
+fn pending_retransmission_alone_gives_some_timeout() -> Result {
+    // `with_syn_rcv` has a pending SYN-ACK due for retransmission at approximately its own
+    // construction time, so a `now` taken right after construction should be at or past it, giving
+    // a near-zero bounded timeout.
+
+    let mut device = MockDevice::new([])?;
+    let server = Server {
+        tcp_connections: TcpConnections::with_syn_rcv(),
+        ..decision_test_server(&mut device)
+    };
+
+    assert_matches!(server.poll_timeout(Instant::now()), Some(_));
+
+    Ok(())
+}
+
+#[test]
+fn earlier_retransmit_deadline_taken_over_later_shutdown_deadline() -> Result {
+    let mut device = MockDevice::new([])?;
+    let now = Instant::now();
+    let far_future = now.checked_add(Duration::from_hours(1)).ok_or("overflow")?;
+
+    let server = Server {
+        tcp_connections: TcpConnections::with_syn_rcv(),
+        shutdown_deadline: Some(far_future),
+        ..decision_test_server(&mut device)
+    };
+
+    assert_matches!(
+        server.poll_timeout(now),
+        Some(d) if d < Duration::from_secs(1),
+        "The near-term retransmit deadline should win the `min`, not the far future shutdown \
+        deadline"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn passed_deadline_saturates_to_zero() -> Result {
+    let mut device = MockDevice::new([])?;
+    let now = Instant::now();
+    let past = now.checked_sub(Duration::from_secs(5)).ok_or("underflow")?;
+
+    let server = Server { shutdown_deadline: Some(past), ..decision_test_server(&mut device) };
+
+    assert_eq!(server.poll_timeout(now), Some(Duration::ZERO));
+
+    Ok(())
+}
+
+#[test]
+fn poll_timeout_reflects_shutdown_deadline_across_a_real_run() -> Result {
+    // Showing here that the loop actually uses the computed timeout when polling, and that the
+    // grace period being elapsed actually ends the loop.
+    //
     // Not asserting exact `Duration` values since they come from `Instant::now()`, just that the
-    // timeout is unbounded before any shutdown signal and becomes bounded once draining starts
+    // timeout is unbounded before any shutdown signal and becomes bounded (and, with an immediate
+    // grace period, causes exit) once draining starts.
 
     let observed_timeouts = RefCell::new(Vec::new());
     let poll = MockPoll::new([Err(io::ErrorKind::Interrupted.into()), Ok(false)]);
@@ -28,42 +108,6 @@ fn poll_timeout_reflects_shutdown_deadline() -> Result {
         observed_timeouts.into_inner().as_slice(),
         [None, Some(_)],
         "No timeout before the interrupt, then some timeout once draining begins"
-    );
-
-    Ok(())
-}
-
-#[test]
-fn poll_timeout_reflects_pending_retransmission() -> Result {
-    // `with_syn_rcv` has a pending SYN-ACK segment from construction, with no interrupt or shutdown
-    // deadline happening first, so a bounded timeout on the very first poll call must come from
-    // that segment. Because the connection is in SYN-RECEIVED, there are no connections considered
-    // to be mid-close, so the interrupt on the first poll call causes an immediate exit instead of
-    // draining.
-
-    let observed_timeouts = RefCell::new(Vec::new());
-    let poll = MockPoll::new([Err(io::ErrorKind::Interrupted.into())]);
-    let mut device = MockDevice::new([])?;
-
-    run_test_server(
-        TcpConnections::with_syn_rcv(),
-        &mut device,
-        |_, timeout| {
-            observed_timeouts
-                .try_borrow_mut()
-                .map_err(io::Error::other)?
-                .push(timeout);
-
-            poll.next()
-        },
-        || true,
-        IMMEDIATE_GRACE_PERIOD,
-    )?;
-
-    assert_matches!(
-        observed_timeouts.into_inner().as_slice(),
-        [Some(_)],
-        "There should be a single bounded timeout from the pending SYN-ACK's retransmit deadline"
     );
 
     Ok(())

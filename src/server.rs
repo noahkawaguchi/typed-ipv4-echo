@@ -3,10 +3,10 @@ use {
         ETHERNET_MTU, Result,
         ipv4_header::Ipv4Header,
         protocol::{
-            TcpConnections,
+            TcpConnections, TcpHandler,
             handler::{Encode, ProtocolHandler},
         },
-        try_ops::TryGet as _,
+        try_ops::{TryAdd as _, TryGet as _},
     },
     std::{
         io::{self, Read, Write},
@@ -24,6 +24,21 @@ const INITIAL_RTO: Duration = Duration::from_millis(500);
 const MAX_RETRANSMITS: u8 = 5;
 
 fn divider() { println!("\n{}\n", "=".repeat(60)) }
+
+/// The result of deciding how to react to a shutdown signal.
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
+enum ShutdownDecision {
+    /// A previous interrupt already started draining, and there is `time_left` until the deadline.
+    AlreadyDraining { time_left: Duration },
+
+    /// This was the first interrupt, active close began, and at least one connection is still
+    /// closing.
+    BeganDraining { to_send: Vec<TcpHandler>, deadline: Instant },
+
+    /// This was the first interrupt, and no connection needs to finish closing, so shutdown can
+    /// happen immediately.
+    NoConnections,
+}
 
 /// Reads and writes IPv4 packets to and from `device`, maintaining TCP connection state and echoing
 /// payloads as necessary.
@@ -79,19 +94,11 @@ where
         divider();
 
         loop {
-            // Block with a `None` timeout if there's no shutdown deadline and no segment pending
-            // retransmission
-            let timeout = [self.shutdown_deadline, self.tcp_connections.next_retransmit_deadline()]
-                .into_iter()
-                .flatten()
-                .min()
-                .map(|deadline| deadline.saturating_duration_since(Instant::now()));
-
-            match (self.poll_readable)(self.device, timeout) {
+            match (self.poll_readable)(self.device, self.poll_timeout(Instant::now())) {
                 // If `poll()` was interrupted and returned `EINTR`, check if a shutdown signal has
                 // been received
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => {
-                    if (self.shutdown_check)() && self.handle_shutdown_interrupt()? {
+                    if (self.shutdown_check)() && self.handle_shutdown_interrupt(Instant::now())? {
                         break Ok(());
                     }
                     // Interrupted by a signal unrelated to shutdown -> just re-poll
@@ -99,11 +106,7 @@ where
 
                 Err(e) => break Err(e.into()),
 
-                Ok(false)
-                    if self
-                        .shutdown_deadline
-                        .is_some_and(|deadline| deadline <= Instant::now()) =>
-                {
+                Ok(false) if self.grace_period_elapsed(Instant::now()) => {
                     println!(
                         "Grace period elapsed with {} remaining connection(s), exiting",
                         self.tcp_connections.len()
@@ -126,7 +129,9 @@ where
                         // If `read()` was interrupted and returned `EINTR`, react to the shutdown
                         // signal in the same way as for a `poll()` interruption
                         Err(e) if e.kind() == io::ErrorKind::Interrupted => {
-                            if (self.shutdown_check)() && self.handle_shutdown_interrupt()? {
+                            if (self.shutdown_check)()
+                                && self.handle_shutdown_interrupt(Instant::now())?
+                            {
                                 break Ok(());
                             }
 
@@ -172,9 +177,7 @@ where
 
                     divider();
 
-                    if self.shutdown_deadline.is_some()
-                        && !self.tcp_connections.closing_in_progress()
-                    {
+                    if self.shutting_down_and_no_connections_closing() {
                         println!("All connections closed within grace period, exiting");
                         break Ok(());
                     }
@@ -183,44 +186,72 @@ where
         }
     }
 
-    /// Reacts to an `EINTR` caused by the shutdown signal. If already draining, prints the time
-    /// left. If not already draining, begins active close, sending a FIN-ACK to all established
-    /// connections and setting the shutdown deadline. Returns whether to proceed to shutdown
-    /// immediately.
-    fn handle_shutdown_interrupt(&mut self) -> Result<bool> {
+    /// Computes how long to block when polling, which is the time remaining until the earlier of
+    /// the shutdown deadline and the next pending retransmission, or if nether is set, returns
+    /// `None` to block indefinitely.
+    fn poll_timeout(&self, now: Instant) -> Option<Duration> {
+        [self.shutdown_deadline, self.tcp_connections.next_retransmit_deadline()]
+            .into_iter()
+            .flatten()
+            .min()
+            .map(|deadline| deadline.saturating_duration_since(now))
+    }
+
+    /// Returns whether `now` has reached or passed the shutdown deadline if there is one, or
+    /// `false` if there is no deadline.
+    fn grace_period_elapsed(&self, now: Instant) -> bool {
+        self.shutdown_deadline
+            .is_some_and(|deadline| deadline <= now)
+    }
+
+    /// Returns whether a shutdown is in progress and there are no connections currently mid-close.
+    fn shutting_down_and_no_connections_closing(&self) -> bool {
+        self.shutdown_deadline.is_some() && !self.tcp_connections.closing_in_progress()
+    }
+
+    /// Decides how to react to a shutdown signal. If not already draining, initiates active close.
+    fn decide_shutdown(&mut self, now: Instant) -> Result<ShutdownDecision, String> {
         Ok(if let Some(deadline) = self.shutdown_deadline {
-            println!(
-                "\nDraining connections, {}ms left",
-                deadline
-                    .saturating_duration_since(Instant::now())
-                    .as_millis()
-            );
-
-            false
+            ShutdownDecision::AlreadyDraining { time_left: deadline.saturating_duration_since(now) }
         } else {
-            println!("\nShutdown signal received, closing established connections...");
-
-            for reply_handler in self.tcp_connections.close_established() {
-                println!("\n ==== Packet sent ====");
-                self.send_packet(&reply_handler)?;
-            }
-
-            divider();
+            let to_send = self.tcp_connections.close_established();
 
             if self.tcp_connections.closing_in_progress() {
-                self.shutdown_deadline = Some(
-                    Instant::now()
-                        .checked_add(self.shutdown_grace_period)
-                        .ok_or_else(|| {
-                            format!(
-                                "Overflowed `Instant` adding {} seconds to now",
-                                self.shutdown_grace_period.as_secs()
-                            )
-                        })?,
-                );
-
-                false
+                ShutdownDecision::BeganDraining {
+                    to_send,
+                    deadline: now.try_add(self.shutdown_grace_period)?,
+                }
             } else {
+                ShutdownDecision::NoConnections
+            }
+        })
+    }
+
+    /// Reacts to an `EINTR` caused by the shutdown signal, performing I/O resulting from the
+    /// shutdown decision as necessary. Returns whether to proceed to shutdown immediately.
+    fn handle_shutdown_interrupt(&mut self, now: Instant) -> Result<bool> {
+        Ok(match self.decide_shutdown(now)? {
+            ShutdownDecision::AlreadyDraining { time_left } => {
+                println!("\nDraining connections, {}ms left", time_left.as_millis());
+                false
+            }
+
+            ShutdownDecision::BeganDraining { to_send, deadline } => {
+                println!("\nShutdown signal received, closing established connections...");
+
+                for reply_handler in to_send {
+                    println!("\n ==== Packet sent ====");
+                    self.send_packet(&reply_handler)?;
+                }
+
+                divider();
+                self.shutdown_deadline = Some(deadline);
+                false
+            }
+
+            ShutdownDecision::NoConnections => {
+                println!("\nShutdown signal received, closing established connections...");
+                divider();
                 println!("No established connections, exiting");
                 true
             }
@@ -248,6 +279,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    mod grace_period;
     mod interrupt;
     mod mocks;
     mod packet_handling;
@@ -293,5 +325,25 @@ mod tests {
             shutdown_deadline: None,
         }
         .run()
+    }
+
+    /// A fully-populated `Server` for tests of the decision-only methods (which never call
+    /// `poll_readable` or `shutdown_check`) to partially override using struct update syntax.
+    #[expect(clippy::type_complexity, reason = "One-off test helper")]
+    fn decision_test_server(
+        device: &mut MockDevice,
+    ) -> Server<'_, MockDevice, fn(&MockDevice, Option<Duration>) -> io::Result<bool>, fn() -> bool>
+    {
+        Server {
+            write_buf: [0u8; ETHERNET_MTU],
+            tcp_connections: TcpConnections::default(),
+            device,
+            poll_readable: |_, _| {
+                Err(io::Error::other("`poll_readable` should not be called in decision tests"))
+            },
+            shutdown_check: || false,
+            shutdown_grace_period: ONE_YEAR_GRACE_PERIOD,
+            shutdown_deadline: None,
+        }
     }
 }
