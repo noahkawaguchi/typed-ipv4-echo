@@ -143,33 +143,19 @@ where
                         Ok(n) => n,
                     };
 
-                    match Ipv4Header::parse(read_buf.try_get(..bytes_read)?) {
-                        Err(e) => eprintln!("Skipping packet: {e}"),
+                    match self.parse_incoming(read_buf.try_get(..bytes_read)?) {
+                        Err(e) => eprintln!("{e}"),
 
-                        Ok((ipv4_header, ipv4_payload)) => {
+                        Ok((ipv4_header, handler, reply_handler)) => {
                             println!(" ==== Packet received ====");
-                            println!("{ipv4_header}");
+                            println!("{ipv4_header}\n{handler}");
 
-                            match ProtocolHandler::parse(
-                                ipv4_payload,
-                                ipv4_header.protocol,
-                                ipv4_header.ip_pair,
-                            ) {
-                                Err(e) => eprintln!("Skipping packet: {e}"),
+                            match reply_handler {
+                                None => println!("\n<no reply>"),
 
-                                Ok(handler) => {
-                                    println!("{handler}");
+                                Some(reply) => {
                                     println!("\n ==== Packet sent ====");
-
-                                    match handler.create_reply(&mut self.tcp_connections) {
-                                        Err(e) => eprintln!("Error creating reply: {e}"),
-
-                                        Ok(None) => println!("<no reply>"),
-
-                                        Ok(Some(reply_handler)) => {
-                                            self.send_packet(&reply_handler)?;
-                                        }
-                                    }
+                                    self.send_packet(&reply)?;
                                 }
                             }
                         }
@@ -274,6 +260,27 @@ impl<D, P, S> Server<'_, D, P, S> {
                 ShutdownDecision::NoConnections
             }
         })
+    }
+
+    /// Parses `data` as an IPv4 header and protocol-specific header and payload, returning the
+    /// incoming packet parsed into structs ready to be logged, and optionally a reply if one is
+    /// required.
+    fn parse_incoming<'a>(
+        &mut self,
+        data: &'a [u8],
+    ) -> Result<(Ipv4Header, ProtocolHandler<'a>, Option<ProtocolHandler<'a>>), String> {
+        let (ipv4_header, ipv4_payload) =
+            Ipv4Header::parse(data).map_err(|e| format!("Skipping packet: {e}"))?;
+
+        let handler =
+            ProtocolHandler::parse(ipv4_payload, ipv4_header.protocol, ipv4_header.ip_pair)
+                .map_err(|e| format!("Skipping packet: {e}"))?;
+
+        let reply_handler = handler
+            .create_reply(&mut self.tcp_connections)
+            .map_err(|e| format!("Error creating reply: {e}"))?;
+
+        Ok((ipv4_header, handler, reply_handler))
     }
 }
 
