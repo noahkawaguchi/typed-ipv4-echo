@@ -255,19 +255,19 @@ where
 #[cfg(test)]
 mod tests {
     mod interrupt;
+    mod mocks;
     mod packet_handling;
     mod propagate;
     mod shutdown;
     mod timeout;
-    mod utils;
 
     use {
         super::*,
+        mocks::{MockDevice, MockPoll},
         std::{
             assert_matches,
             cell::{Cell, RefCell},
         },
-        utils::*,
     };
 
     /// A zero grace period, meaning the very next iteration's poll timeout is already past the
