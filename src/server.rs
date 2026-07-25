@@ -124,7 +124,7 @@ where
 
                 // The device became readable within the timeout -> regular read and reply
                 Ok(true) => {
-                    let n = match self.device.read(&mut read_buf) {
+                    let bytes_read = match self.device.read(&mut read_buf) {
                         // If `read()` was interrupted and returned `EINTR`, react to the shutdown
                         // signal in the same way as for a `poll()` interruption
                         Err(e)
@@ -144,7 +144,7 @@ where
                         Ok(n) => n,
                     };
 
-                    match Ipv4Header::parse(read_buf.try_get(..n)?) {
+                    match Ipv4Header::parse(read_buf.try_get(..bytes_read)?) {
                         Err(e) => eprintln!("Skipping packet: {e}"),
 
                         Ok((ipv4_header, ipv4_payload)) => {
