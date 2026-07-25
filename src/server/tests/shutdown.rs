@@ -1,66 +1,51 @@
 use super::*;
 
 #[test]
-fn no_deadline_no_closing() -> Result {
-    let mut device = MockDevice::new([])?;
-    let server = decision_test_server(&mut device);
-
+fn no_deadline_no_closing() {
+    let server = decision_test_server();
     assert!(server.shutdown_deadline.is_none());
     assert!(!server.tcp_connections.closing_in_progress());
     assert!(!server.shutting_down_and_no_connections_closing());
-
-    Ok(())
 }
 
 #[test]
-fn no_deadline_some_closing() -> Result {
-    let mut device = MockDevice::new([])?;
+fn no_deadline_some_closing() {
     let mut tcp_connections = TcpConnections::after_handshake();
     tcp_connections.close_established();
-
-    let server = Server { tcp_connections, ..decision_test_server(&mut device) };
+    let server = Server { tcp_connections, ..decision_test_server() };
 
     assert!(server.shutdown_deadline.is_none());
     assert!(server.tcp_connections.closing_in_progress());
     assert!(!server.shutting_down_and_no_connections_closing());
-
-    Ok(())
 }
 
 #[test]
-fn some_deadline_some_closing() -> Result {
-    let mut device = MockDevice::new([])?;
+fn some_deadline_some_closing() {
     let mut tcp_connections = TcpConnections::after_handshake();
     tcp_connections.close_established();
 
     let server = Server {
         tcp_connections,
         shutdown_deadline: Some(Instant::now()),
-        ..decision_test_server(&mut device)
+        ..decision_test_server()
     };
 
     assert!(server.shutdown_deadline.is_some());
     assert!(server.tcp_connections.closing_in_progress());
     assert!(!server.shutting_down_and_no_connections_closing());
-
-    Ok(())
 }
 
 #[test]
-fn some_deadline_no_closing() -> Result {
-    let mut device = MockDevice::new([])?;
-
+fn some_deadline_no_closing() {
     let server = Server {
         tcp_connections: TcpConnections::default(),
         shutdown_deadline: Some(Instant::now()),
-        ..decision_test_server(&mut device)
+        ..decision_test_server()
     };
 
     assert!(server.shutdown_deadline.is_some());
     assert!(!server.tcp_connections.closing_in_progress());
     assert!(server.shutting_down_and_no_connections_closing());
-
-    Ok(())
 }
 
 #[test]

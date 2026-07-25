@@ -327,21 +327,16 @@ mod tests {
         .run()
     }
 
-    /// A fully-populated `Server` for tests of the decision-only methods (which never call
-    /// `poll_readable` or `shutdown_check`) to partially override using struct update syntax.
-    #[expect(clippy::type_complexity, reason = "One-off test helper")]
-    fn decision_test_server(
-        device: &mut MockDevice,
-    ) -> Server<'_, MockDevice, fn(&MockDevice, Option<Duration>) -> io::Result<bool>, fn() -> bool>
-    {
+    /// Creates a `Server` for tests of the decision-only methods to partially override using struct
+    /// update syntax. Has placeholder `()` for all the generics since those fields are not used.
+    fn decision_test_server() -> Server<'static, (), (), ()> {
         Server {
             write_buf: [0u8; ETHERNET_MTU],
             tcp_connections: TcpConnections::default(),
-            device,
-            poll_readable: |_, _| {
-                Err(io::Error::other("`poll_readable` should not be called in decision tests"))
-            },
-            shutdown_check: || false,
+            // "Memory leak" of zero bytes, so no memory leak (or allocation)
+            device: Box::leak(Box::new(())),
+            poll_readable: (),
+            shutdown_check: (),
             shutdown_grace_period: ONE_YEAR_GRACE_PERIOD,
             shutdown_deadline: None,
         }

@@ -1,23 +1,18 @@
 use super::*;
 
 #[test]
-fn neither_deadline_gives_no_timeout() -> Result {
-    let mut device = MockDevice::new([])?;
-    let server = decision_test_server(&mut device);
-    assert_eq!(server.poll_timeout(Instant::now()), None);
-    Ok(())
+fn neither_deadline_gives_no_timeout() {
+    assert_eq!(decision_test_server().poll_timeout(Instant::now()), None);
 }
 
 #[test]
 fn shutdown_deadline_alone_gives_its_duration() -> Result {
-    let mut device = MockDevice::new([])?;
     let now = Instant::now();
     let duration = Duration::from_secs(10);
     let deadline = now.checked_add(duration).ok_or("overflow")?;
 
     assert_eq!(
-        Server { shutdown_deadline: Some(deadline), ..decision_test_server(&mut device) }
-            .poll_timeout(now),
+        Server { shutdown_deadline: Some(deadline), ..decision_test_server() }.poll_timeout(now),
         Some(duration)
     );
 
@@ -25,36 +20,30 @@ fn shutdown_deadline_alone_gives_its_duration() -> Result {
 }
 
 #[test]
-fn pending_retransmission_alone_gives_some_timeout() -> Result {
+fn pending_retransmission_alone_gives_some_timeout() {
     // `with_syn_rcv` has a pending SYN-ACK due for retransmission at approximately its own
     // construction time, so a `now` taken right after construction should be at or past it, giving
     // a near-zero bounded timeout.
 
-    let mut device = MockDevice::new([])?;
-    let server = Server {
-        tcp_connections: TcpConnections::with_syn_rcv(),
-        ..decision_test_server(&mut device)
-    };
-
-    assert_matches!(server.poll_timeout(Instant::now()), Some(_));
-
-    Ok(())
+    assert_matches!(
+        Server { tcp_connections: TcpConnections::with_syn_rcv(), ..decision_test_server() }
+            .poll_timeout(Instant::now()),
+        Some(_)
+    );
 }
 
 #[test]
 fn earlier_retransmit_deadline_taken_over_later_shutdown_deadline() -> Result {
-    let mut device = MockDevice::new([])?;
     let now = Instant::now();
     let far_future = now.checked_add(Duration::from_hours(1)).ok_or("overflow")?;
 
-    let server = Server {
-        tcp_connections: TcpConnections::with_syn_rcv(),
-        shutdown_deadline: Some(far_future),
-        ..decision_test_server(&mut device)
-    };
-
     assert_matches!(
-        server.poll_timeout(now),
+        Server {
+            tcp_connections: TcpConnections::with_syn_rcv(),
+            shutdown_deadline: Some(far_future),
+            ..decision_test_server()
+        }
+        .poll_timeout(now),
         Some(d) if d < Duration::from_secs(1),
         "The near-term retransmit deadline should win the `min`, not the far future shutdown \
         deadline"
@@ -65,13 +54,13 @@ fn earlier_retransmit_deadline_taken_over_later_shutdown_deadline() -> Result {
 
 #[test]
 fn passed_deadline_saturates_to_zero() -> Result {
-    let mut device = MockDevice::new([])?;
     let now = Instant::now();
     let past = now.checked_sub(Duration::from_secs(5)).ok_or("underflow")?;
 
-    let server = Server { shutdown_deadline: Some(past), ..decision_test_server(&mut device) };
-
-    assert_eq!(server.poll_timeout(now), Some(Duration::ZERO));
+    assert_eq!(
+        Server { shutdown_deadline: Some(past), ..decision_test_server() }.poll_timeout(now),
+        Some(Duration::ZERO)
+    );
 
     Ok(())
 }

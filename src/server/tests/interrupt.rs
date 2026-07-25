@@ -2,15 +2,12 @@ use super::*;
 
 #[test]
 fn already_draining_reports_time_left() -> Result {
-    let mut device = MockDevice::new([])?;
     let now = Instant::now();
     let deadline = now.checked_add(Duration::from_secs(10)).ok_or("overflow")?;
 
-    let mut server =
-        Server { shutdown_deadline: Some(deadline), ..decision_test_server(&mut device) };
-
     assert_eq!(
-        server.decide_shutdown(now)?,
+        Server { shutdown_deadline: Some(deadline), ..decision_test_server() }
+            .decide_shutdown(now)?,
         ShutdownDecision::AlreadyDraining { time_left: Duration::from_secs(10) }
     );
 
@@ -19,18 +16,16 @@ fn already_draining_reports_time_left() -> Result {
 
 #[test]
 fn established_connection_begins_draining_with_fin_ack_and_deadline() -> Result {
-    let mut device = MockDevice::new([])?;
     let now = Instant::now();
     let expected_deadline = now.checked_add(Duration::from_secs(10)).ok_or("overflow")?;
 
-    let mut server = Server {
-        tcp_connections: TcpConnections::after_handshake(),
-        shutdown_grace_period: Duration::from_secs(10),
-        ..decision_test_server(&mut device)
-    };
-
     assert_matches!(
-        server.decide_shutdown(now)?,
+        Server {
+            tcp_connections: TcpConnections::after_handshake(),
+            shutdown_grace_period: Duration::from_secs(10),
+            ..decision_test_server()
+        }
+        .decide_shutdown(now)?,
         ShutdownDecision::BeganDraining { to_send, deadline }
             if to_send.len() == 1 && deadline == expected_deadline
     );
@@ -40,32 +35,26 @@ fn established_connection_begins_draining_with_fin_ack_and_deadline() -> Result 
 
 #[test]
 fn no_established_connections_reports_no_connections() -> Result {
-    let mut device = MockDevice::new([])?;
-
-    let mut server =
-        Server { tcp_connections: TcpConnections::default(), ..decision_test_server(&mut device) };
-
-    assert_eq!(server.decide_shutdown(Instant::now())?, ShutdownDecision::NoConnections);
+    assert_eq!(
+        Server { tcp_connections: TcpConnections::default(), ..decision_test_server() }
+            .decide_shutdown(Instant::now())?,
+        ShutdownDecision::NoConnections
+    );
 
     Ok(())
 }
 
 #[test]
-fn overflowing_deadline_errors_instead_of_panicking() -> Result {
-    let mut device = MockDevice::new([])?;
-
-    let mut server = Server {
-        tcp_connections: TcpConnections::after_handshake(),
-        shutdown_grace_period: Duration::MAX,
-        ..decision_test_server(&mut device)
-    };
-
+fn overflowing_deadline_errors_instead_of_panicking() {
     assert_matches!(
-        server.decide_shutdown(Instant::now()),
+        Server {
+            tcp_connections: TcpConnections::after_handshake(),
+            shutdown_grace_period: Duration::MAX,
+            ..decision_test_server()
+        }
+        .decide_shutdown(Instant::now()),
         Err(e) if e.contains("Overflowed")
     );
-
-    Ok(())
 }
 
 #[test]
