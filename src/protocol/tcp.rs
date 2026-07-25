@@ -473,6 +473,24 @@ impl TcpHandler {
 
         send_info
     }
+
+    /// A SYN requesting a new connection using the regular `CLIENT_PACKET` consts, which should
+    /// generate a SYN-ACK reply.
+    #[cfg(test)]
+    pub(crate) fn test_syn_requesting_connection() -> Self {
+        use crate::protocol::tcp::tests::CLIENT_PACKET;
+
+        Self { flags: TcpFlags::Syn, ..CLIENT_PACKET }
+    }
+
+    /// The handshake-completing ACK matching the module's standard test consts, which should be
+    /// accepted if in SYN-RECEIVED by transitioning to ESTABLISHED and replying with `None`.
+    #[cfg(test)]
+    pub(crate) fn test_ack_completing_handshake() -> Self {
+        use crate::protocol::tcp::tests::{CLIENT_ISN, CLIENT_PACKET, SERVER_ISN, SYN_BYTE};
+
+        Self { seq_num: CLIENT_ISN + SYN_BYTE, ack_num: SERVER_ISN + SYN_BYTE, ..CLIENT_PACKET }
+    }
 }
 
 impl Encode for TcpHandler {
