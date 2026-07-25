@@ -4,7 +4,7 @@ use super::*;
 fn poll_error_unrelated_to_interruption_propagates() -> Result {
     const MESSAGE: &str = "boom from poll";
 
-    let poll = PollScript::new([Err(io::Error::other(MESSAGE))]);
+    let poll = MockPoll::new([Err(io::Error::other(MESSAGE))]);
     let mut device = MockDevice::new([])?;
 
     assert_matches!(
@@ -26,7 +26,7 @@ fn poll_error_unrelated_to_interruption_propagates() -> Result {
 fn read_error_unrelated_to_interruption_propagates() -> Result {
     const MESSAGE: &str = "boom from read";
 
-    let poll = PollScript::new([Ok(true)]);
+    let poll = MockPoll::new([Ok(true)]);
     let mut device = MockDevice::new([Err(io::Error::other(MESSAGE))])?;
 
     assert_matches!(
@@ -48,7 +48,7 @@ fn read_error_unrelated_to_interruption_propagates() -> Result {
 fn write_failure_while_sending_fin_ack_propagates() -> Result {
     const MESSAGE: &str = "boom from write";
 
-    let poll = PollScript::new([Err(io::ErrorKind::Interrupted.into())]);
+    let poll = MockPoll::new([Err(io::ErrorKind::Interrupted.into())]);
     let mut device = MockDevice::new([])?.fail_writes(MESSAGE);
 
     assert_matches!(

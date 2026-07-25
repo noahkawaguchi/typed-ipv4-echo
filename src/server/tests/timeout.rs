@@ -6,7 +6,7 @@ fn poll_timeout_reflects_shutdown_deadline() -> Result {
     // timeout is unbounded before any shutdown signal and becomes bounded once draining starts
 
     let observed_timeouts = RefCell::new(Vec::new());
-    let poll = PollScript::new([Err(io::ErrorKind::Interrupted.into()), Ok(false)]);
+    let poll = MockPoll::new([Err(io::ErrorKind::Interrupted.into()), Ok(false)]);
     let mut device = MockDevice::new([])?;
 
     run_test_server(
@@ -42,7 +42,7 @@ fn poll_timeout_reflects_pending_retransmission() -> Result {
     // draining.
 
     let observed_timeouts = RefCell::new(Vec::new());
-    let poll = PollScript::new([Err(io::ErrorKind::Interrupted.into())]);
+    let poll = MockPoll::new([Err(io::ErrorKind::Interrupted.into())]);
     let mut device = MockDevice::new([])?;
 
     run_test_server(

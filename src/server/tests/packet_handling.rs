@@ -6,7 +6,7 @@ fn malformed_packet_is_skipped_without_propagating_or_writing() -> Result {
     // packet should just be logged and skipped. The second poll call is a shutdown signal, and
     // since there are no established connections, it ends the loop cleanly.
 
-    let poll = PollScript::new([Ok(true), Err(io::ErrorKind::Interrupted.into())]);
+    let poll = MockPoll::new([Ok(true), Err(io::ErrorKind::Interrupted.into())]);
     let mut device = MockDevice::new([Ok(vec![0u8; 5])])?;
 
     assert_matches!(

@@ -71,9 +71,9 @@ impl AsFd for MockDevice {
 
 /// A scripted sequence of `poll_readable` results, consumed one per call (via interior mutability
 /// since `poll_readable` must be `Fn`, not `FnMut`). Returns `Err` if the script runs out.
-pub struct PollScript(RefCell<VecDeque<io::Result<bool>>>);
+pub struct MockPoll(RefCell<VecDeque<io::Result<bool>>>);
 
-impl PollScript {
+impl MockPoll {
     pub fn new(items: impl IntoIterator<Item = io::Result<bool>>) -> Self {
         Self(RefCell::new(items.into_iter().collect()))
     }

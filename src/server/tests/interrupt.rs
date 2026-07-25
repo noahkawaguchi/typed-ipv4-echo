@@ -5,7 +5,7 @@ fn first_interrupt_with_established_connection_sends_fin_ack_and_continues() -> 
     // The first poll call simulates the shutdown signal, then the second lets the (already-elapsed)
     // grace period end the loop instead of running forever
 
-    let poll = PollScript::new([Err(io::ErrorKind::Interrupted.into()), Ok(false)]);
+    let poll = MockPoll::new([Err(io::ErrorKind::Interrupted.into()), Ok(false)]);
     let mut device = MockDevice::new([])?;
 
     run_test_server(
@@ -27,7 +27,7 @@ fn interrupt_with_no_established_connections_exits_immediately() -> Result {
     // would be propagated
 
     let poll =
-        PollScript::new([Err(io::ErrorKind::Interrupted.into()), Err(io::ErrorKind::Other.into())]);
+        MockPoll::new([Err(io::ErrorKind::Interrupted.into()), Err(io::ErrorKind::Other.into())]);
 
     let mut device = MockDevice::new([])?;
 
@@ -50,7 +50,7 @@ fn interrupt_with_no_established_connections_exits_immediately() -> Result {
 
 #[test]
 fn repeated_interrupts_while_draining_do_not_resend_fin_ack() -> Result {
-    let poll = PollScript::new([
+    let poll = MockPoll::new([
         Err(io::ErrorKind::Interrupted.into()),
         Err(io::ErrorKind::Interrupted.into()),
         Ok(false),
@@ -81,7 +81,7 @@ fn interrupt_unrelated_to_shutdown_is_ignored() -> Result {
 
     let poll_calls = Cell::new(0u8);
 
-    let poll = PollScript::new([
+    let poll = MockPoll::new([
         Err(io::ErrorKind::Interrupted.into()),
         Err(io::ErrorKind::Interrupted.into()),
     ]);
@@ -109,7 +109,7 @@ fn read_interrupt_with_no_established_connections_exits_immediately() -> Result 
     // Mirrors the test for poll, but the `EINTR` arrives from the `read()` call instead of the
     // `poll()`, confirming that both entry points reach the same shutdown handling
 
-    let poll = PollScript::new([Ok(true)]);
+    let poll = MockPoll::new([Ok(true)]);
     let mut device = MockDevice::new([Err(io::ErrorKind::Interrupted.into())])?;
 
     run_test_server(
@@ -127,7 +127,7 @@ fn read_interrupt_with_no_established_connections_exits_immediately() -> Result 
 
 #[test]
 fn read_interrupt_with_established_connection_sends_fin_ack_and_continues() -> Result {
-    let poll = PollScript::new([Ok(true), Ok(false)]);
+    let poll = MockPoll::new([Ok(true), Ok(false)]);
     let mut device = MockDevice::new([Err(io::ErrorKind::Interrupted.into())])?;
 
     run_test_server(

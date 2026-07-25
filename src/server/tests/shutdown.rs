@@ -10,7 +10,7 @@ fn exits_once_connections_finish_closing() -> Result {
     // grace period is nowhere close to elapsing.
 
     let poll_calls = Cell::new(0u8);
-    let poll = PollScript::new([Err(io::ErrorKind::Interrupted.into()), Ok(false), Ok(true)]);
+    let poll = MockPoll::new([Err(io::ErrorKind::Interrupted.into()), Ok(false), Ok(true)]);
     let mut device = MockDevice::new([Ok(vec![0u8; 5])])?;
 
     run_test_server(
