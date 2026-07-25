@@ -21,29 +21,28 @@ fn shutdown_deadline_alone_gives_its_duration() -> Result {
 
 #[test]
 fn pending_retransmission_alone_gives_some_timeout() {
-    // `with_syn_rcv` has a pending SYN-ACK due for retransmission at approximately its own
-    // construction time, so a `now` taken right after construction should be at or past it, giving
-    // a near-zero bounded timeout.
+    // `Instant::now()` is currently called internally for the retransmissions, so assert an
+    // approximate range
 
     assert_matches!(
         Server {
-            tcp_connections: TcpConnections::default().with_syn_rcv(),
+            tcp_connections: TcpConnections::new(Duration::from_millis(500), 5).with_syn_rcv(),
             ..decision_test_server()
         }
         .poll_timeout(Instant::now()),
-        Some(_)
+        Some(d) if d > Duration::from_millis(400) && d < Duration::from_millis(600)
     );
 }
 
 #[test]
 fn earlier_retransmit_deadline_taken_over_later_shutdown_deadline() -> Result {
     let now = Instant::now();
-    let far_future = now.checked_add(Duration::from_hours(1)).ok_or("overflow")?;
+    let in_30s = now.checked_add(Duration::from_secs(30)).ok_or("overflow")?;
 
     assert_matches!(
         Server {
-            tcp_connections: TcpConnections::default().with_syn_rcv(),
-            shutdown_deadline: Some(far_future),
+            tcp_connections: TcpConnections::new(Duration::from_millis(250), 5).with_syn_rcv(),
+            shutdown_deadline: Some(in_30s),
             ..decision_test_server()
         }
         .poll_timeout(now),
