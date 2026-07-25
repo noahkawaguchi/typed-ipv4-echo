@@ -185,7 +185,7 @@ impl TcpConnections {
     /// Creates a default-initialized `Self` and inserts a new SYN-RECEIVED connection using `KEY`,
     /// `CLIENT_ISN`, and `SERVER_ISN` as if we had just responded to the peer's SYN with SYN-ACK.
     #[cfg(test)]
-    pub(super) fn with_syn_rcv() -> Self {
+    pub(crate) fn with_syn_rcv() -> Self {
         use {
             crate::protocol::tcp::tests::{CLIENT_ISN, KEY, SERVER_ISN, SYN_BYTE},
             std::collections::VecDeque,
