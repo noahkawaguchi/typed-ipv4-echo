@@ -1,6 +1,6 @@
 use {
     super::*,
-    crate::try_ops::TryGetMut as _,
+    crate::try_ops::{TryGet as _, TryGetMut as _},
     std::{collections::VecDeque, fs::File, os::fd::BorrowedFd},
 };
 
@@ -85,4 +85,14 @@ impl MockPoll {
             .pop_front()
             .unwrap_or_else(|| Err(io::Error::other("Poll script exhausted")))
     }
+}
+
+/// Encodes `handler` into a full IPv4 packet so it can be used as a scripted mock to be read.
+pub fn encode_mock_packet(handler: &impl Encode) -> Result<Vec<u8>> {
+    let mut buf = [0u8; ETHERNET_MTU];
+    let proto_len = handler.write_into(&mut buf[Ipv4Header::REPLY_HDR_LEN..])?;
+    let ipv4_header = Ipv4Header::try_new(handler.proto(), handler.get_ip_pair(), proto_len)?;
+    ipv4_header.write_into(&mut buf);
+
+    Ok(buf.try_get(..ipv4_header.total_len.into())?.to_vec())
 }

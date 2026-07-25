@@ -296,7 +296,7 @@ mod tests {
 
     use {
         super::*,
-        mocks::{MockDevice, MockPoll},
+        mocks::*,
         std::{
             assert_matches,
             cell::{Cell, RefCell},
