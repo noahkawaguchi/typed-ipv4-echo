@@ -55,6 +55,28 @@ fn earlier_retransmit_deadline_taken_over_later_shutdown_deadline() -> Result {
 }
 
 #[test]
+fn earlier_shutdown_deadline_taken_over_later_retransmit_deadline() -> Result {
+    const GRACE_PERIOD: Duration = Duration::from_millis(250);
+
+    let now = Instant::now();
+    let in_250ms = now.checked_add(GRACE_PERIOD).ok_or("overflow")?;
+
+    assert_eq!(
+        Server {
+            tcp_connections: TcpConnections::new(Duration::from_secs(30), 5).with_syn_rcv(),
+            shutdown_deadline: Some(in_250ms),
+            ..decision_test_server()
+        }
+        .poll_timeout(now),
+        Some(GRACE_PERIOD),
+        "The near-term shutdown deadline should win the `min`, not the far future retransmit \
+         deadline"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn passed_deadline_saturates_to_zero() -> Result {
     let now = Instant::now();
     let past = now.checked_sub(Duration::from_secs(5)).ok_or("underflow")?;
