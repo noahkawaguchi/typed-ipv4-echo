@@ -88,16 +88,14 @@ where
                 .map(|deadline| deadline.saturating_duration_since(Instant::now()));
 
             match (self.poll_readable)(self.device, timeout) {
-                // If `poll()` was interrupted and returned `EINTR`, a shutdown signal has been
-                // received
-                Err(e) if e.kind() == io::ErrorKind::Interrupted && (self.shutdown_check)() => {
-                    if self.handle_shutdown_interrupt()? {
+                // If `poll()` was interrupted and returned `EINTR`, check if a shutdown signal has
+                // been received
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+                    if (self.shutdown_check)() && self.handle_shutdown_interrupt()? {
                         break Ok(());
                     }
+                    // Interrupted by a signal unrelated to shutdown -> just re-poll
                 }
-
-                // Interrupted by a signal unrelated to shutdown -> just re-poll
-                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
 
                 Err(e) => break Err(e.into()),
 
@@ -127,19 +125,15 @@ where
                     let bytes_read = match self.device.read(&mut read_buf) {
                         // If `read()` was interrupted and returned `EINTR`, react to the shutdown
                         // signal in the same way as for a `poll()` interruption
-                        Err(e)
-                            if e.kind() == io::ErrorKind::Interrupted
-                                && (self.shutdown_check)() =>
-                        {
-                            if self.handle_shutdown_interrupt()? {
+                        Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+                            if (self.shutdown_check)() && self.handle_shutdown_interrupt()? {
                                 break Ok(());
                             }
 
+                            // Interrupted by a signal unrelated to shutdown -> just re-poll
                             continue;
                         }
 
-                        // Interrupted by a signal unrelated to shutdown -> just re-poll
-                        Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
                         Err(e) => break Err(e.into()),
                         Ok(n) => n,
                     };
