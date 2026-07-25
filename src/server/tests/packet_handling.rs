@@ -25,3 +25,50 @@ fn malformed_packet_is_skipped_without_propagating_or_writing() -> Result {
 
     Ok(())
 }
+
+#[test]
+fn valid_syn_producing_a_reply_is_sent() -> Result {
+    let poll = MockPoll::new([Ok(true), Err(io::ErrorKind::Interrupted.into())]);
+    let mut device =
+        MockDevice::new([Ok(encode_mock_packet(&TcpHandler::test_syn_requesting_connection())?)])?;
+
+    run_test_server(
+        TcpConnections::default(),
+        &mut device,
+        |_, _| poll.next(),
+        || true,
+        IMMEDIATE_GRACE_PERIOD,
+    )?;
+
+    assert_eq!(device.writes().len(), 1, "The SYN should get a SYN-ACK reply written");
+
+    Ok(())
+}
+
+#[test]
+fn valid_ack_completing_handshake_produces_no_reply() -> Result {
+    // The second, unrelated poll error is just to end the loop right after processing the ACK,
+    // without going through shutdown handling that would close the now ESTABLISHED connection and
+    // write a FIN-ACK, contaminating the write count this test cares about.
+
+    const MESSAGE: &str = "boom from poll, unrelated to the ACK just processed";
+
+    let poll = MockPoll::new([Ok(true), Err(io::Error::other(MESSAGE))]);
+    let mut device =
+        MockDevice::new([Ok(encode_mock_packet(&TcpHandler::test_ack_completing_handshake())?)])?;
+
+    assert_matches!(
+        run_test_server(
+            TcpConnections::with_syn_rcv(),
+            &mut device,
+            |_, _| poll.next(),
+            || false,
+            ONE_YEAR_GRACE_PERIOD,
+        ),
+        Err(e) if e.to_string().contains(MESSAGE)
+    );
+
+    assert!(device.writes().is_empty(), "The handshake-completing ACK should not produce a reply");
+
+    Ok(())
+}
