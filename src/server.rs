@@ -257,11 +257,15 @@ mod tests {
     mod packet_handling;
     mod propagate;
     mod shutdown;
+    mod timeout;
     mod utils;
 
     use {
         super::*,
-        std::{assert_matches, cell::Cell},
+        std::{
+            assert_matches,
+            cell::{Cell, RefCell},
+        },
         utils::*,
     };
 

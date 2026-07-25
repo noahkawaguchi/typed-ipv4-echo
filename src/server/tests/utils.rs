@@ -1,7 +1,7 @@
 use {
     super::*,
     crate::try_ops::TryGetMut as _,
-    std::{cell::RefCell, collections::VecDeque, fs::File, os::fd::BorrowedFd},
+    std::{collections::VecDeque, fs::File, os::fd::BorrowedFd},
 };
 
 /// A `Read + Write + AsFd` test double. `read()` calls are scripted in advance and return an error
