@@ -135,6 +135,8 @@ impl TcpConnections {
     /// Initiates active close (RFC 9293 "CLOSE" call) for every connection currently ESTABLISHED,
     /// transitioning each to FIN-WAIT-1 and returning a FIN-ACK reply for it.
     pub fn close_established(&mut self) -> Vec<TcpHandler> {
+        let now = Instant::now();
+
         self.table
             .iter_mut()
             .filter_map(|(key, conn)| {
@@ -154,7 +156,8 @@ impl TcpConnections {
                 // Consume one sequence number in SND.NXT for the FIN about to be sent
                 conn.snd_nxt.advance_by(1);
 
-                conn.pending.push(PendingSegment::new(send_info.clone()));
+                conn.pending
+                    .push(PendingSegment::new(send_info.clone(), now));
 
                 Some(TcpHandler::from_pairs_and_info(
                     Ipv4AddrPair { src: key.server_ip, dst: key.client_ip },
@@ -185,7 +188,14 @@ impl TcpConnections {
     /// Inserts a SYN-RECEIVED connection using `KEY`, `CLIENT_ISN`, and `SERVER_ISN` as if we had
     /// just responded to the peer's SYN with SYN-ACK.
     #[cfg(test)]
-    pub(crate) fn with_syn_rcv(mut self) -> Self {
+    pub(crate) fn with_syn_rcv(self) -> Self {
+        self.with_syn_rcv_and_packet_last_sent(Instant::now())
+    }
+
+    /// Inserts a SYN-RECEIVED connection using `KEY`, `CLIENT_ISN`, and `SERVER_ISN` as if we had
+    /// just responded to the peer's SYN with SYN-ACK at time `sent_at`.
+    #[cfg(test)]
+    pub(crate) fn with_syn_rcv_and_packet_last_sent(mut self, sent_at: Instant) -> Self {
         use {
             crate::protocol::tcp::tests::{CLIENT_ISN, KEY, SERVER_ISN, SYN_BYTE},
             std::collections::VecDeque,
@@ -199,12 +209,15 @@ impl TcpConnections {
                 rcv_nxt: CLIENT_ISN + SYN_BYTE,
                 snd_una: SERVER_ISN,
                 window_state: None,
-                pending: vec![PendingSegment::new(SendInfo {
-                    seq_num: SERVER_ISN,
-                    ack_num: CLIENT_ISN + SYN_BYTE,
-                    flags: TcpFlags::SynAck,
-                    payload: None,
-                })],
+                pending: vec![PendingSegment::new(
+                    SendInfo {
+                        seq_num: SERVER_ISN,
+                        ack_num: CLIENT_ISN + SYN_BYTE,
+                        flags: TcpFlags::SynAck,
+                        payload: None,
+                    },
+                    sent_at,
+                )],
                 send_buffer: VecDeque::new(),
             },
         );

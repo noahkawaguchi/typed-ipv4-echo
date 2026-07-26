@@ -19,6 +19,8 @@ fn poll_error_unrelated_to_interruption_propagates() -> Result {
         "A non-interrupt poll error should propagate"
     );
 
+    assert!(device.write_history().is_empty(), "Error should propagate without anything written");
+
     Ok(())
 }
 
@@ -41,6 +43,8 @@ fn read_error_unrelated_to_interruption_propagates() -> Result {
         "A non-interrupt read error should propagate"
     );
 
+    assert!(device.write_history().is_empty(), "Error should propagate without anything written");
+
     Ok(())
 }
 
@@ -62,6 +66,8 @@ fn write_failure_while_sending_fin_ack_propagates() -> Result {
         Err(e) if e.to_string().contains(MESSAGE),
         "A device write failure while closing connections should propagate"
     );
+
+    assert!(device.write_history().is_empty(), "Error should propagate without anything written");
 
     Ok(())
 }

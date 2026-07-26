@@ -7,7 +7,7 @@ use {
             seq_space::{SeqLe as _, SeqLt as _},
         },
     },
-    std::collections::VecDeque,
+    std::{collections::VecDeque, time::Instant},
 };
 
 /// The state of a connection in the table, including its TCP state, buffered data, and other
@@ -55,7 +55,7 @@ impl ConnState {
                 // Window-related values are set at connection establishment once the peer has
                 // provided a defined SEG.ACK
                 window_state: None,
-                pending: vec![PendingSegment::new(send_info)],
+                pending: vec![PendingSegment::new(send_info, Instant::now())],
                 send_buffer: VecDeque::new(),
             })
             .ok_or(

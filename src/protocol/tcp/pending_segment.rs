@@ -24,7 +24,7 @@ pub(super) struct PendingSegment {
 impl PendingSegment {
     /// Creates a new unacked segment eligible for retransmission, covering the sequence numbers
     /// consumed by the segment.
-    pub(super) fn new(send_info: SendInfo) -> Self {
+    pub(super) fn new(send_info: SendInfo, sent_at: Instant) -> Self {
         let end_seq = send_info
             .seq_num
             // Any SYN/FIN consumes a single phantom byte
@@ -35,7 +35,7 @@ impl PendingSegment {
             // A payload consumes the number of bytes in the payload
             .wrapping_add(u32::from(send_info.payload.as_ref().map_or(0, |p| p.len().get())));
 
-        Self { send_info, end_seq, last_sent_at: Instant::now(), retries: 0 }
+        Self { send_info, end_seq, last_sent_at: sent_at, retries: 0 }
     }
 
     /// Returns the time at which the segment is due for retransmission using exponential backoff,
@@ -85,12 +85,15 @@ mod tests {
     #[test]
     fn reports_due_now_on_overflow() -> Result {
         assert!(
-            PendingSegment::new(SendInfo {
-                seq_num: 42,
-                ack_num: 24,
-                flags: TcpFlags::Ack,
-                payload: payload_from("Hello")?
-            })
+            PendingSegment::new(
+                SendInfo {
+                    seq_num: 42,
+                    ack_num: 24,
+                    flags: TcpFlags::Ack,
+                    payload: payload_from("Hello")?
+                },
+                Instant::now()
+            )
             .time_due(Duration::MAX)
                 <= Instant::now()
         );

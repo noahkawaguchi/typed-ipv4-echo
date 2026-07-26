@@ -6,7 +6,7 @@ fn neither_deadline_gives_no_timeout() {
 }
 
 #[test]
-fn shutdown_deadline_alone_gives_its_duration() -> Result {
+fn shutdown_deadline_alone_gives_duration() -> Result {
     const GRACE_PERIOD: Duration = Duration::from_secs(10);
 
     let now = Instant::now();
@@ -21,34 +21,39 @@ fn shutdown_deadline_alone_gives_its_duration() -> Result {
 }
 
 #[test]
-fn pending_retransmission_alone_gives_some_timeout() {
-    // `Instant::now()` is currently called internally for the retransmissions, so assert an
-    // approximate range
+fn pending_retransmission_alone_gives_duration() {
+    const INITIAL_RTO: Duration = Duration::from_millis(750);
 
-    assert_matches!(
+    let now = Instant::now();
+
+    assert_eq!(
         Server {
-            tcp_connections: TcpConnections::new(Duration::from_millis(500), 5).with_syn_rcv(),
+            tcp_connections: TcpConnections::new(INITIAL_RTO, 5)
+                .with_syn_rcv_and_packet_last_sent(now),
             ..decision_test_server()
         }
-        .poll_timeout(Instant::now()),
-        Some(d) if d > Duration::from_millis(400) && d < Duration::from_millis(600)
+        .poll_timeout(now),
+        Some(INITIAL_RTO)
     );
 }
 
 #[test]
 fn earlier_retransmit_deadline_taken_over_later_shutdown_deadline() -> Result {
+    const INITIAL_RTO: Duration = Duration::from_millis(250);
+
     let now = Instant::now();
 
-    assert_matches!(
+    assert_eq!(
         Server {
-            tcp_connections: TcpConnections::new(Duration::from_millis(250), 5).with_syn_rcv(),
+            tcp_connections: TcpConnections::new(INITIAL_RTO, 5)
+                .with_syn_rcv_and_packet_last_sent(now),
             shutdown_deadline: Some(now.try_add(Duration::from_secs(30))?),
             ..decision_test_server()
         }
         .poll_timeout(now),
-        Some(d) if d > Duration::from_millis(150) && d < Duration::from_millis(350),
+        Some(INITIAL_RTO),
         "The near-term retransmit deadline should win the `min`, not the far future shutdown \
-        deadline"
+         deadline"
     );
 
     Ok(())
@@ -81,7 +86,10 @@ fn past_deadline_saturates_to_zero() -> Result {
 
     assert_eq!(
         Server {
-            shutdown_deadline: Some(now.checked_sub(Duration::from_secs(5)).ok_or("underflow")?),
+            shutdown_deadline: Some(
+                now.checked_sub(Duration::from_secs(10))
+                    .ok_or("underflow")?
+            ),
             ..decision_test_server()
         }
         .poll_timeout(now),
@@ -96,9 +104,9 @@ fn poll_timeout_reflects_shutdown_deadline_across_a_real_run() -> Result {
     // Showing here that the loop actually uses the computed timeout when polling, and that the
     // grace period being elapsed actually ends the loop.
     //
-    // Not asserting exact `Duration` values since they come from `Instant::now()`, just that the
-    // timeout is unbounded before any shutdown signal and becomes bounded (and, with an immediate
-    // grace period, causes exit) once draining starts.
+    // Even though the exact `Duration` values come from `Instant::now()` calls, the grace period
+    // and initial RTO are both `Duration::ZERO`, so the duration since a slightly later
+    // `Instant::now()` call saturates to `Duration::ZERO` for the second timeout.
 
     let observed_timeouts = RefCell::new(Vec::new());
     let poll = MockPoll::with_results([Err(io::ErrorKind::Interrupted.into()), Ok(false)]);
@@ -119,11 +127,15 @@ fn poll_timeout_reflects_shutdown_deadline_across_a_real_run() -> Result {
         IMMEDIATE_GRACE_PERIOD,
     )?;
 
-    assert_matches!(
+    assert_eq!(
         observed_timeouts.into_inner().as_slice(),
-        [None, Some(_)],
-        "No timeout before the interrupt, then some timeout once draining begins"
+        [None, Some(Duration::ZERO)],
+        "No timeout before the interrupt, then a zero timeout once draining begins"
     );
+
+    let [write] = device.write_history() else { return Err("Expected exactly one write".into()) };
+
+    assert_eq!(decode_mock_tcp_packet(write)?, TcpHandler::SERVER_FIN_ACK_INITIATING_CLOSE);
 
     Ok(())
 }
