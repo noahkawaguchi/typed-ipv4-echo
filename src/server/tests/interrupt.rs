@@ -82,6 +82,44 @@ fn first_interrupt_with_established_connection_sends_fin_ack_and_continues() -> 
 }
 
 #[test]
+fn second_interrupt_while_draining_does_not_resend_or_exit() -> Result {
+    // The first interrupt begins draining and sends FIN-ACK. The second interrupt, arriving while
+    // still draining, should neither resend the FIN-ACK nor break the loop. The third, unrelated
+    // poll error ends the loop deterministically and proves that the second interrupt didn't
+    // already cause an exit.
+
+    const MESSAGE: &str = "boom, unrelated to shutdown";
+
+    let poll_calls = Cell::new(0u8);
+    let poll = MockPoll::new([
+        Err(io::ErrorKind::Interrupted.into()),
+        Err(io::ErrorKind::Interrupted.into()),
+        Err(io::Error::other(MESSAGE)),
+    ]);
+    let mut device = MockDevice::new([])?;
+
+    assert_matches!(
+        run_test_server(
+            TcpConnections::default().after_handshake(),
+            &mut device,
+            |_, _| {
+                poll_calls.set(poll_calls.get() + 1);
+                poll.next()
+            },
+            || true,
+            ONE_YEAR_GRACE_PERIOD,
+        ),
+        Err(e) if e.to_string().contains(MESSAGE),
+        "The third, unrelated poll error should propagate, proving the loop didn't exit earlier"
+    );
+
+    assert_eq!(poll_calls.get(), 3, "All three poll calls should have been needed");
+    assert_eq!(device.writes().len(), 1, "Only the original FIN-ACK, no resend, should be written");
+
+    Ok(())
+}
+
+#[test]
 fn interrupt_with_no_established_connections_exits_immediately() -> Result {
     // The server should exit after the initial interrupted error, avoiding the second error, which
     // would be propagated
