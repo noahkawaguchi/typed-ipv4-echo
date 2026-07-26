@@ -24,7 +24,7 @@
             packages = with pkgs; [
               # Use nightly for formatting only
               rust-bin.nightly.latest.rustfmt
-              (rust-bin.stable."1.96.0".minimal.override {
+              (rust-bin.stable."1.97.1".minimal.override {
                 extensions = [
                   "rust-src"
                   "rust-analyzer"
