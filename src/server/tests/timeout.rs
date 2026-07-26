@@ -6,7 +6,7 @@ fn neither_deadline_gives_no_timeout() {
 }
 
 #[test]
-fn shutdown_deadline_alone_gives_its_duration() -> Result {
+fn shutdown_deadline_alone_gives_duration() -> Result {
     const GRACE_PERIOD: Duration = Duration::from_secs(10);
 
     let now = Instant::now();
@@ -21,34 +21,39 @@ fn shutdown_deadline_alone_gives_its_duration() -> Result {
 }
 
 #[test]
-fn pending_retransmission_alone_gives_some_timeout() {
-    // `Instant::now()` is currently called internally for the retransmissions, so assert an
-    // approximate range
+fn pending_retransmission_alone_gives_duration() {
+    const INITIAL_RTO: Duration = Duration::from_millis(750);
 
-    assert_matches!(
+    let now = Instant::now();
+
+    assert_eq!(
         Server {
-            tcp_connections: TcpConnections::new(Duration::from_millis(500), 5).with_syn_rcv(),
+            tcp_connections: TcpConnections::new(INITIAL_RTO, 5)
+                .with_syn_rcv_and_packet_last_sent(now),
             ..decision_test_server()
         }
-        .poll_timeout(Instant::now()),
-        Some(d) if d > Duration::from_millis(400) && d < Duration::from_millis(600)
+        .poll_timeout(now),
+        Some(INITIAL_RTO)
     );
 }
 
 #[test]
 fn earlier_retransmit_deadline_taken_over_later_shutdown_deadline() -> Result {
+    const INITIAL_RTO: Duration = Duration::from_millis(250);
+
     let now = Instant::now();
 
-    assert_matches!(
+    assert_eq!(
         Server {
-            tcp_connections: TcpConnections::new(Duration::from_millis(250), 5).with_syn_rcv(),
+            tcp_connections: TcpConnections::new(INITIAL_RTO, 5)
+                .with_syn_rcv_and_packet_last_sent(now),
             shutdown_deadline: Some(now.try_add(Duration::from_secs(30))?),
             ..decision_test_server()
         }
         .poll_timeout(now),
-        Some(d) if d > Duration::from_millis(150) && d < Duration::from_millis(350),
+        Some(INITIAL_RTO),
         "The near-term retransmit deadline should win the `min`, not the far future shutdown \
-        deadline"
+         deadline"
     );
 
     Ok(())
@@ -81,7 +86,10 @@ fn past_deadline_saturates_to_zero() -> Result {
 
     assert_eq!(
         Server {
-            shutdown_deadline: Some(now.checked_sub(Duration::from_secs(5)).ok_or("underflow")?),
+            shutdown_deadline: Some(
+                now.checked_sub(Duration::from_secs(10))
+                    .ok_or("underflow")?
+            ),
             ..decision_test_server()
         }
         .poll_timeout(now),
