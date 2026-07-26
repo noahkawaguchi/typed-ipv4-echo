@@ -27,7 +27,7 @@ use {
         sys,
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
-    std::fmt,
+    std::{fmt, time::Instant},
 };
 
 /// The minimum number of bytes in a TCP header (no options).
@@ -200,7 +200,7 @@ impl TcpHandler {
                     payload: None,
                 };
 
-                pending.push(PendingSegment::new(send_info.clone()));
+                pending.push(PendingSegment::new(send_info.clone(), Instant::now()));
 
                 Some(send_info)
             }
@@ -330,7 +330,8 @@ impl TcpHandler {
                 conn.snd_nxt.advance_by(1); // Our FIN consumes one sequence number
                 conn.rcv_nxt.advance_by(1); // Peer's FIN consumes one sequence number
 
-                conn.pending.push(PendingSegment::new(send_info.clone()));
+                conn.pending
+                    .push(PendingSegment::new(send_info.clone(), Instant::now()));
 
                 Some(send_info)
             }
@@ -469,7 +470,8 @@ impl TcpHandler {
         };
 
         conn.snd_nxt.advance_by(send_len);
-        conn.pending.push(PendingSegment::new(send_info.clone()));
+        conn.pending
+            .push(PendingSegment::new(send_info.clone(), Instant::now()));
 
         send_info
     }
