@@ -3,6 +3,7 @@ words = [
     "CWR",
     "DSCP",
     "ECE",
+    "ECN",
     "IFNAMSIZ",
     "IHL",
     "ISN",
