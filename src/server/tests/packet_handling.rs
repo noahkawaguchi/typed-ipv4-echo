@@ -96,6 +96,7 @@ fn valid_syn_producing_a_reply_is_sent() -> Result {
         IMMEDIATE_GRACE_PERIOD,
     )?;
 
+    // Only asserting on length instead of content here because of the randomly generated ISN
     assert_eq!(device.writes().len(), 1, "The SYN should get a SYN-ACK reply written");
 
     Ok(())

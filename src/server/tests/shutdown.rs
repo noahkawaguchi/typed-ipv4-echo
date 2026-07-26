@@ -72,11 +72,22 @@ fn exits_once_connections_finish_closing() -> Result {
     )?;
 
     assert_eq!(poll_calls.get(), 2, "Both poll calls should have been needed to exit");
-    assert_eq!(
-        device.writes().len(),
-        2,
-        "The initial FIN-ACK and the final ACK completing the close should be written"
-    );
+
+    let [fin_ack_bytes, final_ack_bytes] = device.writes() else {
+        return Err(
+            "The initial FIN-ACK and the final ACK completing the close should be written".into()
+        );
+    };
+
+    let ProtocolHandler::Tcp(fin_ack) = decode_mock_packet(fin_ack_bytes)? else {
+        return Err("Expected a TCP packet".into());
+    };
+    let ProtocolHandler::Tcp(final_ack) = decode_mock_packet(final_ack_bytes)? else {
+        return Err("Expected a TCP packet".into());
+    };
+
+    assert_eq!(fin_ack, TcpHandler::test_server_fin_ack_initiating_close());
+    assert_eq!(final_ack, TcpHandler::test_server_final_ack_completing_close());
 
     Ok(())
 }

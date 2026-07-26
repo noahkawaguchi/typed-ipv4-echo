@@ -76,7 +76,13 @@ fn first_interrupt_with_established_connection_sends_fin_ack_and_continues() -> 
         IMMEDIATE_GRACE_PERIOD,
     )?;
 
-    assert_eq!(device.writes().len(), 1, "Exactly one FIN-ACK should be written");
+    let [write] = device.writes() else { return Err("Expected exactly one write".into()) };
+
+    let ProtocolHandler::Tcp(handler) = decode_mock_packet(write)? else {
+        return Err("Expected a TCP packet".into());
+    };
+
+    assert_eq!(handler, TcpHandler::test_server_fin_ack_initiating_close());
 
     Ok(())
 }
@@ -114,7 +120,18 @@ fn second_interrupt_while_draining_does_not_resend_or_exit() -> Result {
     );
 
     assert_eq!(poll_calls.get(), 3, "All three poll calls should have been needed");
-    assert_eq!(device.writes().len(), 1, "Only the original FIN-ACK, no resend, should be written");
+
+    let [write] = device.writes() else { return Err("Expected exactly one write".into()) };
+
+    let ProtocolHandler::Tcp(handler) = decode_mock_packet(write)? else {
+        return Err("Expected a TCP packet".into());
+    };
+
+    assert_eq!(
+        handler,
+        TcpHandler::test_server_fin_ack_initiating_close(),
+        "Should be the original FIN-ACK, not a resend of a different segment"
+    );
 
     Ok(())
 }
@@ -175,6 +192,7 @@ fn interrupt_unrelated_to_shutdown_is_ignored() -> Result {
     )?;
 
     assert_eq!(poll_calls.get(), 2, "The first interrupt should not have ended the loop early");
+    assert!(device.writes().is_empty(), "Nothing should have been written");
 
     Ok(())
 }
