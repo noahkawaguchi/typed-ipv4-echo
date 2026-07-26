@@ -57,8 +57,9 @@ fn exits_once_connections_finish_closing() -> Result {
 
     let poll_calls = Cell::new(0u8);
     let poll = MockPoll::new([Err(io::ErrorKind::Interrupted.into()), Ok(true)]);
-    let mut device =
-        MockDevice::new([Ok(encode_mock_packet(&TcpHandler::test_fin_ack_completing_close())?)])?;
+    let mut device = MockDevice::new([Ok(encode_mock_packet(
+        &TcpHandler::test_client_fin_ack_completing_close(),
+    )?)])?;
 
     run_test_server(
         TcpConnections::default().after_handshake(),
