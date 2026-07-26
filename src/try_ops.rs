@@ -1,16 +1,21 @@
-use std::{any::type_name, fmt, slice::SliceIndex};
+use std::{
+    any::type_name,
+    fmt,
+    slice::SliceIndex,
+    time::{Duration, Instant},
+};
 
-pub trait TryAdd: Sized {
+pub trait TryAdd<T>: Sized {
     /// Attempts to add `self + rhs`, returning `Err` if overflow occurred.
-    fn try_add(self, rhs: Self) -> Result<Self, String>;
+    fn try_add(self, rhs: T) -> Result<Self, String>;
 }
 
-/// Generates `TryAdd` implementations for all types passed as comma-separated arguments. Limited to
-/// primitive integer types.
-macro_rules! impl_try_add {
+/// Generates `TryAdd<Self>` implementations for all types passed as comma-separated arguments.
+/// Limited to primitive integer types.
+macro_rules! impl_try_add_self {
     ($($t:ty),+ $(,)?) => {
         $(
-            impl TryAdd for $t {
+            impl TryAdd<Self> for $t {
                 fn try_add(self, rhs: Self) -> Result<Self, String> {
                     self.checked_add(rhs).ok_or_else(|| {
                         format!("Overflowed `{}` adding {self} and {rhs}", stringify!($t))
@@ -21,7 +26,14 @@ macro_rules! impl_try_add {
     };
 }
 
-impl_try_add!(usize, u16);
+impl_try_add_self!(usize, u16);
+
+impl TryAdd<Duration> for Instant {
+    fn try_add(self, rhs: Duration) -> Result<Self, String> {
+        self.checked_add(rhs)
+            .ok_or_else(|| format!("Overflowed `Instant` adding {} seconds", rhs.as_secs()))
+    }
+}
 
 pub trait TryGet {
     /// Returns a reference to the element or subslice at `index`, or `Err` if out of bounds.
@@ -66,13 +78,29 @@ impl<T> TryGetMut for [T] {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, std::assert_matches};
+    use {super::*, crate::Result, std::assert_matches};
 
     #[test]
-    fn try_add_errors_for_overflow() { assert_matches!(u16::MAX.try_add(1), Err(_)) }
+    fn try_add_errors_for_overflow() {
+        assert_matches!(u16::MAX.try_add(1), Err(_));
+        assert_matches!(Instant::now().try_add(Duration::MAX), Err(_));
+    }
 
     #[test]
-    fn try_add_adds_successfully() { assert_eq!((u16::MAX - 1).try_add(1), Ok(u16::MAX)) }
+    fn try_add_adds_successfully() -> Result {
+        assert_eq!((u16::MAX - 1).try_add(1), Ok(u16::MAX));
+
+        let now = Instant::now();
+        let an_hour = Duration::from_hours(1);
+
+        let an_hour_from_now = now
+            .checked_add(an_hour)
+            .ok_or("Regular checked_add overflowed")?;
+
+        assert_eq!(now.try_add(an_hour), Ok(an_hour_from_now));
+
+        Ok(())
+    }
 
     #[test]
     fn try_get_and_try_get_mut_error_out_of_bounds() {

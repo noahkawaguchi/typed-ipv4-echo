@@ -7,7 +7,7 @@ fn stray_syn_out_of_window_gets_challenge_ack() -> Result {
     // check the SYN bit" is not reached.
 
     // snd_nxt=SERVER_ISN+1, rcv_nxt=CLIENT_ISN+1
-    let mut connections = TcpConnections::after_handshake();
+    let mut connections = TcpConnections::default().after_handshake();
     let initial_state = connections.try_get()?.clone();
 
     // seq=CLIENT_ISN-20 < rcv_nxt=CLIENT_ISN+1, outside the receive window, caught at "First, check
@@ -41,7 +41,7 @@ fn stray_syn_in_window_gets_challenge_ack() -> Result {
     // and the connection must not be reset.
 
     // snd_nxt=SERVER_ISN+1, rcv_nxt=CLIENT_ISN+1
-    let mut connections = TcpConnections::after_handshake();
+    let mut connections = TcpConnections::default().after_handshake();
     let initial_state = connections.try_get()?.clone();
 
     // seq=CLIENT_ISN+1 == rcv_nxt, inside the receive window, reaches "Fourth, check the SYN bit"
@@ -73,7 +73,7 @@ fn stray_syn_in_fin_wait_1_gets_challenge_ack() -> Result {
     // The same RFC 9293, Section 3.10.7.4 SYN rule as above applies to all synchronized states
     // listed there, not just ESTABLISHED.
 
-    let mut connections = TcpConnections::after_handshake(); // rcv_nxt=CLIENT_ISN+1
+    let mut connections = TcpConnections::default().after_handshake(); // rcv_nxt=CLIENT_ISN+1
     connections.close_established(); // -> FIN-WAIT-1, snd_nxt=SERVER_ISN+2
 
     let initial_state = connections.try_get()?.clone();
@@ -111,7 +111,7 @@ fn stray_syn_ack_gets_challenge_ack() -> Result {
     // verified for robustness and correctness reasons.
 
     // snd_nxt=SERVER_ISN+1, rcv_nxt=CLIENT_ISN+1
-    let mut connections = TcpConnections::after_handshake();
+    let mut connections = TcpConnections::default().after_handshake();
     let initial_state = connections.try_get()?.clone();
 
     // seq=CLIENT_ISN+1 == rcv_nxt, inside the receive window, reaches "Fourth, check the SYN bit"

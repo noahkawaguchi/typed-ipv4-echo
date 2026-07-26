@@ -29,7 +29,7 @@ fn duplicate_syn_during_syn_received_resends_same_syn_ack() -> Result {
     // the same SYN-ACK (same ISN), not RST the retry, and not generate a new ISN.
 
     // Simulate having already sent a SYN-ACK with ISN=SERVER_ISN
-    let mut connections = TcpConnections::with_syn_rcv();
+    let mut connections = TcpConnections::default().with_syn_rcv();
     let initial_state = connections.try_get()?.clone();
 
     let reply = TcpHandler { seq_num: CLIENT_ISN, flags: TcpFlags::Syn, ..CLIENT_PACKET }
@@ -58,7 +58,7 @@ fn duplicate_syn_during_syn_received_resends_same_syn_ack() -> Result {
 #[test]
 fn data_packet_before_complete_handshake_gets_rst() -> Result {
     // SYN-ACK sent, but handshake not yet completed
-    let mut connections = TcpConnections::with_syn_rcv();
+    let mut connections = TcpConnections::default().with_syn_rcv();
 
     let reply = TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE,
@@ -80,7 +80,7 @@ fn data_packet_before_complete_handshake_gets_rst() -> Result {
 fn handshake_ack_establishes_connection_and_returns_none() -> Result {
     // Simulate having sent a SYN-ACK with ISN=SERVER_ISN so ack_num=SERVER_ISN+1 is the correct
     // completion
-    let mut connections = TcpConnections::with_syn_rcv();
+    let mut connections = TcpConnections::default().with_syn_rcv();
     let mut cloned_state = connections.try_get()?.clone();
 
     let handshake_ack = TcpHandler {
@@ -113,7 +113,7 @@ fn handshake_ack_with_wrong_seq_num_does_not_establish() -> Result {
     // the ACK field is otherwise valid. Instead, an ACK reflecting current state is sent and the
     // segment is dropped.
 
-    let mut connections = TcpConnections::with_syn_rcv();
+    let mut connections = TcpConnections::default().with_syn_rcv();
     let initial_state = connections.try_get()?.clone();
 
     // Correct ack_num, but seq_num doesn't match RCV.NXT = CLIENT_ISN + SYN_BYTE

@@ -23,6 +23,7 @@ pub trait Encode: fmt::Display {
 }
 
 /// Enum for static dispatch over the supported protocol-specific handlers.
+#[cfg_attr(test, derive(Debug))]
 pub enum ProtocolHandler<'a> {
     Icmp(IcmpEchoHandler<'a>),
     Tcp(TcpHandler),

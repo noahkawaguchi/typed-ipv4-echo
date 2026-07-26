@@ -1,5 +1,5 @@
 pub mod handler;
-pub use tcp::TcpConnections;
+pub use tcp::{TcpConnections, TcpHandler};
 
 mod icmp_echo;
 mod tcp;

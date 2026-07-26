@@ -182,18 +182,16 @@ impl TcpConnections {
         self.table.insert(KEY, conn);
     }
 
-    /// Creates a default-initialized `Self` and inserts a new SYN-RECEIVED connection using `KEY`,
-    /// `CLIENT_ISN`, and `SERVER_ISN` as if we had just responded to the peer's SYN with SYN-ACK.
+    /// Inserts a SYN-RECEIVED connection using `KEY`, `CLIENT_ISN`, and `SERVER_ISN` as if we had
+    /// just responded to the peer's SYN with SYN-ACK.
     #[cfg(test)]
-    pub(super) fn with_syn_rcv() -> Self {
+    pub(crate) fn with_syn_rcv(mut self) -> Self {
         use {
             crate::protocol::tcp::tests::{CLIENT_ISN, KEY, SERVER_ISN, SYN_BYTE},
             std::collections::VecDeque,
         };
 
-        let mut connections = Self::default();
-
-        connections.table.insert(
+        self.table.insert(
             KEY,
             ConnState {
                 tcp_state: TcpState::SynReceived,
@@ -211,17 +209,16 @@ impl TcpConnections {
             },
         );
 
-        connections
+        self
     }
 
-    /// Creates a default-initialized `Self` and inserts a default-initialized ESTABLISHED
-    /// connection using `KEY` as if the initial three-way handshake had just completed.
+    /// Inserts an ESTABLISHED connection using `KEY` as if the initial three-way handshake had just
+    /// completed.
     #[cfg(test)]
-    pub(super) fn after_handshake() -> Self {
+    pub(crate) fn after_handshake(mut self) -> Self {
         use crate::protocol::tcp::tests::{AFTER_HANDSHAKE, KEY};
 
-        let mut connections = Self::default();
-        connections.table.insert(KEY, AFTER_HANDSHAKE);
-        connections
+        self.table.insert(KEY, AFTER_HANDSHAKE);
+        self
     }
 }
