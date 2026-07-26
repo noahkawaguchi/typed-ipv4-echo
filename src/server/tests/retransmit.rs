@@ -20,11 +20,7 @@ fn due_retransmission_is_sent_as_real_io() -> Result {
 
     let [write] = device.writes() else { return Err("Expected exactly one write".into()) };
 
-    let ProtocolHandler::Tcp(handler) = decode_mock_packet(write)? else {
-        return Err("Expected a TCP packet".into());
-    };
-
-    assert_eq!(handler, TcpHandler::test_server_syn_ack_for_syn_received());
+    assert_eq!(decode_mock_tcp_packet(write)?, TcpHandler::test_server_syn_ack_for_syn_received());
 
     Ok(())
 }
@@ -53,12 +49,8 @@ fn retransmission_does_not_drop_the_connection() -> Result {
     };
 
     for write in [first, second] {
-        let ProtocolHandler::Tcp(handler) = decode_mock_packet(write)? else {
-            return Err("Expected a TCP packet".into());
-        };
-
         assert_eq!(
-            handler,
+            decode_mock_tcp_packet(write)?,
             TcpHandler::test_server_syn_ack_for_syn_received(),
             "Every retransmission should resend the same unacked SYN-ACK unchanged"
         );
@@ -91,12 +83,8 @@ fn gives_up_and_drops_connection_after_max_retries() -> Result {
     };
 
     for write in [first, second] {
-        let ProtocolHandler::Tcp(handler) = decode_mock_packet(write)? else {
-            return Err("Expected a TCP packet".into());
-        };
-
         assert_eq!(
-            handler,
+            decode_mock_tcp_packet(write)?,
             TcpHandler::test_server_syn_ack_for_syn_received(),
             "Every retransmission should resend the same unacked SYN-ACK unchanged"
         );

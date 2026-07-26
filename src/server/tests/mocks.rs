@@ -97,8 +97,16 @@ pub fn encode_mock_packet(handler: &impl Encode) -> Result<Vec<u8>> {
     Ok(buf.try_get(..ipv4_header.total_len.into())?.to_vec())
 }
 
-/// Decodes a full IPv4 packet so tests can assert on structs instead of raw bytes.
-pub fn decode_mock_packet(bytes: &[u8]) -> Result<ProtocolHandler<'_>> {
+/// Decodes a full IPv4 packet into a `TcpHandler` so tests can assert on structs instead of raw
+/// bytes.
+pub fn decode_mock_tcp_packet(bytes: &[u8]) -> Result<TcpHandler> {
     let (ipv4_header, payload) = Ipv4Header::parse(bytes)?;
-    ProtocolHandler::parse(payload, ipv4_header.protocol, ipv4_header.ip_pair)
+
+    let ProtocolHandler::Tcp(handler) =
+        ProtocolHandler::parse(payload, ipv4_header.protocol, ipv4_header.ip_pair)?
+    else {
+        return Err("Expected a TCP packet".into());
+    };
+
+    Ok(handler)
 }
