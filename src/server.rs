@@ -47,7 +47,7 @@ where
 {
     Server {
         write_buf: [0u8; ETHERNET_MTU],
-        tcp_connections: TcpConnections::new(config.initial_rto, config.max_retransmits),
+        tcp_connections: TcpConnections::new(config.initial_rto, config.max_retries),
         device,
         poll_readable,
         shutdown_check,

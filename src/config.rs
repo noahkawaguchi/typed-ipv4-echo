@@ -14,7 +14,7 @@ pub struct Config {
 
     /// The number of times to retransmit an unacked TCP segment before giving up and dropping the
     /// connection.
-    pub max_retransmits: u8,
+    pub max_retries: u8,
 }
 
 /// Loads config from environment variables or falls back to defaults.
@@ -28,7 +28,7 @@ pub fn load() -> Result<Config, String> {
         tun_name: get_env_or_else(|| String::from("tun0"), "TUN_DEVICE_NAME")?,
         grace_period: Duration::from_secs(get_env_or_else(|| 5, "GRACE_PERIOD_SECS")?),
         initial_rto: Duration::from_millis(get_env_or_else(|| 500, "INITIAL_RTO_MILLIS")?),
-        max_retransmits: get_env_or_else(|| 5, "MAX_TCP_RETRANSMISSIONS")?,
+        max_retries: get_env_or_else(|| 5, "MAX_TCP_RETRANSMISSIONS")?,
     })
 }
 
