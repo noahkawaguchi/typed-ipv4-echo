@@ -491,6 +491,22 @@ impl TcpHandler {
 
         Self { seq_num: CLIENT_ISN + SYN_BYTE, ack_num: SERVER_ISN + SYN_BYTE, ..CLIENT_PACKET }
     }
+
+    /// The client's FIN-ACK completing active close after our own FIN was sent (FIN-WAIT-1), which
+    /// also acknowledges our FIN, so the connection should close immediately.
+    #[cfg(test)]
+    pub(crate) fn test_fin_ack_completing_close() -> Self {
+        use crate::protocol::tcp::tests::{
+            CLIENT_ISN, CLIENT_PACKET, FIN_BYTE, SERVER_ISN, SYN_BYTE,
+        };
+
+        Self {
+            seq_num: CLIENT_ISN + SYN_BYTE,
+            ack_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
+            flags: TcpFlags::FinAck,
+            ..CLIENT_PACKET
+        }
+    }
 }
 
 impl Encode for TcpHandler {
