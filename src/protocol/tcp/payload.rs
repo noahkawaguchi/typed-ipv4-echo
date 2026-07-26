@@ -76,7 +76,7 @@ mod tests {
     #[test]
     fn err_for_too_large() {
         assert_matches!(
-            TcpPayload::try_from_iter(MAX_ARRAY.into_iter().chain([b'e'])),
+            TcpPayload::try_from_iter(MAX_ARRAY.into_iter().chain(*b"e")),
             Err(e) if e.contains("longer than")
         );
     }
