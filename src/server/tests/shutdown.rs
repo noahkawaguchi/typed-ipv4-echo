@@ -50,16 +50,15 @@ fn some_deadline_no_closing() {
 
 #[test]
 fn exits_once_connections_finish_closing() -> Result {
-    // A grace period too long to elapse means the second poll's `Ok(false)` must fall through to
-    // the retransmit branch instead of the "grace period elapsed" branch. The default
-    // `TcpConnections` has a max retries of 0, so the retransmission attempt actually drops the
-    // connection, which then lets the third poll call (processing an otherwise irrelevant packet)
-    // prove that the post-packet closing in progress check ends the loop early, even though the
-    // grace period is nowhere close to elapsing.
+    // The first poll is a shutdown signal that begins active close (FIN-ACK sent -> FIN-WAIT-1).
+    // The second poll delivers the client's real closing FIN-ACK, which the connection accepts as
+    // completing the close. The post-packet check should then end the loop immediately, without
+    // needing the (very long) grace period to elapse.
 
     let poll_calls = Cell::new(0u8);
-    let poll = MockPoll::new([Err(io::ErrorKind::Interrupted.into()), Ok(false), Ok(true)]);
-    let mut device = MockDevice::new([Ok(vec![0u8; 5])])?;
+    let poll = MockPoll::new([Err(io::ErrorKind::Interrupted.into()), Ok(true)]);
+    let mut device =
+        MockDevice::new([Ok(encode_mock_packet(&TcpHandler::test_fin_ack_completing_close())?)])?;
 
     run_test_server(
         TcpConnections::default().after_handshake(),
@@ -72,8 +71,12 @@ fn exits_once_connections_finish_closing() -> Result {
         ONE_YEAR_GRACE_PERIOD,
     )?;
 
-    assert_eq!(poll_calls.get(), 3, "All three poll calls should have been needed to exit");
-    assert_eq!(device.writes().len(), 1, "Only the original FIN-ACK, no resend, should be written");
+    assert_eq!(poll_calls.get(), 2, "Both poll calls should have been needed to exit");
+    assert_eq!(
+        device.writes().len(),
+        2,
+        "The initial FIN-ACK and the final ACK completing the close should be written"
+    );
 
     Ok(())
 }
