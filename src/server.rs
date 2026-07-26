@@ -1,6 +1,7 @@
 use {
     crate::{
         ETHERNET_MTU, Result,
+        config::Config,
         ipv4_header::Ipv4Header,
         protocol::{
             TcpConnections, TcpHandler,
@@ -14,14 +15,6 @@ use {
         time::{Duration, Instant},
     },
 };
-
-/// The initial retransmission timeout, i.e. how long to wait before retransmitting an unacked
-/// segment the first time before exponential backoff.
-const INITIAL_RTO: Duration = Duration::from_millis(500);
-
-/// The number of times to retransmit an unacked segment before giving up and dropping the
-/// connection.
-const MAX_RETRANSMITS: u8 = 5;
 
 fn divider() { println!("\n{}\n", "=".repeat(60)) }
 
@@ -46,12 +39,7 @@ enum ShutdownDecision {
 /// When polling `device` with `poll_readable` is interrupted and `shutdown_check` returns `true`,
 /// actively closes all established TCP connections and waits up to `shutdown_grace_period` for them
 /// to finish before returning.
-pub fn run<D, P, S>(
-    device: &mut D,
-    poll_readable: P,
-    shutdown_check: S,
-    shutdown_grace_period: Duration,
-) -> Result
+pub fn run<D, P, S>(device: &mut D, poll_readable: P, shutdown_check: S, config: &Config) -> Result
 where
     D: Read + Write + AsFd,
     P: Fn(&D, Option<Duration>) -> io::Result<bool>,
@@ -59,11 +47,11 @@ where
 {
     Server {
         write_buf: [0u8; ETHERNET_MTU],
-        tcp_connections: TcpConnections::new(INITIAL_RTO, MAX_RETRANSMITS),
+        tcp_connections: TcpConnections::new(config.initial_rto, config.max_retransmits),
         device,
         poll_readable,
         shutdown_check,
-        shutdown_grace_period,
+        shutdown_grace_period: config.grace_period,
         shutdown_deadline: None,
     }
     .run()

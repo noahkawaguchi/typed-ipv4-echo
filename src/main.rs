@@ -3,13 +3,12 @@ compile_error!("This crate only supports Linux because it directly uses low-leve
 
 mod addr_pairs;
 mod checksum;
+mod config;
 mod ipv4_header;
 mod protocol;
 mod server;
 mod sys;
 mod try_ops;
-
-use std::{env, time::Duration};
 
 type Result<T = (), E = Box<dyn std::error::Error>> = std::result::Result<T, E>;
 
@@ -18,15 +17,12 @@ const ETHERNET_MTU: usize = 1500;
 
 /// Runs an echo server that uses a TUN device to read and write IPv4 packets: TCP, UDP, and ICMP.
 fn main() -> Result {
-    /// The amount of time to wait for established TCP connections to finish closing after a
-    /// shutdown signal before exiting unconditionally.
-    const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(5);
-
     let shutdown = sys::ShutdownSignal::install()?;
 
-    let tun_name = env::var("TUN_DEVICE_NAME").unwrap_or_else(|_| String::from("tun0"));
-    let mut tun = sys::tun::attach(&tun_name)?;
-    println!("Attached to TUN device {tun_name}");
+    let config = config::load();
+
+    let mut tun = sys::tun::attach(&config.tun_name)?;
+    println!("Attached to TUN device {}", config.tun_name);
 
     println!("Waiting for packets... (Ctrl+C to stop)");
 
@@ -34,6 +30,6 @@ fn main() -> Result {
         &mut tun,
         |fd, timeout| sys::poll::readable(fd, timeout),
         || shutdown.load(),
-        SHUTDOWN_GRACE_PERIOD,
+        &config,
     )
 }
