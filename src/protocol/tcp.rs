@@ -473,84 +473,6 @@ impl TcpHandler {
 
         send_info
     }
-
-    /// A SYN requesting a new connection using the regular `CLIENT_PACKET` consts, which should
-    /// generate a SYN-ACK reply.
-    #[cfg(test)]
-    pub(crate) fn test_client_syn_requesting_connection() -> Self {
-        use crate::protocol::tcp::tests::CLIENT_PACKET;
-
-        Self { flags: TcpFlags::Syn, ..CLIENT_PACKET }
-    }
-
-    /// The handshake-completing ACK matching the module's standard test consts, which should be
-    /// accepted if in SYN-RECEIVED by transitioning to ESTABLISHED and replying with `None`.
-    #[cfg(test)]
-    pub(crate) fn test_client_ack_completing_handshake() -> Self {
-        use crate::protocol::tcp::tests::{CLIENT_ISN, CLIENT_PACKET, SERVER_ISN, SYN_BYTE};
-
-        Self { seq_num: CLIENT_ISN + SYN_BYTE, ack_num: SERVER_ISN + SYN_BYTE, ..CLIENT_PACKET }
-    }
-
-    /// The client's FIN-ACK completing active close after our own FIN was sent (FIN-WAIT-1), which
-    /// also acknowledges our FIN, so the connection should close immediately.
-    #[cfg(test)]
-    pub(crate) fn test_client_fin_ack_completing_close() -> Self {
-        use crate::protocol::tcp::tests::{
-            CLIENT_ISN, CLIENT_PACKET, FIN_BYTE, SERVER_ISN, SYN_BYTE,
-        };
-
-        Self {
-            seq_num: CLIENT_ISN + SYN_BYTE,
-            ack_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
-            flags: TcpFlags::FinAck,
-            ..CLIENT_PACKET
-        }
-    }
-
-    /// The server's FIN-ACK reply when actively initiating close right after the handshake for the
-    /// standard connection using the module's test consts.
-    #[cfg(test)]
-    pub(crate) fn test_server_fin_ack_initiating_close() -> Self {
-        use crate::protocol::tcp::tests::{CLIENT_ISN, SERVER_ISN, SERVER_REPLY, SYN_BYTE};
-
-        Self {
-            seq_num: SERVER_ISN + SYN_BYTE,
-            ack_num: CLIENT_ISN + SYN_BYTE,
-            flags: TcpFlags::FinAck,
-            ..SERVER_REPLY
-        }
-    }
-
-    /// The server's final ACK completing close from FIN-WAIT-1, matching the module's standard test
-    /// consts for a connection closing right after the handshake, after its FIN was both acked and
-    /// matched by the peer's own FIN in the same segment.
-    #[cfg(test)]
-    pub(crate) fn test_server_final_ack_completing_close() -> Self {
-        use crate::protocol::tcp::tests::{
-            CLIENT_ISN, FIN_BYTE, SERVER_ISN, SERVER_REPLY, SYN_BYTE,
-        };
-
-        Self {
-            seq_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
-            ack_num: CLIENT_ISN + SYN_BYTE + FIN_BYTE,
-            ..SERVER_REPLY
-        }
-    }
-
-    /// The server's SYN-ACK reply for the standard SYN-RECEIVED connection using the module's
-    /// standard test consts.
-    #[cfg(test)]
-    pub(crate) fn test_server_syn_ack_for_syn_received() -> Self {
-        use crate::protocol::tcp::tests::{CLIENT_ISN, SERVER_ISN, SERVER_REPLY, SYN_BYTE};
-
-        Self {
-            seq_num: SERVER_ISN,
-            ack_num: CLIENT_ISN + SYN_BYTE,
-            flags: TcpFlags::SynAck,
-            ..SERVER_REPLY
-        }
-    }
 }
 
 impl Encode for TcpHandler {
@@ -663,4 +585,62 @@ mod tests {
         crate::protocol::test_consts::{DST_IP, IP_PAIR, SRC_IP},
         std::{assert_matches, collections::VecDeque},
     };
+
+    impl TcpHandler {
+        /// A SYN requesting a new connection using the regular `CLIENT_PACKET` consts, which should
+        /// generate a SYN-ACK reply.
+        pub(crate) fn test_client_syn_requesting_connection() -> Self {
+            Self { flags: TcpFlags::Syn, ..CLIENT_PACKET }
+        }
+
+        /// The handshake-completing ACK matching the module's standard test consts, which should be
+        /// accepted if in SYN-RECEIVED by transitioning to ESTABLISHED and replying with `None`.
+        pub(crate) fn test_client_ack_completing_handshake() -> Self {
+            Self { seq_num: CLIENT_ISN + SYN_BYTE, ack_num: SERVER_ISN + SYN_BYTE, ..CLIENT_PACKET }
+        }
+
+        /// The client's FIN-ACK completing active close after our own FIN was sent (FIN-WAIT-1),
+        /// which also acknowledges our FIN, so the connection should close immediately.
+        pub(crate) fn test_client_fin_ack_completing_close() -> Self {
+            Self {
+                seq_num: CLIENT_ISN + SYN_BYTE,
+                ack_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
+                flags: TcpFlags::FinAck,
+                ..CLIENT_PACKET
+            }
+        }
+
+        /// The server's FIN-ACK reply when actively initiating close right after the handshake for
+        /// the standard connection using the module's test consts.
+        pub(crate) fn test_server_fin_ack_initiating_close() -> Self {
+            Self {
+                seq_num: SERVER_ISN + SYN_BYTE,
+                ack_num: CLIENT_ISN + SYN_BYTE,
+                flags: TcpFlags::FinAck,
+                ..SERVER_REPLY
+            }
+        }
+
+        /// The server's final ACK completing close from FIN-WAIT-1, matching the module's standard
+        /// test consts for a connection closing right after the handshake, after its FIN
+        /// was both acked and matched by the peer's own FIN in the same segment.
+        pub(crate) fn test_server_final_ack_completing_close() -> Self {
+            Self {
+                seq_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
+                ack_num: CLIENT_ISN + SYN_BYTE + FIN_BYTE,
+                ..SERVER_REPLY
+            }
+        }
+
+        /// The server's SYN-ACK reply for the standard SYN-RECEIVED connection using the module's
+        /// standard test consts.
+        pub(crate) fn test_server_syn_ack_for_syn_received() -> Self {
+            Self {
+                seq_num: SERVER_ISN,
+                ack_num: CLIENT_ISN + SYN_BYTE,
+                flags: TcpFlags::SynAck,
+                ..SERVER_REPLY
+            }
+        }
+    }
 }
