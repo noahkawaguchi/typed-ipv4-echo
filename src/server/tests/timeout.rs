@@ -104,9 +104,9 @@ fn poll_timeout_reflects_shutdown_deadline_across_a_real_run() -> Result {
     // Showing here that the loop actually uses the computed timeout when polling, and that the
     // grace period being elapsed actually ends the loop.
     //
-    // Not asserting exact `Duration` values since they come from `Instant::now()`, just that the
-    // timeout is unbounded before any shutdown signal and becomes bounded (and, with an immediate
-    // grace period, causes exit) once draining starts.
+    // Even though the exact `Duration` values come from `Instant::now()` calls, the grace period
+    // and initial RTO are both `Duration::ZERO`, so the duration since a slightly later
+    // `Instant::now()` call saturates to `Duration::ZERO` for the second timeout.
 
     let observed_timeouts = RefCell::new(Vec::new());
     let poll = MockPoll::with_results([Err(io::ErrorKind::Interrupted.into()), Ok(false)]);
@@ -127,11 +127,15 @@ fn poll_timeout_reflects_shutdown_deadline_across_a_real_run() -> Result {
         IMMEDIATE_GRACE_PERIOD,
     )?;
 
-    assert_matches!(
+    assert_eq!(
         observed_timeouts.into_inner().as_slice(),
-        [None, Some(_)],
-        "No timeout before the interrupt, then some timeout once draining begins"
+        [None, Some(Duration::ZERO)],
+        "No timeout before the interrupt, then a zero timeout once draining begins"
     );
+
+    let [write] = device.write_history() else { return Err("Expected exactly one write".into()) };
+
+    assert_eq!(decode_mock_tcp_packet(write)?, TcpHandler::SERVER_FIN_ACK_INITIATING_CLOSE);
 
     Ok(())
 }
