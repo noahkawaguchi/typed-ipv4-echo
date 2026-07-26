@@ -19,7 +19,7 @@ const ETHERNET_MTU: usize = 1500;
 fn main() -> Result {
     let shutdown = sys::ShutdownSignal::install()?;
 
-    let config = config::load();
+    let config = config::load()?;
 
     let mut tun = sys::tun::attach(&config.tun_name)?;
     println!("Attached to TUN device {}", config.tun_name);

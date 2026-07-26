@@ -1,4 +1,4 @@
-use std::{env, time::Duration};
+use std::{any::type_name, env, str::FromStr, time::Duration};
 
 pub struct Config {
     /// The name of the TUN device to attach to.
@@ -17,12 +17,45 @@ pub struct Config {
     pub max_retransmits: u8,
 }
 
-pub fn load() -> Config {
-    Config {
+/// Loads config from environment variables or falls back to defaults.
+///
+/// # Errors
+///
+/// Returns `Err` if an environment variable is present but unparsable.
+pub fn load() -> Result<Config, String> {
+    Ok(Config {
         // NOTE: "TUN_DEVICE_NAME" is also read by the TUN creation script with a "tun0" fallback
-        tun_name: env::var("TUN_DEVICE_NAME").unwrap_or_else(|_| String::from("tun0")),
-        grace_period: Duration::from_secs(5),
-        initial_rto: Duration::from_millis(500),
-        max_retransmits: 5,
+        tun_name: get_env_or_else(|| String::from("tun0"), "TUN_DEVICE_NAME")?,
+        grace_period: Duration::from_secs(get_env_or_else(|| 5, "GRACE_PERIOD_SECS")?),
+        initial_rto: Duration::from_millis(get_env_or_else(|| 500, "INITIAL_RTO_MILLIS")?),
+        max_retransmits: get_env_or_else(|| 5, "MAX_TCP_RETRANSMISSIONS")?,
+    })
+}
+
+/// Reads in an environment variable using `key`, or if not found, computes a default from a
+/// closure.
+///
+/// # Errors
+///
+/// Returns `Err` if the environment variable is present but is not valid Unicode or cannot be
+/// parsed as `T`.
+fn get_env_or_else<T, F>(op: F, key: &str) -> Result<T, String>
+where
+    T: FromStr,
+    F: FnOnce() -> T,
+{
+    match env::var(key) {
+        Err(env::VarError::NotPresent) => Ok(op()),
+
+        Err(env::VarError::NotUnicode(_)) => {
+            Err(format!("Environment variable {key} present but not valid Unicode"))
+        }
+
+        Ok(val) => val.parse().map_err(|_| {
+            format!(
+                "Environment variable {key} present but could not be parsed as {}",
+                type_name::<T>()
+            )
+        }),
     }
 }
