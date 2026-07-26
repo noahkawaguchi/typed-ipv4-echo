@@ -291,6 +291,7 @@ mod tests {
     mod mocks;
     mod packet_handling;
     mod propagate;
+    mod retransmit;
     mod shutdown;
     mod timeout;
 
