@@ -4,8 +4,8 @@ use super::*;
 fn poll_error_unrelated_to_interruption_propagates() -> Result {
     const MESSAGE: &str = "boom from poll";
 
-    let poll = MockPoll::new([Err(io::Error::other(MESSAGE))]);
-    let mut device = MockDevice::new([])?;
+    let poll = MockPoll::with_results([Err(io::Error::other(MESSAGE))]);
+    let mut device = MockDevice::with_read_results([])?;
 
     assert_matches!(
         run_test_server(
@@ -26,8 +26,8 @@ fn poll_error_unrelated_to_interruption_propagates() -> Result {
 fn read_error_unrelated_to_interruption_propagates() -> Result {
     const MESSAGE: &str = "boom from read";
 
-    let poll = MockPoll::new([Ok(true)]);
-    let mut device = MockDevice::new([Err(io::Error::other(MESSAGE))])?;
+    let poll = MockPoll::with_results([Ok(true)]);
+    let mut device = MockDevice::with_read_results([Err(io::Error::other(MESSAGE))])?;
 
     assert_matches!(
         run_test_server(
@@ -48,8 +48,8 @@ fn read_error_unrelated_to_interruption_propagates() -> Result {
 fn write_failure_while_sending_fin_ack_propagates() -> Result {
     const MESSAGE: &str = "boom from write";
 
-    let poll = MockPoll::new([Err(io::ErrorKind::Interrupted.into())]);
-    let mut device = MockDevice::new([])?.fail_writes(MESSAGE);
+    let poll = MockPoll::with_results([Err(io::ErrorKind::Interrupted.into())]);
+    let mut device = MockDevice::with_read_results([])?.with_failing_writes(MESSAGE);
 
     assert_matches!(
         run_test_server(

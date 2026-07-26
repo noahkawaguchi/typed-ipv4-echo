@@ -101,8 +101,8 @@ fn poll_timeout_reflects_shutdown_deadline_across_a_real_run() -> Result {
     // grace period, causes exit) once draining starts.
 
     let observed_timeouts = RefCell::new(Vec::new());
-    let poll = MockPoll::new([Err(io::ErrorKind::Interrupted.into()), Ok(false)]);
-    let mut device = MockDevice::new([])?;
+    let poll = MockPoll::with_results([Err(io::ErrorKind::Interrupted.into()), Ok(false)]);
+    let mut device = MockDevice::with_read_results([])?;
 
     run_test_server(
         TcpConnections::default().after_handshake(),

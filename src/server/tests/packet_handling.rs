@@ -62,8 +62,8 @@ fn malformed_packet_is_skipped_without_propagating_or_writing() -> Result {
     // packet should just be logged and skipped. The second poll call is a shutdown signal, and
     // since there are no established connections, it ends the loop cleanly.
 
-    let poll = MockPoll::new([Ok(true), Err(io::ErrorKind::Interrupted.into())]);
-    let mut device = MockDevice::new([Ok(vec![0u8; 5])])?;
+    let poll = MockPoll::with_results([Ok(true), Err(io::ErrorKind::Interrupted.into())]);
+    let mut device = MockDevice::with_read_results([Ok(vec![0u8; 5])])?;
 
     assert_matches!(
         run_test_server(
@@ -77,15 +77,15 @@ fn malformed_packet_is_skipped_without_propagating_or_writing() -> Result {
         "A malformed packet error should not propagate"
     );
 
-    assert!(device.writes().is_empty(), "A malformed packet should not produce a reply");
+    assert!(device.write_history().is_empty(), "A malformed packet should not produce a reply");
 
     Ok(())
 }
 
 #[test]
 fn valid_syn_producing_a_reply_is_sent() -> Result {
-    let poll = MockPoll::new([Ok(true), Err(io::ErrorKind::Interrupted.into())]);
-    let mut device = MockDevice::new([Ok(encode_mock_packet(&TcpHandler::CLIENT_SYN)?)])?;
+    let poll = MockPoll::with_results([Ok(true), Err(io::ErrorKind::Interrupted.into())]);
+    let mut device = MockDevice::with_read_results([Ok(encode_mock_packet(&TcpHandler::CLIENT_SYN)?)])?;
 
     run_test_server(
         TcpConnections::default(),
@@ -96,7 +96,7 @@ fn valid_syn_producing_a_reply_is_sent() -> Result {
     )?;
 
     // Only asserting on length instead of content here because of the randomly generated ISN
-    assert_eq!(device.writes().len(), 1, "The SYN should get a SYN-ACK reply written");
+    assert_eq!(device.write_history().len(), 1, "The SYN should get a SYN-ACK reply written");
 
     Ok(())
 }
@@ -109,9 +109,10 @@ fn valid_ack_completing_handshake_produces_no_reply() -> Result {
 
     const MESSAGE: &str = "boom from poll, unrelated to the ACK just processed";
 
-    let poll = MockPoll::new([Ok(true), Err(io::Error::other(MESSAGE))]);
-    let mut device =
-        MockDevice::new([Ok(encode_mock_packet(&TcpHandler::CLIENT_ACK_COMPLETING_HANDSHAKE)?)])?;
+    let poll = MockPoll::with_results([Ok(true), Err(io::Error::other(MESSAGE))]);
+    let mut device = MockDevice::with_read_results([Ok(encode_mock_packet(
+        &TcpHandler::CLIENT_ACK_COMPLETING_HANDSHAKE,
+    )?)])?;
 
     assert_matches!(
         run_test_server(
@@ -124,7 +125,7 @@ fn valid_ack_completing_handshake_produces_no_reply() -> Result {
         Err(e) if e.to_string().contains(MESSAGE)
     );
 
-    assert!(device.writes().is_empty(), "The handshake-completing ACK should not produce a reply");
+    assert!(device.write_history().is_empty(), "The handshake-completing ACK should not produce a reply");
 
     Ok(())
 }

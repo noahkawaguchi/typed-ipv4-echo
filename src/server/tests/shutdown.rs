@@ -56,9 +56,10 @@ fn exits_once_connections_finish_closing() -> Result {
     // needing the (very long) grace period to elapse.
 
     let poll_calls = Cell::new(0u8);
-    let poll = MockPoll::new([Err(io::ErrorKind::Interrupted.into()), Ok(true)]);
-    let mut device =
-        MockDevice::new([Ok(encode_mock_packet(&TcpHandler::CLIENT_FIN_ACK_COMPLETING_CLOSE)?)])?;
+    let poll = MockPoll::with_results([Err(io::ErrorKind::Interrupted.into()), Ok(true)]);
+    let mut device = MockDevice::with_read_results([Ok(encode_mock_packet(
+        &TcpHandler::CLIENT_FIN_ACK_COMPLETING_CLOSE,
+    )?)])?;
 
     run_test_server(
         TcpConnections::default().after_handshake(),
@@ -73,7 +74,7 @@ fn exits_once_connections_finish_closing() -> Result {
 
     assert_eq!(poll_calls.get(), 2, "Both poll calls should have been needed to exit");
 
-    let [fin_ack, final_ack] = device.writes() else {
+    let [fin_ack, final_ack] = device.write_history() else {
         return Err(
             "The initial FIN-ACK and the final ACK completing the close should be written".into()
         );

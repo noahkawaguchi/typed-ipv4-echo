@@ -65,8 +65,8 @@ fn first_interrupt_with_established_connection_sends_fin_ack_and_continues() -> 
     // grace period end the loop instead of running forever. Proves that the loop sends the packets
     // as real I/O when draining begins.
 
-    let poll = MockPoll::new([Err(io::ErrorKind::Interrupted.into()), Ok(false)]);
-    let mut device = MockDevice::new([])?;
+    let poll = MockPoll::with_results([Err(io::ErrorKind::Interrupted.into()), Ok(false)]);
+    let mut device = MockDevice::with_read_results([])?;
 
     run_test_server(
         TcpConnections::default().after_handshake(),
@@ -76,7 +76,7 @@ fn first_interrupt_with_established_connection_sends_fin_ack_and_continues() -> 
         IMMEDIATE_GRACE_PERIOD,
     )?;
 
-    let [write] = device.writes() else { return Err("Expected exactly one write".into()) };
+    let [write] = device.write_history() else { return Err("Expected exactly one write".into()) };
 
     assert_eq!(decode_mock_tcp_packet(write)?, TcpHandler::SERVER_FIN_ACK_INITIATING_CLOSE);
 
@@ -93,12 +93,12 @@ fn second_interrupt_while_draining_does_not_resend_or_exit() -> Result {
     const MESSAGE: &str = "boom, unrelated to shutdown";
 
     let poll_calls = Cell::new(0u8);
-    let poll = MockPoll::new([
+    let poll = MockPoll::with_results([
         Err(io::ErrorKind::Interrupted.into()),
         Err(io::ErrorKind::Interrupted.into()),
         Err(io::Error::other(MESSAGE)),
     ]);
-    let mut device = MockDevice::new([])?;
+    let mut device = MockDevice::with_read_results([])?;
 
     assert_matches!(
         run_test_server(
@@ -117,7 +117,7 @@ fn second_interrupt_while_draining_does_not_resend_or_exit() -> Result {
 
     assert_eq!(poll_calls.get(), 3, "All three poll calls should have been needed");
 
-    let [write] = device.writes() else { return Err("Expected exactly one write".into()) };
+    let [write] = device.write_history() else { return Err("Expected exactly one write".into()) };
 
     assert_eq!(
         decode_mock_tcp_packet(write)?,
@@ -133,10 +133,12 @@ fn interrupt_with_no_established_connections_exits_immediately() -> Result {
     // The server should exit after the initial interrupted error, avoiding the second error, which
     // would be propagated
 
-    let poll =
-        MockPoll::new([Err(io::ErrorKind::Interrupted.into()), Err(io::ErrorKind::Other.into())]);
+    let poll = MockPoll::with_results([
+        Err(io::ErrorKind::Interrupted.into()),
+        Err(io::ErrorKind::Other.into()),
+    ]);
 
-    let mut device = MockDevice::new([])?;
+    let mut device = MockDevice::with_read_results([])?;
 
     assert_matches!(
         run_test_server(
@@ -150,7 +152,10 @@ fn interrupt_with_no_established_connections_exits_immediately() -> Result {
         "Server should exit before hitting the error that would be propagated"
     );
 
-    assert!(device.writes().is_empty(), "No connections to close, nothing should be written");
+    assert!(
+        device.write_history().is_empty(),
+        "No connections to close, nothing should be written"
+    );
 
     Ok(())
 }
@@ -165,12 +170,12 @@ fn interrupt_unrelated_to_shutdown_is_ignored() -> Result {
 
     let poll_calls = Cell::new(0u8);
 
-    let poll = MockPoll::new([
+    let poll = MockPoll::with_results([
         Err(io::ErrorKind::Interrupted.into()),
         Err(io::ErrorKind::Interrupted.into()),
     ]);
 
-    let mut device = MockDevice::new([])?;
+    let mut device = MockDevice::with_read_results([])?;
 
     run_test_server(
         TcpConnections::default(),
@@ -184,7 +189,7 @@ fn interrupt_unrelated_to_shutdown_is_ignored() -> Result {
     )?;
 
     assert_eq!(poll_calls.get(), 2, "The first interrupt should not have ended the loop early");
-    assert!(device.writes().is_empty(), "Nothing should have been written");
+    assert!(device.write_history().is_empty(), "Nothing should have been written");
 
     Ok(())
 }
@@ -194,8 +199,8 @@ fn read_interrupt_reaches_the_same_shutdown_handling_as_poll_interrupt() -> Resu
     // Mirrors the test for poll, but the `EINTR` arrives from the `read()` call instead of the
     // `poll()`, confirming that both entry points reach the same shutdown decision handling
 
-    let poll = MockPoll::new([Ok(true)]);
-    let mut device = MockDevice::new([Err(io::ErrorKind::Interrupted.into())])?;
+    let poll = MockPoll::with_results([Ok(true)]);
+    let mut device = MockDevice::with_read_results([Err(io::ErrorKind::Interrupted.into())])?;
 
     run_test_server(
         TcpConnections::default(),
@@ -205,7 +210,10 @@ fn read_interrupt_reaches_the_same_shutdown_handling_as_poll_interrupt() -> Resu
         IMMEDIATE_GRACE_PERIOD,
     )?;
 
-    assert!(device.writes().is_empty(), "No connections to close, nothing should be written");
+    assert!(
+        device.write_history().is_empty(),
+        "No connections to close, nothing should be written"
+    );
 
     Ok(())
 }

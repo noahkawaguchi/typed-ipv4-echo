@@ -7,8 +7,8 @@ fn due_retransmission_is_sent_as_real_io() -> Result {
     // signal, and since a SYN-RECEIVED connection isn't mid-close, it exits immediately without
     // writing anything more.
 
-    let poll = MockPoll::new([Ok(false), Err(io::ErrorKind::Interrupted.into())]);
-    let mut device = MockDevice::new([])?;
+    let poll = MockPoll::with_results([Ok(false), Err(io::ErrorKind::Interrupted.into())]);
+    let mut device = MockDevice::with_read_results([])?;
 
     run_test_server(
         TcpConnections::new(Duration::ZERO, 5).with_syn_rcv(),
@@ -18,7 +18,7 @@ fn due_retransmission_is_sent_as_real_io() -> Result {
         ONE_YEAR_GRACE_PERIOD,
     )?;
 
-    let [write] = device.writes() else { return Err("Expected exactly one write".into()) };
+    let [write] = device.write_history() else { return Err("Expected exactly one write".into()) };
 
     assert_eq!(decode_mock_tcp_packet(write)?, TcpHandler::SERVER_SYN_ACK);
 
@@ -31,8 +31,9 @@ fn retransmission_does_not_drop_the_connection() -> Result {
     // first retransmit, the second due poll should trigger another one instead of finding the
     // connection already gone.
 
-    let poll = MockPoll::new([Ok(false), Ok(false), Err(io::ErrorKind::Interrupted.into())]);
-    let mut device = MockDevice::new([])?;
+    let poll =
+        MockPoll::with_results([Ok(false), Ok(false), Err(io::ErrorKind::Interrupted.into())]);
+    let mut device = MockDevice::with_read_results([])?;
 
     run_test_server(
         TcpConnections::new(Duration::ZERO, 5).with_syn_rcv(),
@@ -42,7 +43,7 @@ fn retransmission_does_not_drop_the_connection() -> Result {
         ONE_YEAR_GRACE_PERIOD,
     )?;
 
-    let [first, second] = device.writes() else {
+    let [first, second] = device.write_history() else {
         return Err(
             "The connection should survive the first retransmit and produce a second".into()
         );
@@ -66,9 +67,13 @@ fn gives_up_and_drops_connection_after_max_retries() -> Result {
     // signal, and with the connection already gone, it should exit immediately without another
     // write.
 
-    let poll =
-        MockPoll::new([Ok(false), Ok(false), Ok(false), Err(io::ErrorKind::Interrupted.into())]);
-    let mut device = MockDevice::new([])?;
+    let poll = MockPoll::with_results([
+        Ok(false),
+        Ok(false),
+        Ok(false),
+        Err(io::ErrorKind::Interrupted.into()),
+    ]);
+    let mut device = MockDevice::with_read_results([])?;
 
     run_test_server(
         TcpConnections::new(Duration::ZERO, 2).with_syn_rcv(),
@@ -78,7 +83,7 @@ fn gives_up_and_drops_connection_after_max_retries() -> Result {
         ONE_YEAR_GRACE_PERIOD,
     )?;
 
-    let [first, second] = device.writes() else {
+    let [first, second] = device.write_history() else {
         return Err("Only 2 retransmissions should be written before giving up, not 3".into());
     };
 

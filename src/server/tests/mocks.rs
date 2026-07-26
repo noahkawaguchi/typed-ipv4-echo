@@ -12,16 +12,19 @@ pub struct MockDevice {
     writes: Vec<Vec<u8>>,
     write_error: Option<String>,
 
-    /// Backing fd only to satisfy `AsFd`. `poll_readable` is always injected in tests, so this fd
-    /// is never actually polled or read from the OS.
+    /// Backing fd only to satisfy `AsFd`. The polling function is always injected in tests, so
+    /// this fd is never actually polled or read from the OS.
     dummy_fd: File,
 }
 
 impl MockDevice {
-    /// Creates a new `Self` that returns the next item in `reads` in order for each `read()` call.
-    pub fn new(reads: impl IntoIterator<Item = io::Result<Vec<u8>>>) -> io::Result<Self> {
+    /// Creates a new `Self` that returns the next result in `results` in order for each `read()`
+    /// call.
+    pub fn with_read_results(
+        results: impl IntoIterator<Item = io::Result<Vec<u8>>>,
+    ) -> io::Result<Self> {
         Ok(Self {
-            reads: reads.into_iter().collect(),
+            reads: results.into_iter().collect(),
             writes: Vec::new(),
             write_error: None,
             dummy_fd: File::open("/dev/null")?,
@@ -29,12 +32,12 @@ impl MockDevice {
     }
 
     /// Makes every subsequent `write()` call fail with `io::Error::other(message)`.
-    pub fn fail_writes(mut self, message: impl Into<String>) -> Self {
+    pub fn with_failing_writes(mut self, message: impl Into<String>) -> Self {
         self.write_error = Some(message.into());
         self
     }
 
-    pub fn writes(&self) -> &[Vec<u8>] { &self.writes }
+    pub fn write_history(&self) -> &[Vec<u8>] { &self.writes }
 }
 
 impl Read for MockDevice {
@@ -69,13 +72,13 @@ impl AsFd for MockDevice {
     fn as_fd(&self) -> BorrowedFd<'_> { self.dummy_fd.as_fd() }
 }
 
-/// A scripted sequence of `poll_readable` results, consumed one per call (via interior mutability
-/// since `poll_readable` must be `Fn`, not `FnMut`). Returns `Err` if the script runs out.
+/// A scripted sequence of poll results, consumed one per call (via interior mutability since the
+/// trait bound is `Fn`, not `FnMut`). Returns `Err` if the script runs out.
 pub struct MockPoll(RefCell<VecDeque<io::Result<bool>>>);
 
 impl MockPoll {
-    pub fn new(items: impl IntoIterator<Item = io::Result<bool>>) -> Self {
-        Self(RefCell::new(items.into_iter().collect()))
+    pub fn with_results(results: impl IntoIterator<Item = io::Result<bool>>) -> Self {
+        Self(RefCell::new(results.into_iter().collect()))
     }
 
     pub fn next(&self) -> io::Result<bool> {
