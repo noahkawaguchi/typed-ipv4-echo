@@ -85,7 +85,8 @@ fn malformed_packet_is_skipped_without_propagating_or_writing() -> Result {
 #[test]
 fn valid_syn_producing_a_reply_is_sent() -> Result {
     let poll = MockPoll::with_results([Ok(true), Err(io::ErrorKind::Interrupted.into())]);
-    let mut device = MockDevice::with_read_results([Ok(encode_mock_packet(&TcpHandler::CLIENT_SYN)?)])?;
+    let mut device =
+        MockDevice::with_read_results([Ok(encode_mock_packet(&TcpHandler::CLIENT_SYN)?)])?;
 
     run_test_server(
         TcpConnections::default(),
@@ -125,7 +126,10 @@ fn valid_ack_completing_handshake_produces_no_reply() -> Result {
         Err(e) if e.to_string().contains(MESSAGE)
     );
 
-    assert!(device.write_history().is_empty(), "The handshake-completing ACK should not produce a reply");
+    assert!(
+        device.write_history().is_empty(),
+        "The handshake-completing ACK should not produce a reply"
+    );
 
     Ok(())
 }
