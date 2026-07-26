@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-libc = "0.2.184"
+libc = "0.2.189"
 
 [lints.clippy]
 # All lint groups except restriction and cargo
