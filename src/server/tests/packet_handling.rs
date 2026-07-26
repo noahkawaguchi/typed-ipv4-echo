@@ -13,7 +13,7 @@ fn ipv4_ok_but_tcp_parse_error_is_skipped() -> Result {
     // Reads a valid IPv4 header claiming a 4-byte TCP payload (far too short), so IPv4 parsing
     // succeeds while TCP parsing fails
 
-    let fixture = TcpHandler::test_client_syn_requesting_connection();
+    let fixture = TcpHandler::CLIENT_SYN;
     let mut buf = [0u8; ETHERNET_MTU];
 
     let ipv4_header = Ipv4Header::try_new(fixture.proto(), fixture.get_ip_pair(), 4)?;
@@ -29,7 +29,7 @@ fn ipv4_ok_but_tcp_parse_error_is_skipped() -> Result {
 
 #[test]
 fn syn_parses_and_produces_a_reply() -> Result {
-    let bytes = encode_mock_packet(&TcpHandler::test_client_syn_requesting_connection())?;
+    let bytes = encode_mock_packet(&TcpHandler::CLIENT_SYN)?;
 
     assert_matches!(
         Server { tcp_connections: TcpConnections::default(), ..decision_test_server() }
@@ -42,7 +42,7 @@ fn syn_parses_and_produces_a_reply() -> Result {
 
 #[test]
 fn handshake_ack_parses_and_produces_no_reply() -> Result {
-    let bytes = encode_mock_packet(&TcpHandler::test_client_ack_completing_handshake())?;
+    let bytes = encode_mock_packet(&TcpHandler::CLIENT_ACK_COMPLETING_HANDSHAKE)?;
 
     assert_matches!(
         Server {
@@ -85,9 +85,7 @@ fn malformed_packet_is_skipped_without_propagating_or_writing() -> Result {
 #[test]
 fn valid_syn_producing_a_reply_is_sent() -> Result {
     let poll = MockPoll::new([Ok(true), Err(io::ErrorKind::Interrupted.into())]);
-    let mut device = MockDevice::new([Ok(encode_mock_packet(
-        &TcpHandler::test_client_syn_requesting_connection(),
-    )?)])?;
+    let mut device = MockDevice::new([Ok(encode_mock_packet(&TcpHandler::CLIENT_SYN)?)])?;
 
     run_test_server(
         TcpConnections::default(),
@@ -112,9 +110,8 @@ fn valid_ack_completing_handshake_produces_no_reply() -> Result {
     const MESSAGE: &str = "boom from poll, unrelated to the ACK just processed";
 
     let poll = MockPoll::new([Ok(true), Err(io::Error::other(MESSAGE))]);
-    let mut device = MockDevice::new([Ok(encode_mock_packet(
-        &TcpHandler::test_client_ack_completing_handshake(),
-    )?)])?;
+    let mut device =
+        MockDevice::new([Ok(encode_mock_packet(&TcpHandler::CLIENT_ACK_COMPLETING_HANDSHAKE)?)])?;
 
     assert_matches!(
         run_test_server(
