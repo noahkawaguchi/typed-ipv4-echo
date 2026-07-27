@@ -111,16 +111,20 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    #[cfg_attr(
-        not(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "x86_64"))),
-        ignore = "only checking specific known architectures on Linux"
-    )]
-    fn c_char_signedness_sanity_check() {
-        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-        assert_eq!(libc::c_char::MAX, u8::MAX);
+    /// Causes a compilation error if the two arguments are not of the same type.
+    #[cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "x86_64")))]
+    const fn same_type<T: Copy>(_: T, _: T) {}
 
-        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-        assert_eq!(libc::c_char::MAX, i8::MAX);
-    }
+    /// Sanity check that C `char` is unsigned on `aarch64` Linux.
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    const _: () = same_type(libc::c_char::MAX, u8::MAX);
+
+    /// Sanity check that C `char` is signed on `x86_64` Linux.
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    const _: () = same_type(libc::c_char::MAX, i8::MAX);
+
+    /// Sanity check that C `size_t` is equivalent to Rust `usize` on both `aarch64` Linux and
+    /// `x86_64` Linux.
+    #[cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "x86_64")))]
+    const _: () = same_type(libc::size_t::MAX, usize::MAX);
 }
