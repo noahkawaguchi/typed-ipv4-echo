@@ -92,7 +92,8 @@ const fn u8_to_c_char(b: u8) -> libc::c_char { b as libc::c_char }
 mod tests {
     use {
         super::*,
-        std::{assert_matches, env},
+        crate::{Config, Result},
+        std::assert_matches,
     };
 
     #[test]
@@ -105,9 +106,9 @@ mod tests {
 
     #[test]
     #[ignore = "requires TUN setup"]
-    fn successfully_attaches_to_existing_tun() {
-        let tun_name = env::var("TUN_DEVICE_NAME").unwrap_or_else(|_| String::from("tun0"));
-        assert_matches!(attach(&tun_name), Ok(_));
+    fn successfully_attaches_to_existing_tun() -> Result {
+        assert_matches!(attach(&Config::load()?.tun_name), Ok(_));
+        Ok(())
     }
 
     #[test]
