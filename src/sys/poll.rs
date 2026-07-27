@@ -31,3 +31,87 @@ pub fn readable(fd: impl AsFd, timeout: Option<Duration>) -> io::Result<bool> {
         1.. => Ok(true),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::*,
+        std::{
+            io::Write as _,
+            os::unix::net::UnixStream,
+            thread::{self, JoinHandle},
+        },
+    };
+
+    /// Joins on a writer thread with error handling.
+    fn join_writer(writer: JoinHandle<io::Result<()>>) -> io::Result<()> {
+        writer
+            .join()
+            .unwrap_or_else(|_| Err(io::Error::other("writer thread panicked")))
+    }
+
+    #[test]
+    fn true_when_data_is_available() -> io::Result<()> {
+        let (mut tx, rx) = UnixStream::pair()?;
+        tx.write_all(b"hi")?;
+        assert!(readable(&rx, Some(Duration::ZERO))?);
+        Ok(())
+    }
+
+    #[test]
+    fn false_when_no_data_is_available() -> io::Result<()> {
+        let (_tx, rx) = UnixStream::pair()?;
+        assert!(!readable(&rx, Some(Duration::ZERO))?);
+        Ok(())
+    }
+
+    #[test]
+    fn handles_extreme_durations() -> io::Result<()> {
+        let (mut tx, rx) = UnixStream::pair()?;
+        tx.write_all(b"hi")?;
+        assert!(readable(&rx, Some(Duration::MAX))?);
+        Ok(())
+    }
+
+    #[test]
+    fn blocks_until_data_arrives_when_timeout_is_none() -> io::Result<()> {
+        let (mut tx, rx) = UnixStream::pair()?;
+
+        let writer = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            tx.write_all(b"hi")
+        });
+
+        assert!(readable(&rx, None)?);
+
+        join_writer(writer)
+    }
+
+    #[test]
+    fn true_when_data_arrives_in_time() -> io::Result<()> {
+        let (mut tx, rx) = UnixStream::pair()?;
+
+        let writer = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            tx.write_all(b"hi")
+        });
+
+        assert!(readable(&rx, Some(Duration::from_millis(100)))?);
+
+        join_writer(writer)
+    }
+
+    #[test]
+    fn false_when_data_arrives_too_late() -> io::Result<()> {
+        let (mut tx, rx) = UnixStream::pair()?;
+
+        let writer = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            tx.write_all(b"hi")
+        });
+
+        assert!(!readable(&rx, Some(Duration::from_millis(50)))?);
+
+        join_writer(writer)
+    }
+}
