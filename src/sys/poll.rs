@@ -8,8 +8,12 @@ use std::{
 /// otherwise blocks indefinitely (i.e. until `fd` is readable or the syscall is interrupted).
 ///
 /// Returns `Ok(true)` if `fd` becomes readable before the timeout elapses, or `Ok(false)` if
-/// the timeout elapses first. If a signal is caught while blocked and `SA_RESTART` is not set,
-/// returns `Err` with `io::ErrorKind::Interrupted`.
+/// the timeout elapses first.
+///
+/// # Errors
+///
+/// Returns `Err` for errors from the `poll()` syscall. Specifically, if a signal is caught while
+/// blocked and `SA_RESTART` is not set, returns `Err` with `io::ErrorKind::Interrupted`.
 #[expect(unsafe_code, reason = "libc syscall to poll for fd readiness")]
 pub fn readable(fd: impl AsFd, timeout: Option<Duration>) -> io::Result<bool> {
     // Set input `events` to `POLLIN` to signify interest in there being data to read for `fd`

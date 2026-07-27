@@ -39,6 +39,11 @@ enum ShutdownDecision {
 /// When polling `device` with `poll_readable` is interrupted and `shutdown_check` returns `true`,
 /// actively closes all established TCP connections and waits up to `shutdown_grace_period` for them
 /// to finish before returning.
+///
+/// # Errors
+///
+/// Returns `Err` for errors related to packet I/O, but logs and continues for errors related to
+/// parsing and replying to individual packets.
 pub fn run<D, P, S>(device: &mut D, poll_readable: P, shutdown_check: S, config: &Config) -> Result
 where
     D: Read + Write + AsFd,

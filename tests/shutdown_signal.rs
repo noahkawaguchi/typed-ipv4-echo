@@ -4,10 +4,7 @@
 //! Written as an integration test so it runs as its own process, since installing a signal handler
 //! and flipping the static shutdown flag mutate process-wide state.
 
-#[path = "../src/sys/shutdown_signal.rs"]
-mod shutdown_signal;
-
-use {shutdown_signal::ShutdownSignal, std::io};
+use {std::io, typed_ipv4_echo::sys::ShutdownSignal};
 
 #[test]
 #[expect(unsafe_code, reason = "libc FFI to raise a real SIGINT for testing the handler")]

@@ -23,6 +23,10 @@ impl ShutdownSignal {
     ///
     /// The `SA_RESTART` flag will not be set, meaning a blocking `read()` system call will be
     /// interrupted and return `EINTR` without being automatically restarted.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the signal handler could not be installed.
     #[expect(unsafe_code, reason = "libc system calls to install handler")]
     pub fn install() -> io::Result<Self> {
         // Use `sigaction` here to ensure the `SA_RESTART` flag is not set
@@ -52,5 +56,6 @@ impl ShutdownSignal {
     }
 
     /// Atomically loads the status of the flag representing whether or not to shut down.
+    #[must_use]
     pub fn load(&self) -> bool { self.flag.load(Ordering::Relaxed) }
 }
