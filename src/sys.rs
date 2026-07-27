@@ -14,3 +14,14 @@ pub fn random_u32() -> io::Result<u32> {
     File::open("/dev/urandom")?.read_exact(&mut buf)?;
     Ok(u32::from_ne_bytes(buf))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn produces_different_values_across_calls() -> io::Result<()> {
+        assert_ne!(random_u32()?, random_u32()?);
+        Ok(())
+    }
+}
