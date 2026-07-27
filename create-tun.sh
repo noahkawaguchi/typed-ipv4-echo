@@ -10,10 +10,11 @@ set -euo pipefail
 #
 # The device will appear in the `ip link` listing and persists until reboot. It
 # can also be removed manually with `sudo ip link del tun0` (or other custom
-# name if not the default tun0).
+# name if not the default "tun0").
 #
 
-# Optional environment variable configuration
+# Optional environment variable configuration.
+# NOTE: "TUN_DEVICE_NAME" is also read by the server with a "tun0" fallback.
 device_name=${TUN_DEVICE_NAME:-tun0}
 ip_cidr=${TUN_IP_CIDR:-10.0.0.1/24}
 
