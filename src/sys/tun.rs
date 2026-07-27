@@ -30,8 +30,8 @@ const IFRU_FLAGS: libc::c_short = (IFF_TUN | IFF_NO_PI) as libc::c_short;
 /// Returns `Err` if the device does not exist or could not be attached to.
 #[expect(unsafe_code, reason = "libc FFI to attach to TUN device")]
 pub fn attach(device_name: &str) -> io::Result<File> {
-    // The interface must already exist, otherwise the `ioctl` call will try to create it and fail
-    // with permission denied
+    // The interface must already exist, otherwise the `ioctl()` syscall will try to create it and
+    // fail with permission denied
     if !Path::new(SYSFS_NET_DEVICES)
         .join(device_name)
         .try_exists()?
@@ -48,16 +48,13 @@ pub fn attach(device_name: &str) -> io::Result<File> {
     let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
 
     // Copy the device name
-    for (c, b) in ifr
-        .ifr_name
+    ifr.ifr_name
         .iter_mut()
         .zip(device_name.bytes().map(u8_to_c_char))
         // Leave space for the trailing NUL byte (redundant with the existence check above since the
         // name must be valid for the device to exist)
         .take(IFNAMSIZ - 1)
-    {
-        *c = b;
-    }
+        .for_each(|(c, b)| *c = b);
 
     // Set options in flags
     ifr.ifr_ifru.ifru_flags = IFRU_FLAGS;
