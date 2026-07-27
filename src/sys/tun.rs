@@ -24,6 +24,10 @@ const SYSFS_NET_DEVICES: &str = "/sys/class/net";
 const IFRU_FLAGS: libc::c_short = (IFF_TUN | IFF_NO_PI) as libc::c_short;
 
 /// Attaches to the TUN device with name `device_name` as an opened `File`.
+///
+/// # Errors
+///
+/// Returns `Err` if the device does not exist or could not be attached to.
 #[expect(unsafe_code, reason = "libc FFI to attach to TUN device")]
 pub fn attach(device_name: &str) -> io::Result<File> {
     // The interface must already exist, otherwise the `ioctl` call will try to create it and fail

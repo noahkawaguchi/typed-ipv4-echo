@@ -9,7 +9,7 @@ use std::{
     io::{self, Read as _},
 };
 
-pub fn random_u32() -> io::Result<u32> {
+pub(crate) fn random_u32() -> io::Result<u32> {
     let mut buf = [0u8; 4];
     File::open("/dev/urandom")?.read_exact(&mut buf)?;
     Ok(u32::from_ne_bytes(buf))
