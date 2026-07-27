@@ -1,6 +1,8 @@
-//! Test for the shutdown signal handler installation and functionality. Written as an integration
-//! test so it runs as a separate process from the main unit test binary, since installing a handler
-//! and raising signals mutates process-wide state.
+//! Test confirming that the shutdown signal handler installs successfully and flips the shutdown
+//! flag.
+//!
+//! Written as an integration test so it runs as its own process, since installing a signal handler
+//! and flipping the static shutdown flag mutate process-wide state.
 
 #[path = "../src/sys/shutdown_signal.rs"]
 mod shutdown_signal;
@@ -14,8 +16,8 @@ fn shutdown_flag_starts_false_and_flips_on_sigint() -> io::Result<()> {
 
     assert!(!shutdown.load());
 
-    // SAFETY: raising `SIGINT` on the current process is well-defined, and the handler installed
-    // above is async-signal-safe (a single relaxed store), so this cannot corrupt process state.
+    // SAFETY: raising `SIGINT` on the current thread is well-defined, and the handler installed
+    // above is async-signal-safe (a single relaxed store), so this cannot corrupt thread state.
     if unsafe { libc::raise(libc::SIGINT) } != 0 {
         return Err(io::Error::last_os_error());
     }
