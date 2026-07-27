@@ -48,18 +48,10 @@ pub fn attach(device_name: &str) -> io::Result<File> {
     let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
 
     // Copy the device name
-    #[expect(
-        clippy::allow_attributes,
-        reason = "No conditional compilation for C `char` signedness"
-    )]
-    #[allow(
-        clippy::cast_possible_wrap,
-        reason = "Casting is the portable solution because `libc::c_char` may be `u8` or `i8`"
-    )]
     for (c, b) in ifr
         .ifr_name
         .iter_mut()
-        .zip(device_name.bytes().map(|b| b as libc::c_char))
+        .zip(device_name.bytes().map(u8_to_c_char))
         // Leave space for the trailing NUL byte (redundant with the existence check above since the
         // name must be valid for the device to exist)
         .take(IFNAMSIZ - 1)
@@ -85,6 +77,19 @@ pub fn attach(device_name: &str) -> io::Result<File> {
         .then_some(tun_file)
         .ok_or_else(io::Error::last_os_error)
 }
+
+/// Casts Rust `u8` to C `char` without performing any checks.
+///
+/// - On platforms where C `char` is unsigned (e.g. `aarch64` Linux), this is a no-op cast to the
+///   same type.
+/// - On platforms where C `char` is signed (e.g. `x86_64` Linux), values above 127 wrap to negative
+///   numbers.
+#[expect(clippy::allow_attributes, reason = "No conditional compilation for C `char` signedness")]
+#[allow(
+    clippy::cast_possible_wrap,
+    reason = "Casting is the portable solution because `libc::c_char` may be `u8` or `i8`"
+)]
+const fn u8_to_c_char(b: u8) -> libc::c_char { b as libc::c_char }
 
 #[cfg(test)]
 mod tests {
