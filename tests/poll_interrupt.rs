@@ -3,21 +3,14 @@
 //! - A blocking `poll()` syscall is interrupted and returns `EINTR` instead of silently restarting
 //!   when `SIGINT` arrives, since the shutdown handler installation should leave `SA_RESTART`
 //!   unset.
-//! - That error is correctly propagated through `sys::poll::readable`.
+//! - That error is correctly propagated through `poll::readable`.
 //!
 //! Written as an integration test so it runs as its own process, since installing a signal handler
 //! and flipping the static shutdown flag mutate process-wide state.
 
-#[path = "../src/sys/shutdown_signal.rs"]
-#[expect(dead_code, reason = "Parts of `shutdown_signal.rs` are unused in this specific test")]
-mod shutdown_signal;
-
-#[path = "../src/sys/poll.rs"]
-mod poll;
-
 use {
-    shutdown_signal::ShutdownSignal,
     std::{assert_matches, io, os::unix::net::UnixStream, sync::mpsc, thread, time::Duration},
+    typed_ipv4_echo::sys::{ShutdownSignal, poll},
 };
 
 #[test]
