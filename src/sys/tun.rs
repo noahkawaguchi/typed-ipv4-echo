@@ -33,7 +33,12 @@ const IFRU_FLAGS: libc::c_short = (IFF_TUN | IFF_NO_PI) as libc::c_short;
 #[expect(unsafe_code, reason = "libc FFI to attach to TUN device")]
 pub fn attach(device_name: &str) -> io::Result<File> {
     // The interface must already exist, otherwise the `ioctl()` syscall will try to create it and
-    // fail with permission denied
+    // fail with permission denied.
+    //
+    // NOTE: This is a simple safe Rust check to catch the common case of simply having forgotten to
+    // set up the TUN device, but it is not foolproof. Absolute paths like "/dev/null" or an empty
+    // device name still pass the existence check despite being invalid network device names, so the
+    // name validation below is still necessary.
     if !Path::new(SYSFS_NET_DEVICES)
         .join(device_name)
         .try_exists()?
@@ -206,6 +211,19 @@ mod tests {
         for invalid_name in [" tun", "\tun", "tu\n", "t:un", "/dev/null"] {
             assert_matches!(
                 prepare_ifr_name(invalid_name),
+                Err(e) if e.kind() == io::ErrorKind::InvalidInput
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_names_pass_existence_check_but_are_caught_at_validation() {
+        // The `Path`-based check lets names that are clearly not TUN devices through because the
+        // path does exist, or in the case of absolute paths, they replace the sysfs prefix
+
+        for invalid_name in ["/dev/null", "/proc/version", ".", "..", ""] {
+            assert_matches!(
+                attach(invalid_name),
                 Err(e) if e.kind() == io::ErrorKind::InvalidInput
             );
         }
