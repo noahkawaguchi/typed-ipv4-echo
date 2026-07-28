@@ -32,6 +32,10 @@ all-checks: (test '--quiet') lint fmt-check spell-check
 test *ARGS:
     cargo test --workspace --all-targets {{ ARGS }} -- --include-ignored
 
+# Generate test coverage and open in browser (includes ignored tests)
+coverage:
+    cargo llvm-cov --open -- --include-ignored
+
 # Lint with Clippy for {aarch64,x86_64}-unknown-linux-gnu, denying warnings
 lint-targets: (lint '--target' 'aarch64-unknown-linux-gnu') \
               (lint '--target' 'x86_64-unknown-linux-gnu')
