@@ -1,8 +1,9 @@
 use {
     libc::{IFF_NO_PI, IFF_TUN, IFNAMSIZ, TUNSETIFF},
     std::{
+        error::Error,
         fs::{File, OpenOptions},
-        io,
+        io, iter,
         os::unix::io::AsRawFd as _,
         path::Path,
     },
@@ -27,7 +28,8 @@ const IFRU_FLAGS: libc::c_short = (IFF_TUN | IFF_NO_PI) as libc::c_short;
 ///
 /// # Errors
 ///
-/// Returns `Err` if the device does not exist or could not be attached to.
+/// Returns `Err` if the device does not exist, `device_name` is an invalid name, or the device
+/// could not be attached to.
 #[expect(unsafe_code, reason = "libc FFI to attach to TUN device")]
 pub fn attach(device_name: &str) -> io::Result<File> {
     // The interface must already exist, otherwise the `ioctl()` syscall will try to create it and
@@ -47,17 +49,8 @@ pub fn attach(device_name: &str) -> io::Result<File> {
     // SAFETY: All fields of `ifreq` have valid all-zero bit patterns.
     let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
 
-    // Copy the device name
-    ifr.ifr_name
-        .iter_mut()
-        .zip(device_name.bytes().map(u8_to_c_char))
-        // Leave space for the trailing NUL byte (redundant with the existence check above since the
-        // name must be valid for the device to exist)
-        .take(IFNAMSIZ - 1)
-        .for_each(|(c, b)| *c = b);
-
-    // Set options in flags
-    ifr.ifr_ifru.ifru_flags = IFRU_FLAGS;
+    ifr.ifr_name = prepare_ifr_name(device_name)?; // Validate and copy the device name
+    ifr.ifr_ifru.ifru_flags = IFRU_FLAGS; // Set options in flags
 
     // Open the kernel's TUN/TAP device file
     let tun_file = OpenOptions::new()
@@ -73,6 +66,70 @@ pub fn attach(device_name: &str) -> io::Result<File> {
     (unsafe { libc::ioctl(tun_file.as_raw_fd(), TUNSETIFF, &mut ifr) } != -1)
         .then_some(tun_file)
         .ok_or_else(io::Error::last_os_error)
+}
+
+/// Converts a `&str` into an interface name. If `n` is the number of bytes in `name`, `n` must be
+/// between 1 and `IFNAMSIZ - 1` inclusive, and the remaining `IFNAMSIZ - n` bytes will be NUL.
+///
+/// # Errors
+///
+/// Returns `Err` if `name` is invalid for a network device according to the following sources:
+/// - `dev_valid_name` in `linux/net/core/dev.c`
+/// - `_ctype` in `linux/lib/ctype.c`
+/// - `isspace` in `linux/include/linux/ctype.h`
+fn prepare_ifr_name(name: &str) -> io::Result<[libc::c_char; IFNAMSIZ]> {
+    /// The final index in the interface name array, which must be reserved for the NUL terminator.
+    const FINAL_IDX: libc::size_t = IFNAMSIZ - 1;
+
+    if matches!(name, "." | "..") {
+        return Err(invalid_input("TUN device name cannot be . or .."));
+    }
+
+    let mut ifr_name = [0; IFNAMSIZ];
+
+    ifr_name
+        .iter_mut()
+        .zip(name.bytes().map(Some).chain(iter::repeat(None)))
+        .enumerate()
+        .try_for_each(|(i, (ifr_char, name_byte))| {
+            *ifr_char = match (i, name_byte) {
+                // The first byte must come from the provided name
+                (0, None) => return Err(invalid_input("TUN device name cannot be empty")),
+                (0, Some(b)) => validate_character(b)?,
+
+                // Intermediate bytes may come from the provided name or be NUL padding
+                (1..FINAL_IDX, maybe_b) => maybe_b
+                    .map(validate_character)
+                    .transpose()?
+                    .unwrap_or_default(),
+
+                // The final byte must be the NUL terminator
+                (FINAL_IDX.., Some(_)) => return Err(invalid_input("TUN device name too long")),
+                (FINAL_IDX.., None) => 0,
+            };
+
+            Ok(())
+        })?;
+
+    Ok(ifr_name)
+}
+
+/// Uses `msg` to create an `io::Error` of kind `InvalidInput`.
+fn invalid_input(msg: impl Into<Box<dyn Error + Send + Sync>>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, msg)
+}
+
+/// If `b` is a disallowed character in Linux network device names, returns `Err`, otherwise
+/// converts it to a `libc::c_char`.
+fn validate_character(b: u8) -> io::Result<libc::c_char> {
+    (!matches!(b, b'/' | b':' | b'\t'..=b'\r' | b' ' | 0xA0))
+        .then(|| u8_to_c_char(b))
+        .ok_or_else(|| {
+            invalid_input(format!(
+                "TUN device name cannot contain the character '{}'",
+                char::from(b)
+            ))
+        })
 }
 
 /// Casts Rust `u8` to C `char` without performing any checks.
@@ -95,6 +152,64 @@ mod tests {
         crate::{Config, Result},
         std::assert_matches,
     };
+
+    #[test]
+    fn pads_short_name_with_nul_bytes() {
+        assert_matches!(
+            prepare_ifr_name("a"),
+            Ok(name) if name == b"a\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0".map(u8_to_c_char)
+        );
+    }
+
+    #[test]
+    fn allows_name_at_length_limit() {
+        const NAME: &str = "abcdefghijklmno";
+        const _: () = assert!(NAME.len() == IFNAMSIZ - 1);
+
+        assert_matches!(
+            prepare_ifr_name(NAME),
+            Ok(name) if name == b"abcdefghijklmno\0".map(u8_to_c_char)
+        );
+    }
+
+    #[test]
+    fn errors_for_name_too_long() {
+        const NAME: &str = "abcdefghijklmnop";
+        const _: () = assert!(NAME.len() == IFNAMSIZ);
+
+        assert_matches!(
+            prepare_ifr_name(NAME),
+            Err(e) if e.kind() == io::ErrorKind::InvalidInput
+        );
+    }
+
+    #[test]
+    fn errors_for_empty_name() {
+        assert_matches!(
+            prepare_ifr_name(""),
+            Err(e) if e.kind() == io::ErrorKind::InvalidInput
+        );
+    }
+
+    #[test]
+    fn errors_for_dot_and_dot_dot_names() {
+        for invalid_name in [".", ".."] {
+            assert_matches!(
+                prepare_ifr_name(invalid_name),
+                Err(e) if e.kind() == io::ErrorKind::InvalidInput
+            );
+        }
+    }
+
+    #[test]
+    fn errors_for_illegal_characters_in_name() {
+        for invalid_name in [" tun", "\tun", "tu\n", "t:un", "/dev/null"] {
+            assert_matches!(
+                prepare_ifr_name(invalid_name),
+                Err(e) if e.kind() == io::ErrorKind::InvalidInput
+            );
+        }
+    }
 
     #[test]
     fn errors_for_nonexistent_tun() {
