@@ -21,6 +21,7 @@ words = [
     "acking",
     "acks",
     "clippy",
+    "cov",
     "ctype",
     "datagrams",
     "direnv",

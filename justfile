@@ -26,11 +26,18 @@ udp:
 ####################################################################################################
 
 # Run tests, lints, format checking, and spell checking to match CI
-all-checks: (test '--quiet') lint fmt-check spell-check
+all-checks: (test '--quiet') lint-targets fmt-check spell-check
 
 # Run tests, including ignored
 test *ARGS:
     cargo test --workspace --all-targets {{ ARGS }} -- --include-ignored
+
+# Generate test coverage report and print summary (includes ignored tests)
+cov *ARGS:
+    cargo llvm-cov {{ ARGS }} -- --include-ignored
+
+# Generate HTML test coverage report and open in browser (includes ignored tests)
+cov-open: (cov '--open')
 
 # Lint with Clippy for {aarch64,x86_64}-unknown-linux-gnu, denying warnings
 lint-targets: (lint '--target' 'aarch64-unknown-linux-gnu') \

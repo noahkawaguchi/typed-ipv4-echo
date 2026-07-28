@@ -29,6 +29,7 @@
                   "rust-src"
                   "rust-analyzer"
                   "clippy"
+                  "llvm-tools-preview"
                 ];
                 targets = [
                   "aarch64-unknown-linux-gnu"
@@ -36,6 +37,7 @@
                 ];
               })
 
+              cargo-llvm-cov
               codebook
               inetutils
               just
