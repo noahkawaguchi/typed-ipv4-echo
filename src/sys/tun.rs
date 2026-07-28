@@ -1,20 +1,16 @@
 use {
     libc::{IFF_NO_PI, IFF_TUN, IFNAMSIZ, TUNSETIFF},
     std::{
+        ffi::CString,
         fs::{File, OpenOptions},
         io,
         os::unix::io::AsRawFd as _,
-        path::Path,
     },
 };
 
 /// The character device (clone device) that serves as the entrypoint for TUN virtual network
 /// interfaces.
 const TUN_DEVICE_FILE: &str = "/dev/net/tun";
-
-/// The pseudo-filesystem directory containing symlinks to networking devices, including TUN
-/// interfaces.
-const SYSFS_NET_DEVICES: &str = "/sys/class/net";
 
 /// The flags to use for the interface request.
 ///
@@ -30,12 +26,15 @@ const IFRU_FLAGS: libc::c_short = (IFF_TUN | IFF_NO_PI) as libc::c_short;
 /// Returns `Err` if the device does not exist or could not be attached to.
 #[expect(unsafe_code, reason = "libc FFI to attach to TUN device")]
 pub fn attach(device_name: &str) -> io::Result<File> {
-    // The interface must already exist, otherwise the `ioctl` call will try to create it and fail
-    // with permission denied
-    if !Path::new(SYSFS_NET_DEVICES)
-        .join(device_name)
-        .try_exists()?
-    {
+    // The interface must already exist, otherwise the `ioctl()` syscall below will try to create it
+    // and fail with permission denied.
+    //
+    // NOTE: Query the kernel's interface table directly because path existence checks relative to
+    // `/sys/class/net` are fooled by absolute paths, empty strings, etc.
+    if CString::new(device_name).ok().is_none_or(|name| {
+        // SAFETY: `name` is a valid, NUL-terminated C string that outlives this call.
+        (unsafe { libc::if_nametoindex(name.as_ptr()) }) == 0
+    }) {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
             format!("TUN device {device_name} does not exist"),
@@ -47,25 +46,13 @@ pub fn attach(device_name: &str) -> io::Result<File> {
     // SAFETY: All fields of `ifreq` have valid all-zero bit patterns.
     let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
 
-    // Copy the device name
-    #[expect(
-        clippy::allow_attributes,
-        reason = "No conditional compilation for C `char` signedness"
-    )]
-    #[allow(
-        clippy::cast_possible_wrap,
-        reason = "Casting is the portable solution because `libc::c_char` may be `u8` or `i8`"
-    )]
-    for (c, b) in ifr
-        .ifr_name
+    // Simply copy up to `IFNAMSIZ - 1` bytes without full name validation because the kernel
+    // reporting that the device exists above already proves that the name is valid
+    ifr.ifr_name
         .iter_mut()
-        .zip(device_name.bytes().map(|b| b as libc::c_char))
-        // Leave space for the trailing NUL byte (redundant with the existence check above since the
-        // name must be valid for the device to exist)
+        .zip(device_name.bytes().map(u8_to_c_char))
         .take(IFNAMSIZ - 1)
-    {
-        *c = b;
-    }
+        .for_each(|(ifr_byte, name_byte)| *ifr_byte = name_byte);
 
     // Set options in flags
     ifr.ifr_ifru.ifru_flags = IFRU_FLAGS;
@@ -86,38 +73,67 @@ pub fn attach(device_name: &str) -> io::Result<File> {
         .ok_or_else(io::Error::last_os_error)
 }
 
+/// Casts Rust `u8` to C `char` without performing any checks.
+///
+/// - On platforms where C `char` is unsigned (e.g. `aarch64` Linux), this is a no-op cast to the
+///   same type.
+/// - On platforms where C `char` is signed (e.g. `x86_64` Linux), values above 127 wrap to negative
+///   numbers.
+#[expect(clippy::allow_attributes, reason = "No conditional compilation for C `char` signedness")]
+#[allow(
+    clippy::cast_possible_wrap,
+    reason = "Casting is the portable solution because `libc::c_char` may be `u8` or `i8`"
+)]
+const fn u8_to_c_char(b: u8) -> libc::c_char { b as libc::c_char }
+
 #[cfg(test)]
 mod tests {
     use {
         super::*,
-        std::{assert_matches, env},
+        crate::{Config, Result},
+        std::assert_matches,
     };
 
     #[test]
-    fn errors_for_nonexistent_tun() {
-        assert_matches!(
-            attach("abcdefghijklmnopqrstuvwxyz"),
-            Err(e) if e.kind() == io::ErrorKind::NotFound
-        );
+    fn errors_for_nonexistent_tun_with_valid_name() {
+        assert_matches!(attach("nonexistent"), Err(e) if e.kind() == io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn errors_for_names_that_can_never_belong_to_a_real_device() {
+        // The old path-based check relative to `/sys/class/net` reported various invalid interface
+        // names (e.g. absolute paths, empty strings, ".", "..") as existent paths, requiring a
+        // separate name validation step returning an invalid input error. In contrast, querying the
+        // kernel directly should uniformly report as not found.
+
+        for invalid_name in
+            ["/dev/null", "/proc/version", ".", "..", "", "\tun", "t\0\0n", "1234567890123456"]
+        {
+            assert_matches!(attach(invalid_name), Err(e) if e.kind() == io::ErrorKind::NotFound);
+        }
     }
 
     #[test]
     #[ignore = "requires TUN setup"]
-    fn successfully_attaches_to_existing_tun() {
-        let tun_name = env::var("TUN_DEVICE_NAME").unwrap_or_else(|_| String::from("tun0"));
-        assert_matches!(attach(&tun_name), Ok(_));
+    fn successfully_attaches_to_existing_tun() -> Result {
+        assert_matches!(attach(&Config::load()?.tun_name), Ok(_));
+        Ok(())
     }
 
-    #[test]
-    #[cfg_attr(
-        not(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "x86_64"))),
-        ignore = "only checking specific known architectures on Linux"
-    )]
-    fn c_char_signedness_sanity_check() {
-        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-        assert_eq!(libc::c_char::MAX, u8::MAX);
+    /// Causes a compilation error if the two arguments are not of the same type.
+    #[cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "x86_64")))]
+    const fn same_type<T: Copy>(_: T, _: T) {}
 
-        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-        assert_eq!(libc::c_char::MAX, i8::MAX);
-    }
+    /// Sanity check that C `char` is unsigned on `aarch64` Linux.
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    const _: () = same_type(libc::c_char::MAX, u8::MAX);
+
+    /// Sanity check that C `char` is signed on `x86_64` Linux.
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    const _: () = same_type(libc::c_char::MAX, i8::MAX);
+
+    /// Sanity check that C `size_t` is equivalent to Rust `usize` on both `aarch64` Linux and
+    /// `x86_64` Linux.
+    #[cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "x86_64")))]
+    const _: () = same_type(libc::size_t::MAX, usize::MAX);
 }
