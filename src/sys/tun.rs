@@ -213,10 +213,7 @@ mod tests {
 
     #[test]
     fn errors_for_nonexistent_tun() {
-        assert_matches!(
-            attach("abcdefghijklmnopqrstuvwxyz"),
-            Err(e) if e.kind() == io::ErrorKind::NotFound
-        );
+        assert_matches!(attach("nonexistent"), Err(e) if e.kind() == io::ErrorKind::NotFound);
     }
 
     #[test]
