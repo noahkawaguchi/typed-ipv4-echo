@@ -71,6 +71,7 @@ Each variant wraps a concrete protocol handler responsible for:
 - Otherwise, install:
   - The [Rust toolchain](https://rust-lang.org/tools/install)
   - `telnet`, `nc`/`netcat`, and `ping` (likely already installed)
+  - [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov) (only if generating test coverage reports)
   - Optional: the command runner [Just](https://github.com/casey/just)
 
 ### Steps
@@ -116,6 +117,21 @@ Run the test suite:
 ```bash
 cargo test                       # Pure unit tests with no dependencies
 cargo test -- --include-ignored  # TUN device must already exist
+```
+
+Or with a coverage report:
+
+```bash
+cargo llvm-cov -- --include-ignored         # Text summary
+cargo llvm-cov --open -- --include-ignored  # Generate HTML and open in browser
+```
+
+Or with Just (includes ignored tests):
+
+```bash
+just test
+just cov
+just cov-open
 ```
 
 The project includes comprehensive unit tests for:
