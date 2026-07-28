@@ -26,7 +26,7 @@ udp:
 ####################################################################################################
 
 # Run tests, lints, format checking, and spell checking to match CI
-all-checks: (test '--quiet') lint fmt-check spell-check
+all-checks: (test '--quiet') lint-targets fmt-check spell-check
 
 # Run tests, including ignored
 test *ARGS:
