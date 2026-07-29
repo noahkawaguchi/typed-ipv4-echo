@@ -2,24 +2,24 @@
 # Connecting as a client
 ####################################################################################################
 
-addr := '10.0.0.2'
-port := '8080'
+server-addr := '10.0.0.2'
+server-port := '8080'
 
 # Connect to the server using TCP (telnet)
 tcp:
-    telnet {{ addr }} {{ port }}
+    telnet {{ server-addr }} {{ server-port }}
 
 # Connect to the server using TCP (netcat)
 tcp-nc:
-    nc {{ addr }} {{ port }}
+    nc {{ server-addr }} {{ server-port }}
 
 # Connect to the server using ICMP
 icmp:
-    ping {{ addr }}
+    ping {{ server-addr }}
 
 # Connect to the server using UDP
 udp:
-    nc -u {{ addr }} {{ port }}
+    nc -u {{ server-addr }} {{ server-port }}
 
 ####################################################################################################
 # Testing and quality
