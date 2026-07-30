@@ -13,6 +13,7 @@ use {
         addr_pairs::{Ipv4AddrPair, PortPair},
         protocol::{
             Protocol,
+            display::AsPrettyPayload as _,
             handler::Encode,
             pseudo_header_checksum,
             tcp::{
@@ -23,7 +24,6 @@ use {
                 seq_space::{AdvanceBy as _, SeqLe as _, SeqLt as _},
                 state::{ConnState, TcpState, WindowState},
             },
-            write_payload,
         },
         sys,
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
@@ -551,18 +551,19 @@ impl Encode for TcpHandler {
 
 impl fmt::Display for TcpHandler {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(
+        write!(
             f,
-            "TCP | {} | seq={} ack={} win={} | {}",
-            self.ports, self.seq_num, self.ack_num, self.window, self.flags
-        )?;
-
-        write_payload(
-            f,
+            "TCP | {} | seq={} ack={} win={} | {}\n{}",
+            self.ports,
+            self.seq_num,
+            self.ack_num,
+            self.window,
+            self.flags,
             self.payload
                 .as_ref()
                 .map(TcpPayload::as_bytes)
-                .unwrap_or_default(),
+                .unwrap_or_default()
+                .as_pretty_payload()
         )
     }
 }
