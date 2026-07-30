@@ -44,8 +44,8 @@ jobs:
         name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Run tests
-        run: just test
+      - name: Create TUN device and run tests
+        run: just --yes tun-create test
 
   lint:
     strategy: *os-matrix
