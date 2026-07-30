@@ -74,7 +74,7 @@ Each variant wraps a concrete protocol handler responsible for:
   - [TShark](https://www.wireshark.org/docs/man-pages/tshark.html) (only if capturing network traffic or reading PCAP files)
   - [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov) (only if generating test coverage reports)
 
-### If using TShark:
+### If using TShark for live packet capture:
 
 The `dumpcap` binary requires CAP_NET_RAW and CAP_NET_ADMIN capabilities. It works to just use `sudo` and be done, but to be more granular:
 
