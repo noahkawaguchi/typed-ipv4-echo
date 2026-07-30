@@ -65,7 +65,7 @@ Each variant wraps a concrete protocol handler responsible for:
 ## Prerequisites
 
 - Linux (for its TUN device API)
-- `sudo` privileges (specifically CAP_NET_ADMIN for creating network interfaces)
+- `sudo` privileges (for creating and managing TUN devices)
 - For [Nix](https://github.com/NixOS/nix) users, the toolchain is included as a flake.
 - Otherwise, install:
   - The [Rust toolchain](https://rust-lang.org/tools/install)
@@ -132,9 +132,9 @@ just throughput -f Cargo.toml  # Send Cargo.toml instead
 To emulate real-world networks with delay/loss/corruption/duplication/reordering:
 
 ```bash
-just loss        # Add the emulation to the device (prompts for sudo)
+just loss        # Add the emulation to the device (uses sudo)
 just loss-show   # Show current network emulation and packet counters
-just loss-clear  # Remove emulated network conditions (prompts for sudo)
+just loss-clear  # Remove emulated network conditions (uses sudo)
 ```
 
 See `just --usage throughput` and `just --usage loss` for further options.

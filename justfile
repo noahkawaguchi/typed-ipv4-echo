@@ -50,7 +50,7 @@ sniff pcap=f'{{ project-name }}.pcap' x='':
 inspect pcap=f'{{ project-name }}.pcap' x='' V='':
     {{ tshark-cmd }} -r {{ pcap }} {{ x }} {{ V }} | "${PAGER:-less}"
 
-# Add emulation of real-world networks to the TUN device (prompts for sudo)
+# Add emulation of real-world networks to the TUN device (uses sudo)
 [
     arg('delay', short, long),
     arg('loss', short, long),
@@ -70,11 +70,11 @@ loss delay='100ms' loss='1%' corrupt='1%' duplicate='1%' reorder='1%':
 loss-show:
     tc -stats qdisc show dev {{ tun }}
 
-# Remove emulated network conditions (prompts for sudo)
+# Remove emulated network conditions (uses sudo)
 loss-clear:
     sudo tc qdisc del dev {{ tun }} root
 
-# Send a file through the echo server using TCP and diff the echoed reply against the original
+# Send a file through the echo server using TCP and diff the reply against the original
 [
     arg('input-file', short='f', long, help='File to send'),
     arg('echo-file', short, long, help='Output location for echoed data'),
