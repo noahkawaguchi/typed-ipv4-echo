@@ -44,6 +44,11 @@
               just
               tshark
             ];
+
+            # If using a dumpcap wrapper, make it take precedence
+            shellHook = ''
+              if [ -e /run/wrappers/bin/dumpcap ]; then export PATH="/run/wrappers/bin:$PATH"; fi
+            '';
           };
         }
       );
