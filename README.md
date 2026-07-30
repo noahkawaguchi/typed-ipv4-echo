@@ -88,16 +88,12 @@ users.users.<you>.extraGroups = [ "wireshark" ];
 
 ## Running the Server
 
-Create the TUN device using the provided script (once per reboot):
-
-```bash
-sudo ./create-tun.sh
-```
+You will be prompted to create the TUN device on first use, once per reboot, which requires `sudo` privileges.
 
 Build and run the server:
 
 ```bash
-cargo run
+just serve
 ```
 
 The server will attach to the TUN device, listen for and reply to packets, and log processed data until it receives SIGINT (Ctrl+C).
@@ -141,13 +137,7 @@ See `just --usage throughput` and `just --usage loss` for further options.
 
 ## Testing
 
-For only pure unit tests with no dependencies, run:
-
-```bash
-cargo test
-```
-
-However, once the TUN device is created, the full test suite can run:
+As with running the server, you will be prompted to create the TUN device if it does not already exist.
 
 ```bash
 just test

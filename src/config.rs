@@ -25,8 +25,7 @@ impl Config {
     /// Returns `Err` if an environment variable is present but unparsable.
     pub fn load() -> Result<Self, String> {
         Ok(Self {
-            // NOTE: "TUN_DEVICE_NAME" is also read by the TUN creation script with a "tun0"
-            // fallback
+            // NOTE: "TUN_DEVICE_NAME" is also read in the `justfile` with a "tun0" fallback
             tun_name: Self::get_env_or_else(|| String::from("tun0"), "TUN_DEVICE_NAME")?,
 
             grace_period: Duration::from_secs(Self::get_env_or_else(|| 5, "GRACE_PERIOD_SECS")?),

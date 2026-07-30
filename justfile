@@ -3,11 +3,45 @@
 ####################################################################################################
 
 project-name := 'typed-ipv4-echo'
+user := env('USER')
+
 server-addr := '10.0.0.2'
 server-port := '8080'
+
+# NOTE: "TUN_DEVICE_NAME" is also read by the server with a "tun0" fallback
 tun := env('TUN_DEVICE_NAME', 'tun0')
+tun-cidr := env('TUN_IP_CIDR', '10.0.0.1/24')
+
 tshark-cmd := 'tshark -n --print' \
     + ' -o ip.check_checksum:true -o tcp.check_checksum:true -o udp.check_checksum:true'
+
+####################################################################################################
+# Running the server (including TUN device setup)
+####################################################################################################
+
+# Run the server (default recipe)
+serve: tun
+    cargo run
+
+# Create the TUN device if it doesn't already exist
+tun:
+    @if ! ip addr show {{ tun }} >/dev/null 2>&1; then \
+        echo 'TUN device {{ tun }} not found'; \
+        just tun-create; \
+    fi
+
+# Internal helper for the `tun` recipe
+[private]
+[confirm(f'Create TUN device {{ tun }}? (uses sudo)')]
+tun-create:
+    sudo ip tuntap add dev {{ tun }} mode tun user {{ user }}
+    sudo ip addr add {{ tun-cidr }} dev {{ tun }}
+    sudo ip link set {{ tun }} up
+    @echo 'TUN device created: name={{ tun }}, CIDR={{ tun-cidr }}, user={{ user }}'
+
+# Remove the TUN device manually (it's automatically destroyed on reboot)
+tun-del:
+    sudo ip link del {{ tun }}
 
 ####################################################################################################
 # Connecting as a client
@@ -100,11 +134,11 @@ throughput input-file='README.md' echo-file=f'/tmp/{{ project-name }}-out' timeo
 all-checks: (test '--quiet') lint-targets fmt-check spell-check
 
 # Run tests, including ignored
-test *ARGS:
+test *ARGS: tun
     cargo test --workspace --all-targets {{ ARGS }} -- --include-ignored
 
 # Generate test coverage report and print summary (includes ignored tests)
-cov *ARGS:
+cov *ARGS: tun
     cargo llvm-cov {{ ARGS }} -- --include-ignored
 
 # Generate HTML test coverage report and open in browser (includes ignored tests)
