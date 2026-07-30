@@ -553,8 +553,8 @@ impl fmt::Display for TcpHandler {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(
             f,
-            "TCP | {} | seq={} ack={} | {}",
-            self.ports, self.seq_num, self.ack_num, self.flags
+            "TCP | {} | seq={} ack={} win={} | {}",
+            self.ports, self.seq_num, self.ack_num, self.window, self.flags
         )?;
 
         write_payload(
