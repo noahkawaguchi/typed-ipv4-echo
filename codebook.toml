@@ -59,6 +59,7 @@ words = [
     "subslice",
     "syscall",
     "sysfs",
+    "tshark",
     "unacked",
     "userspace",
     "vtable",

@@ -40,7 +40,9 @@
               cargo-llvm-cov
               codebook
               inetutils
+              iproute2
               just
+              tshark
             ];
           };
         }
