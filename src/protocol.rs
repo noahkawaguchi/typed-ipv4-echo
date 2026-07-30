@@ -38,13 +38,13 @@ fn pseudo_header_checksum(data: &[u8], ip_pair: Ipv4AddrPair, protocol: Protocol
     Ok(checksum::calculate(checksum_data.try_get(..checksum_len)?))
 }
 
-/// Converts raw payload bytes to a printable string representation of the payload's length and
-/// content. Escapes control and non-printable characters.
-fn payload_to_string(payload: &[u8]) -> String {
+/// Converts the raw bytes of `payload` into a printable representation of the payload's length and
+/// content (if UTF-8), and then writes that into `f`.
+fn write_payload(f: &mut fmt::Formatter, payload: &[u8]) -> fmt::Result {
     match str::from_utf8(payload) {
-        Ok("") => String::from("<no payload>"),
-        Ok(s) => format!("{}-byte UTF-8 payload: {}", payload.len(), s.escape_debug()),
-        Err(_) => format!("{}-byte non-UTF-8 payload", payload.len()),
+        Ok("") => write!(f, "<no payload>"),
+        Ok(s) => write!(f, "{}-byte UTF-8 payload: {}", payload.len(), s.escape_debug()),
+        Err(_) => write!(f, "{}-byte non-UTF-8 payload", payload.len()),
     }
 }
 

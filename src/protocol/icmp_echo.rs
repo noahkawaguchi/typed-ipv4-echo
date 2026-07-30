@@ -3,7 +3,7 @@ use {
         Result,
         addr_pairs::Ipv4AddrPair,
         checksum,
-        protocol::{Protocol, handler::Encode, payload_to_string},
+        protocol::{Protocol, handler::Encode, write_payload},
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
     std::fmt,
@@ -113,9 +113,9 @@ impl Encode for IcmpEchoHandler<'_> {
 
 impl fmt::Display for IcmpEchoHandler<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
+        writeln!(
             f,
-            "ICMP | type={} code={} ({}) | identifier={} sequence={}\n{}",
+            "ICMP | type={} code={} ({}) | identifier={} sequence={}",
             self.icmp_type,
             Self::ICMP_CODE_ECHO,
             match self.icmp_type {
@@ -124,9 +124,10 @@ impl fmt::Display for IcmpEchoHandler<'_> {
                 _ => "unknown type",
             },
             self.identifier,
-            self.sequence,
-            payload_to_string(self.payload),
-        )
+            self.sequence
+        )?;
+
+        write_payload(f, self.payload)
     }
 }
 
