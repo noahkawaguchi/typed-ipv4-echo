@@ -33,20 +33,20 @@ The server separates protocol-agnostic IPv4 handling from protocol-specific ICMP
 
 ```
 ┌────────────────────────────────────┐
-       TUN device, main loop,
-         shutdown signals
+│       TUN device, main loop,       │
+│         shutdown signals           │
 └────────────────┬───────────────────┘
                  │
                  ▼
 ┌────────────────────────────────────┐
-            IPv4 header
-          parsing/writing
+│            IPv4 header             │
+│          parsing/writing           │
 └────────────────┬───────────────────┘
                  │
                  ▼
 ┌───────────────────────────────────┐
-       ProtocolHandler enum
-         (static dispatch)
+│       ProtocolHandler enum        │
+│         (static dispatch)         │
 └────┬───────────┬───────────┬──────┘
      │           │           │
      ▼           ▼           ▼
