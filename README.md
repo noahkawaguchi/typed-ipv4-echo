@@ -70,9 +70,9 @@ Each variant wraps a concrete protocol handler responsible for:
 - For [Nix](https://github.com/NixOS/nix) users, the toolchain is included as a flake.
 - Otherwise, install:
   - The [Rust toolchain](https://rust-lang.org/tools/install)
+  - The command runner [Just](https://github.com/casey/just)
   - `telnet`, `nc`/`netcat`, and `ping` (likely already installed)
   - [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov) (only if generating test coverage reports)
-  - Optional: the command runner [Just](https://github.com/casey/just)
 
 ### Steps
 
@@ -101,37 +101,25 @@ just udp
 just icmp
 ```
 
-Or manually:
-
-```bash
-telnet 10.0.0.2 8080  # TCP
-nc 10.0.0.2 8080      # TCP
-nc -u 10.0.0.2 8080   # UDP
-ping 10.0.0.2         # ICMP
-```
-
 ## Testing
 
-Run the test suite:
+For only pure unit tests with no dependencies, run:
 
 ```bash
-cargo test                       # Pure unit tests with no dependencies
-cargo test -- --include-ignored  # TUN device must already exist
+cargo test
+```
+
+However, once the TUN device is created, the full test suite can run:
+
+```bash
+just test
 ```
 
 Or with a coverage report:
 
 ```bash
-cargo llvm-cov -- --include-ignored         # Text summary
-cargo llvm-cov --open -- --include-ignored  # Generate HTML and open in browser
-```
-
-Or with Just (includes ignored tests):
-
-```bash
-just test
-just cov
-just cov-open
+just cov       # Text summary
+just cov-open  # Generate detailed HTML and open in browser
 ```
 
 The project includes comprehensive unit tests for:
