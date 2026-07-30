@@ -7,9 +7,10 @@ A type-safe, userspace IPv4 echo server implementing TCP, UDP, and ICMP protocol
 1. [Overview](#overview)
 2. [Features](#features)
 3. [Architecture](#architecture)
-4. [Running the Server](#running-the-server)
-5. [Connecting as a Client](#connecting-as-a-client)
-6. [Testing](#testing)
+4. [Prerequisites](#prerequisites)
+5. [Running the Server](#running-the-server)
+6. [Connecting as a Client](#connecting-as-a-client)
+7. [Testing](#testing)
 
 ## Overview
 
@@ -61,9 +62,7 @@ Each variant wraps a concrete protocol handler responsible for:
 - Determining the packets to send to clients
 - Encoding appropriate reply packets into raw bytes
 
-## Running the Server
-
-### Prerequisites
+## Prerequisites
 
 - Linux (for its TUN device API)
 - `sudo` privileges (specifically CAP_NET_ADMIN for creating network interfaces)
@@ -75,7 +74,7 @@ Each variant wraps a concrete protocol handler responsible for:
   - [TShark](https://www.wireshark.org/docs/man-pages/tshark.html) (only if capturing network traffic or reading PCAP files)
   - [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov) (only if generating test coverage reports)
 
-#### If using TShark:
+### If using TShark:
 
 The `dumpcap` binary requires CAP_NET_RAW and CAP_NET_ADMIN capabilities. It works to just use `sudo` and be done, but to be more granular:
 
@@ -87,7 +86,7 @@ programs.wireshark.enable = true;
 users.users.<you>.extraGroups = [ "wireshark" ];
 ```
 
-### Steps
+## Running the Server
 
 Create the TUN device using the provided script (once per reboot):
 
@@ -102,6 +101,15 @@ cargo run
 ```
 
 The server will attach to the TUN device, listen for and reply to packets, and log processed data until it receives SIGINT (Ctrl+C).
+
+Although the server logs incoming and outgoing packets, the `justfile` also includes recipes for capturing and logging traffic live and reading it back with TShark.
+
+```bash
+just sniff    # Run in another terminal while creating traffic
+just inspect  # Read back the saved PCAP file
+```
+
+See `just --usage sniff` and `just --usage inspect` for further options.
 
 ## Connecting as a Client
 
@@ -129,14 +137,7 @@ just loss-show   # Show current network emulation and packet counters
 just loss-clear  # Remove emulated network conditions (prompts for sudo)
 ```
 
-Although the server logs incoming and outgoing packets, the `justfile` also includes recipes for capturing and logging traffic live and reading it back with TShark.
-
-```bash
-just sniff    # Run in another terminal while creating traffic
-just inspect  # Read back the saved PCAP file
-```
-
-For the `throughput`, `loss`, `sniff`, and `inspect` recipes, see `just --usage <RECIPE>` for further options.
+See `just --usage throughput` and `just --usage loss` for further options.
 
 ## Testing
 
