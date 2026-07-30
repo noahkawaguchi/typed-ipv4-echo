@@ -74,7 +74,7 @@ loss-show:
 loss-clear:
     sudo tc qdisc del dev {{ tun }} root
 
-# Send a file through the TCP echo server and diff the echoed reply against the original
+# Send a file through the echo server using TCP and diff the echoed reply against the original
 [
     arg('input-file', short='f', long, help='File to send'),
     arg('echo-file', short, long, help='Output location for echoed data'),
