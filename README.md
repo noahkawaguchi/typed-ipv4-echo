@@ -65,7 +65,7 @@ Each variant wraps a concrete protocol handler responsible for:
 ## Prerequisites
 
 - Linux (for its TUN device API)
-- `sudo` privileges (specifically CAP_NET_ADMIN for creating network interfaces)
+- `sudo` privileges (for creating and managing TUN devices)
 - For [Nix](https://github.com/NixOS/nix) users, the toolchain is included as a flake.
 - Otherwise, install:
   - The [Rust toolchain](https://rust-lang.org/tools/install)
@@ -88,16 +88,12 @@ users.users.<you>.extraGroups = [ "wireshark" ];
 
 ## Running the Server
 
-Create the TUN device using the provided script (once per reboot):
-
-```bash
-sudo ./create-tun.sh
-```
+You will be prompted to create the TUN device on first use, once per reboot, which requires `sudo` privileges.
 
 Build and run the server:
 
 ```bash
-cargo run
+just serve
 ```
 
 The server will attach to the TUN device, listen for and reply to packets, and log processed data until it receives SIGINT (Ctrl+C).
@@ -132,22 +128,16 @@ just throughput -f Cargo.toml  # Send Cargo.toml instead
 To emulate real-world networks with delay/loss/corruption/duplication/reordering:
 
 ```bash
-just loss        # Add the emulation to the device (prompts for sudo)
+just loss        # Add the emulation to the device (uses sudo)
 just loss-show   # Show current network emulation and packet counters
-just loss-clear  # Remove emulated network conditions (prompts for sudo)
+just loss-clear  # Remove emulated network conditions (uses sudo)
 ```
 
 See `just --usage throughput` and `just --usage loss` for further options.
 
 ## Testing
 
-For only pure unit tests with no dependencies, run:
-
-```bash
-cargo test
-```
-
-However, once the TUN device is created, the full test suite can run:
+As with running the server, you will be prompted to create the TUN device if it does not already exist.
 
 ```bash
 just test

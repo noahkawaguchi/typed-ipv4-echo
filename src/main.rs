@@ -9,10 +9,7 @@ fn main() -> Result {
     let config = Config::load()?;
 
     let mut tun = tun::attach(&config.tun_name)?;
-    println!(
-        "Attached to TUN device \"{}\"\nWaiting for packets... (Ctrl+C to stop)",
-        config.tun_name
-    );
+    println!("Attached to TUN device {}\nWaiting for packets... (Ctrl+C to stop)", config.tun_name);
 
     server::run(&mut tun, |fd, timeout| poll::readable(fd, timeout), || shutdown.load(), &config)
 }
