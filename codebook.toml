@@ -4,6 +4,7 @@ words = [
     "DSCP",
     "ECE",
     "ECN",
+    "FHS",
     "IFNAMSIZ",
     "IHL",
     "ISN",
@@ -25,6 +26,7 @@ words = [
     "ctype",
     "datagrams",
     "direnv",
+    "distros",
     "dtolnay",
     "dumpcap",
     "ifr",
@@ -50,6 +52,7 @@ words = [
     "revents",
     "rto",
     "rustfmt",
+    "setcap",
     "sigaction",
     "sigemptyset",
     "signedness",
@@ -64,6 +67,7 @@ words = [
     "unacked",
     "userspace",
     "vtable",
+    "wireshark",
     "xzf",
 ]
 ignore_paths = [

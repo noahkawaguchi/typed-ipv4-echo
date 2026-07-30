@@ -71,12 +71,25 @@ Each variant wraps a concrete protocol handler responsible for:
 - Otherwise, install:
   - The [Rust toolchain](https://rust-lang.org/tools/install)
   - The command runner [Just](https://github.com/casey/just)
-  - `telnet`, `nc`/`netcat`, and `ping` (likely already installed)
+  - `telnet`, `nc`/`netcat`, `ping`, and `tc` (likely already installed)
+  - [TShark](https://www.wireshark.org/docs/man-pages/tshark.html) (only if capturing network traffic or reading PCAP files)
   - [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov) (only if generating test coverage reports)
+
+#### If using TShark:
+
+The `dumpcap` binary requires CAP_NET_RAW and CAP_NET_ADMIN capabilities. It works to just use `sudo` and be done, but to be more granular:
+
+- On FHS-based distros (i.e. most normal Linux): Grant it the capabilities as described [here](https://wiki.wireshark.org/capturesetup/captureprivileges).
+- On NixOS: Enable the `wireshark` program and add yourself to the `"wireshark"` group. This creates a setcap wrapper that will automatically be given precedence by the `shellHook` in the project's flake.
+
+```nix
+programs.wireshark.enable = true;
+users.users.<you>.extraGroups = [ "wireshark" ];
+```
 
 ### Steps
 
-Create a TUN device using the provided script (once per reboot):
+Create the TUN device using the provided script (once per reboot):
 
 ```bash
 sudo ./create-tun.sh
@@ -100,6 +113,30 @@ just tcp-nc  # TCP using netcat
 just udp
 just icmp
 ```
+
+To send a file through the echo server using TCP and diff the echoed reply against the original:
+
+```bash
+just throughput                # Defaults to README.md
+just throughput -f Cargo.toml  # Send Cargo.toml instead
+```
+
+To emulate real-world networks with delay/loss/corruption/duplication/reordering:
+
+```bash
+just loss        # Add the emulation to the device (prompts for sudo)
+just loss-show   # Show current network emulation and packet counters
+just loss-clear  # Remove emulated network conditions (prompts for sudo)
+```
+
+Although the server logs incoming and outgoing packets, the `justfile` also includes recipes for capturing and logging traffic live and reading it back with TShark.
+
+```bash
+just sniff    # Run in another terminal while creating traffic
+just inspect  # Read back the saved PCAP file
+```
+
+For the `throughput`, `loss`, `sniff`, and `inspect` recipes, see `just --usage <RECIPE>` for further options.
 
 ## Testing
 
