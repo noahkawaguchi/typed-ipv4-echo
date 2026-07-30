@@ -43,8 +43,8 @@ fn pseudo_header_checksum(data: &[u8], ip_pair: Ipv4AddrPair, protocol: Protocol
 fn payload_to_string(payload: &[u8]) -> String {
     match str::from_utf8(payload) {
         Ok("") => String::from("<no payload>"),
-        Ok(s) => format!("{}-byte payload: {}", payload.len(), s.escape_debug()),
-        Err(_) => format!("{}-byte non-UTF-8 payload: {}", payload.len(), payload.escape_ascii()),
+        Ok(s) => format!("{}-byte UTF-8 payload: {}", payload.len(), s.escape_debug()),
+        Err(_) => format!("{}-byte non-UTF-8 payload", payload.len()),
     }
 }
 
