@@ -103,9 +103,10 @@ Although the server logs incoming and outgoing packets, the `justfile` also incl
 ```bash
 just sniff          # Run in another terminal while creating traffic
 just sniff-inspect  # Read back the saved PCAP file
+just sniff-clean    # Remove the saved PCAP file
 ```
 
-See `just --usage sniff` and `just --usage sniff-inspect` for further options.
+For each of these three recipes, see `just --usage <RECIPE>` for further options.
 
 ## Connecting as a Client
 

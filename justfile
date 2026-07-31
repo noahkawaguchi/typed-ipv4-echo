@@ -84,6 +84,11 @@ sniff pcap=f'{{ project-name }}.pcap' x='':
 sniff-inspect pcap=f'{{ project-name }}.pcap' x='' V='':
     {{ tshark-cmd }} -r {{ pcap }} {{ x }} {{ V }} | "${PAGER:-less}"
 
+# Remove the saved PCAP file
+[arg('pcap', short, long, help='Name of PCAP file to remove')]
+sniff-clean pcap=f'{{ project-name }}.pcap':
+    rm {{ pcap }}
+
 # Add emulation of real-world networks to the TUN device (uses sudo)
 [
     arg('delay', short, long),
