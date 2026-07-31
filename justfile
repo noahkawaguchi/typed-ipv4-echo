@@ -114,8 +114,8 @@ loss-clear:
     arg('echo-file', short, long, help='Output location for echoed data'),
     arg('timeout-secs', short='s', long, help='Number of seconds to wait for echo')
 ]
-throughput input-file='README.md' echo-file=f'/tmp/{{ project-name }}-out' timeout-secs='3':
-    nc -nvw {{ timeout-secs }} {{ server-addr }} {{ server-port }} \
+throughput input-file='README.md' echo-file=f'/tmp/{{ project-name }}-out' timeout-secs='60':
+    nc -Nnvw {{ timeout-secs }} {{ server-addr }} {{ server-port }} \
         < {{ input-file }} > {{ echo-file }}
 
     if command -v delta >/dev/null 2>&1; then \
