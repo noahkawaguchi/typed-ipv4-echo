@@ -30,7 +30,7 @@ tun:
         just tun-create; \
     fi
 
-# Internal helper for the `tun` recipe
+# Internal helper for the `tun` recipe (also used in CI for unconditional creation)
 [private]
 [confirm(f'Create TUN device {{ tun-name }}? (uses sudo)')]
 tun-create:
