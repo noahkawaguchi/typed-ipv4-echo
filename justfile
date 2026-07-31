@@ -20,6 +20,7 @@ tshark-cmd := 'tshark -n --print' \
 ####################################################################################################
 
 # Run the server (default recipe)
+[continue]
 serve: tun
     cargo run
 
@@ -56,6 +57,7 @@ tcp-nc:
     nc -Nnv {{ server-addr }} {{ server-port }}
 
 # Connect to the server using ICMP
+[continue]
 icmp:
     ping {{ server-addr }}
 
@@ -72,6 +74,7 @@ udp:
     arg('pcap', short, long, help='Name of PCAP file to write'),
     arg('x', short, value='-x', help='Show hex and ASCII')
 ]
+[continue]
 sniff pcap=f'{{ project-name }}.pcap' x='':
     {{ tshark-cmd }} -i {{ tun-name }} -w {{ pcap }} {{ x }}
 
