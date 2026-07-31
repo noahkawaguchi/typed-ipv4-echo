@@ -111,8 +111,9 @@ where
                 // A retransmit deadline elapsed -> retransmit all expired segments
                 Ok(false) => {
                     for reply_handler in self.tcp_connections.make_retransmissions() {
-                        println!("\n ==== Packet sent (retransmission) ====");
+                        println!(" ==== Packet sent (retransmission) ====");
                         self.send_packet(&reply_handler)?;
+                        divider();
                     }
                 }
 
