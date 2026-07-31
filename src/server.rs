@@ -16,7 +16,7 @@ use {
     },
 };
 
-fn divider() { println!("\n{}\n", "=".repeat(60)) }
+fn divider() { println!("\n{}\n", "=".repeat(80)) }
 
 /// The result of deciding how to react to a shutdown signal.
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
