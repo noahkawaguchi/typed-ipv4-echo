@@ -312,24 +312,39 @@ impl TcpHandler {
             }
 
             // FIN-ACK (connection teardown) on an established connection, arriving in order ->
-            // start closing to wait for client's final ACK, reply with FIN-ACK.
+            // echo any trailing data (as much as the window allows, same as plain in-order data),
+            // then start closing to wait for client's final ACK, replying with FIN-ACK. Unlike
+            // FIN-WAIT-1/2, our own FIN hasn't gone out yet, so we can piggyback the data echo on
+            // this same reply.
             (
                 Some(conn @ ConnState { tcp_state: TcpState::Established, .. }),
                 TcpFlags::FinAck,
-                _,
+                maybe_payload,
             ) if self.seq_num == conn.rcv_nxt => {
-                let send_info = SendInfo {
-                    seq_num: conn.snd_nxt,
-                    ack_num: conn.rcv_nxt.wrapping_add(1),
-                    flags: TcpFlags::FinAck,
-                    payload: None,
-                };
-
                 conn.incoming_ack_update(self)?;
 
-                conn.tcp_state = TcpState::LastAck;
-                conn.snd_nxt.advance_by(1); // Our FIN consumes one sequence number
+                if let Some(payload) = maybe_payload {
+                    conn.rcv_nxt.advance_by(u32::from(payload.len().get()));
+                    conn.send_buffer.extend(payload.as_bytes().iter());
+                }
+
                 conn.rcv_nxt.advance_by(1); // Peer's FIN consumes one sequence number
+                conn.tcp_state = TcpState::LastAck;
+
+                let to_send = conn.drain_transmittable()?;
+                let send_len = to_send
+                    .as_ref()
+                    .map_or(0, |payload| u32::from(payload.len().get()));
+
+                let send_info = SendInfo {
+                    seq_num: conn.snd_nxt,
+                    ack_num: conn.rcv_nxt,
+                    flags: TcpFlags::FinAck,
+                    payload: to_send,
+                };
+
+                conn.snd_nxt.advance_by(send_len);
+                conn.snd_nxt.advance_by(1); // Our FIN consumes one sequence number
 
                 conn.pending
                     .push(PendingSegment::new(send_info.clone(), Instant::now()));

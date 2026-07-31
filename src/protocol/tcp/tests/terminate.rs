@@ -567,3 +567,99 @@ fn fin_ack_with_data_in_fin_wait_2_advances_rcv_nxt_past_data_and_fin() -> Resul
 
     Ok(())
 }
+
+#[test]
+fn fin_ack_with_data_in_established_echoes_data_and_starts_closing() -> Result {
+    // A FIN-ACK carrying trailing data on an established connection should echo the data (like
+    // plain in-order data) before closing. Unlike FIN-WAIT-1/2, our own FIN hasn't been sent yet
+    // here, so it can be piggybacked on the same FIN-ACK reply.
+
+    let mut connections = TcpConnections::default().after_handshake(); // rcv_nxt=CLIENT_ISN+1
+    let mut cloned_state = connections.try_get()?.clone();
+
+    let reply = TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE,
+        ack_num: SERVER_ISN + SYN_BYTE,
+        flags: TcpFlags::FinAck,
+        payload: payload_from("Hello")?,
+        ..CLIENT_PACKET
+    }
+    .create_reply(&mut connections)?;
+
+    assert_eq!(
+        reply,
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN + FIN_BYTE,
+            flags: TcpFlags::FinAck,
+            payload: payload_from("Hello")?,
+            ..SERVER_REPLY
+        }),
+        "Data should be echoed and piggybacked on the FIN-ACK, with the ACK covering both the \
+         data and the FIN"
+    );
+
+    cloned_state.tcp_state = TcpState::LastAck;
+    cloned_state.snd_nxt.advance_by(HELLO_LEN + FIN_BYTE);
+    cloned_state.rcv_nxt.advance_by(HELLO_LEN + FIN_BYTE);
+
+    assert_eq!(connections.try_get()?, &cloned_state);
+
+    Ok(())
+}
+
+#[test]
+fn fin_ack_with_data_in_established_buffers_the_untransmittable_remainder() -> Result {
+    // If the peer's advertised window can't fit all the trailing data right now, only what fits
+    // gets echoed alongside the FIN, with the rest buffered in the send buffer.
+    //
+    // However, due to the current simplification lacking a proper half-closed state, the remaining
+    // data can never actually be sent afterward, since our own FIN in this same reply ends our byte
+    // stream.
+
+    let mut connections = TcpConnections::default();
+    let mut expected_state = ConnState {
+        window_state: Some(WindowState {
+            snd_wnd: 3,
+            snd_wl1: CLIENT_ISN + SYN_BYTE,
+            snd_wl2: SERVER_ISN + SYN_BYTE,
+        }),
+        ..AFTER_HANDSHAKE
+    };
+    connections.insert(expected_state.clone());
+
+    let reply = TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE,
+        ack_num: SERVER_ISN + SYN_BYTE,
+        window: 3,
+        flags: TcpFlags::FinAck,
+        payload: payload_from("Hello")?,
+        ..CLIENT_PACKET
+    }
+    .create_reply(&mut connections)?;
+
+    assert_eq!(
+        reply,
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN + FIN_BYTE,
+            flags: TcpFlags::FinAck,
+            payload: payload_from("Hel")?,
+            ..SERVER_REPLY
+        }),
+        "Only the first 3 bytes fit in the advertised window of 3, piggybacked on the FIN-ACK"
+    );
+
+    expected_state.tcp_state = TcpState::LastAck;
+    expected_state.snd_nxt.advance_by(3 + FIN_BYTE);
+    expected_state.rcv_nxt.advance_by(HELLO_LEN + FIN_BYTE);
+    expected_state.send_buffer.extend(b"lo");
+
+    assert_eq!(
+        connections.try_get()?,
+        &expected_state,
+        "The untransmittable remainder \"lo\" should be queued in the send buffer"
+    );
+
+    Ok(())
+}
