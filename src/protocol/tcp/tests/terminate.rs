@@ -2,8 +2,8 @@ use super::*;
 
 #[test]
 fn creates_valid_fin_ack() -> Result {
-    // Simulate an established connection
-    let mut connections = TcpConnections::default().after_handshake(); // FIN-ACK arrives at seq=CLIENT_ISN+1
+    // Simulate an established connection, FIN-ACK arrives at seq=CLIENT_ISN+1
+    let mut connections = TcpConnections::default().after_handshake();
     let mut cloned_state = connections.try_get()?.clone();
 
     let reply = TcpHandler {
@@ -448,6 +448,119 @@ fn simultaneous_close_transitions_through_closing_to_closed() -> Result {
         }
         .create_reply(&mut connections)?,
         None
+    );
+
+    assert_matches!(connections.try_get(), Err(_), "Connection should be removed");
+
+    Ok(())
+}
+
+#[test]
+fn fin_ack_with_data_in_fin_wait_1_advances_rcv_nxt_past_data_and_fin() -> Result {
+    // Simultaneous close where the peer's FIN carries trailing data. Our own FIN has already been
+    // sent, so the data can't be echoed (same as plain data arriving in FIN-WAIT-1), but RCV.NXT
+    // must still advance past both the data and the FIN's phantom byte.
+
+    let mut connections = TcpConnections::default().after_handshake(); // rcv_nxt=CLIENT_ISN+1
+    connections.close_established(); // -> FIN-WAIT-1, snd_nxt=SERVER_ISN+2
+    let mut cloned_state = connections.try_get()?.clone();
+
+    // Client's FIN-ACK arrives in order with data, not yet acknowledging our FIN (ack=SERVER_ISN+1)
+    let reply = TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE,
+        ack_num: SERVER_ISN + SYN_BYTE,
+        flags: TcpFlags::FinAck,
+        payload: payload_from("Hello")?,
+        ..CLIENT_PACKET
+    }
+    .create_reply(&mut connections)?;
+
+    assert_eq!(
+        reply,
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN + FIN_BYTE,
+            ..SERVER_REPLY
+        }),
+        "ACK should reflect RCV.NXT advanced past both the data and the FIN, not just the FIN"
+    );
+
+    cloned_state.tcp_state = TcpState::Closing;
+    cloned_state.rcv_nxt.advance_by(HELLO_LEN + FIN_BYTE);
+    assert_eq!(connections.try_get()?, &cloned_state);
+
+    Ok(())
+}
+
+#[test]
+fn fin_ack_with_data_in_fin_wait_1_acking_our_fin_closes_immediately() -> Result {
+    // Similar to the other case with FIN-ACK with data in FIN-WAIT-1, but the peer's FIN+data also
+    // acknowledges our own FIN, so the close completes immediately instead of moving to CLOSING.
+
+    let mut connections = TcpConnections::default().after_handshake();
+    connections.close_established(); // -> FIN-WAIT-1, snd_nxt=SERVER_ISN+2
+
+    let reply = TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE,
+        ack_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
+        flags: TcpFlags::FinAck,
+        payload: payload_from("Hello")?,
+        ..CLIENT_PACKET
+    }
+    .create_reply(&mut connections)?;
+
+    assert_eq!(
+        reply,
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN + FIN_BYTE,
+            ..SERVER_REPLY
+        }),
+        "ACK should reflect RCV.NXT advanced past both the data and the FIN, not just the FIN"
+    );
+
+    assert_matches!(connections.try_get(), Err(_), "Connection should be removed");
+
+    Ok(())
+}
+
+#[test]
+fn fin_ack_with_data_in_fin_wait_2_advances_rcv_nxt_past_data_and_fin() -> Result {
+    // The peer's final FIN in FIN-WAIT-2 carries trailing data, so the ACK we send back must
+    // reflect RCV.NXT advanced past both the data and the FIN before the connection is removed.
+
+    let mut connections = TcpConnections::default().after_handshake();
+    connections.close_established(); // -> FIN-WAIT-1, snd_nxt=SERVER_ISN+2
+
+    // Our FIN is acknowledged -> FIN-WAIT-2
+    assert_eq!(
+        TcpHandler {
+            seq_num: CLIENT_ISN + SYN_BYTE,
+            ack_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
+            ..CLIENT_PACKET
+        }
+        .create_reply(&mut connections)?,
+        None
+    );
+
+    // Client's FIN arrives in order with trailing data
+    let reply = TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE,
+        ack_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
+        flags: TcpFlags::FinAck,
+        payload: payload_from("Hello")?,
+        ..CLIENT_PACKET
+    }
+    .create_reply(&mut connections)?;
+
+    assert_eq!(
+        reply,
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
+            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN + FIN_BYTE,
+            ..SERVER_REPLY
+        }),
+        "ACK should reflect RCV.NXT advanced past both the data and the FIN, not just the FIN"
     );
 
     assert_matches!(connections.try_get(), Err(_), "Connection should be removed");

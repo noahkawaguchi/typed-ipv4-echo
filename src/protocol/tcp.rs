@@ -351,8 +351,7 @@ impl TcpHandler {
                 TcpFlags::Ack,
                 Some(payload),
             ) if self.seq_num == conn.rcv_nxt => {
-                let payload_len = u32::from(payload.len().get());
-                conn.rcv_nxt.advance_by(payload_len);
+                conn.rcv_nxt.advance_by(u32::from(payload.len().get()));
 
                 let send_info = SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt);
                 conn.incoming_ack_update(self)?;
@@ -372,11 +371,18 @@ impl TcpHandler {
             // FIN-WAIT-1, the remote peer's FIN arrives before ours is acknowledged (simultaneous
             // close) -> ACK it. If it also acknowledges our FIN, the connection is fully closed
             // (skipping FIN-WAIT-2/TIME-WAIT), otherwise move to CLOSING to await that ACK.
+            //
+            // Our own FIN has already been sent, so any trailing data can't be echoed (same as
+            // plain data arriving in FIN-WAIT-1), but RCV.NXT must still advance past it.
             (
                 Some(conn @ ConnState { tcp_state: TcpState::FinWait1, .. }),
                 TcpFlags::FinAck,
-                None,
+                maybe_payload,
             ) if self.seq_num == conn.rcv_nxt => {
+                if let Some(payload) = maybe_payload {
+                    conn.rcv_nxt.advance_by(u32::from(payload.len().get()));
+                }
+
                 // Consume one sequence number in RCV.NXT for the peer's FIN
                 conn.rcv_nxt.advance_by(1);
 
@@ -393,14 +399,20 @@ impl TcpHandler {
             }
 
             // FIN-WAIT-2, the remote peer's FIN arrives, in order -> ACK it and finish closing (no
-            // TIME-WAIT)
+            // TIME-WAIT). Our own FIN has already been sent, so any trailing data can't be echoed,
+            // but the ACK must still reflect RCV.NXT advanced past it as well as the FIN.
             (
                 Some(&mut ConnState { tcp_state: TcpState::FinWait2, snd_nxt, rcv_nxt, .. }),
                 TcpFlags::FinAck,
-                None,
+                maybe_payload,
             ) if self.seq_num == rcv_nxt => {
                 connections.remove(&key);
-                Some(SendInfo::pure_ack(snd_nxt, rcv_nxt.wrapping_add(1)))
+
+                let payload_len = maybe_payload
+                    .as_ref()
+                    .map_or(0, |payload| u32::from(payload.len().get()));
+
+                Some(SendInfo::pure_ack(snd_nxt, rcv_nxt.wrapping_add(payload_len).wrapping_add(1)))
             }
 
             // CLOSING (simultaneous close), the remote peer's ACK of our FIN arrives -> fully
