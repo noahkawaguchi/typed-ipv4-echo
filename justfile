@@ -75,7 +75,7 @@ udp:
     arg('x', short, value='-x', help='Show hex and ASCII')
 ]
 [continue]
-sniff pcap=f'{{ project-name }}.pcap' x='':
+sniff pcap=f'{{ project-name }}.pcap' x='': tun
     {{ tshark-cmd }} -i {{ tun-name }} -w {{ pcap }} {{ x }}
 
 # Read a PCAP file with TShark
@@ -100,7 +100,7 @@ sniff-clean pcap=f'{{ project-name }}.pcap':
     arg('duplicate', short='u', long),
     arg('reorder', short, long)
 ]
-loss delay='100ms' loss='1%' corrupt='1%' duplicate='1%' reorder='1%':
+loss delay='100ms' loss='1%' corrupt='1%' duplicate='1%' reorder='1%': tun
     sudo tc qdisc replace dev {{ tun-name }} root netem \
         delay {{ delay }} 20ms 25% distribution paretonormal \
         loss random {{ loss }} 25% \
