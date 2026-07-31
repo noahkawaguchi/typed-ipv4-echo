@@ -20,6 +20,7 @@ tshark-cmd := 'tshark -n --print' \
 ####################################################################################################
 
 # Run the server (default recipe)
+[continue]
 serve: tun
     cargo run
 
@@ -30,7 +31,7 @@ tun:
         just tun-create; \
     fi
 
-# Internal helper for the `tun` recipe
+# Internal helper for the `tun` recipe (also used in CI for unconditional creation)
 [private]
 [confirm(f'Create TUN device {{ tun-name }}? (uses sudo)')]
 tun-create:
@@ -39,7 +40,7 @@ tun-create:
     sudo ip link set {{ tun-name }} up
     @echo 'TUN device created: name={{ tun-name }}, CIDR={{ tun-cidr }}, user={{ user }}'
 
-# Remove the TUN device manually (it's automatically destroyed on reboot)
+# Remove the TUN device manually instead of waiting for it to be destroyed on reboot (uses sudo)
 tun-del:
     sudo ip link del {{ tun-name }}
 
@@ -53,15 +54,16 @@ tcp:
 
 # Connect to the server using TCP (netcat)
 tcp-nc:
-    nc {{ server-addr }} {{ server-port }}
-
-# Connect to the server using ICMP
-icmp:
-    ping {{ server-addr }}
+    nc -Nnv {{ server-addr }} {{ server-port }}
 
 # Connect to the server using UDP
 udp:
-    nc -u {{ server-addr }} {{ server-port }}
+    -nc -nu {{ server-addr }} {{ server-port }}
+
+# Connect to the server using ICMP
+[continue]
+icmp:
+    ping {{ server-addr }}
 
 ####################################################################################################
 # Observation and stress testing
@@ -72,7 +74,8 @@ udp:
     arg('pcap', short, long, help='Name of PCAP file to write'),
     arg('x', short, value='-x', help='Show hex and ASCII')
 ]
-sniff pcap=f'{{ project-name }}.pcap' x='':
+[continue]
+sniff pcap=f'{{ project-name }}.pcap' x='': tun
     {{ tshark-cmd }} -i {{ tun-name }} -w {{ pcap }} {{ x }}
 
 # Read a PCAP file with TShark
@@ -81,8 +84,31 @@ sniff pcap=f'{{ project-name }}.pcap' x='':
     arg('x', short, value='-x', help='Show hex and ASCII'),
     arg('V', short, value='-V', help='Show full packet dissection')
 ]
-inspect pcap=f'{{ project-name }}.pcap' x='' V='':
+sniff-inspect pcap=f'{{ project-name }}.pcap' x='' V='':
     {{ tshark-cmd }} -r {{ pcap }} {{ x }} {{ V }} | "${PAGER:-less}"
+
+# Remove the saved PCAP file
+[arg('pcap', short, long, help='Name of PCAP file to remove')]
+sniff-clean pcap=f'{{ project-name }}.pcap':
+    rm {{ pcap }}
+
+# Send a file through the echo server using TCP and diff the reply against the original
+[
+    arg('input-file', short='f', long, help='File to send'),
+    arg('echo-file', short, long, help='Output location for echoed data'),
+    arg('timeout-secs', short='s', long, help='Number of seconds to wait for echo')
+]
+throughput input-file='README.md' echo-file=f'/tmp/{{ project-name }}-out' timeout-secs='60':
+    nc -Nnvw {{ timeout-secs }} {{ server-addr }} {{ server-port }} \
+        < {{ input-file }} > {{ echo-file }}
+
+    if command -v delta >/dev/null 2>&1; then \
+        delta --paging never {{ input-file }} {{ echo-file }}; \
+    else \
+        diff {{ input-file }} {{ echo-file }}; \
+    fi
+
+    echo 'Echoed data matched input exactly'
 
 # Add emulation of real-world networks to the TUN device (uses sudo)
 [
@@ -92,7 +118,7 @@ inspect pcap=f'{{ project-name }}.pcap' x='' V='':
     arg('duplicate', short='u', long),
     arg('reorder', short, long)
 ]
-loss delay='100ms' loss='1%' corrupt='1%' duplicate='1%' reorder='1%':
+loss delay='100ms' loss='1%' corrupt='1%' duplicate='1%' reorder='1%': tun
     sudo tc qdisc replace dev {{ tun-name }} root netem \
         delay {{ delay }} 20ms 25% distribution paretonormal \
         loss random {{ loss }} 25% \
@@ -107,24 +133,6 @@ loss-show:
 # Remove emulated network conditions (uses sudo)
 loss-clear:
     sudo tc qdisc del dev {{ tun-name }} root
-
-# Send a file through the echo server using TCP and diff the reply against the original
-[
-    arg('input-file', short='f', long, help='File to send'),
-    arg('echo-file', short, long, help='Output location for echoed data'),
-    arg('timeout-secs', short='s', long, help='Number of seconds to wait for echo')
-]
-throughput input-file='README.md' echo-file=f'/tmp/{{ project-name }}-out' timeout-secs='3':
-    nc -nvw {{ timeout-secs }} {{ server-addr }} {{ server-port }} \
-        < {{ input-file }} > {{ echo-file }}
-
-    if command -v delta >/dev/null 2>&1; then \
-        delta --paging never {{ input-file }} {{ echo-file }}; \
-    else \
-        diff {{ input-file }} {{ echo-file }}; \
-    fi
-
-    echo 'Echoed data matched input exactly'
 
 ####################################################################################################
 # Testing and quality
@@ -144,13 +152,13 @@ cov *ARGS: tun
 # Generate HTML test coverage report and open in browser (includes ignored tests)
 cov-open: (cov '--open')
 
-# Lint with Clippy for {aarch64,x86_64}-unknown-linux-gnu, denying warnings
-lint-targets: (lint '--target' 'aarch64-unknown-linux-gnu') \
-              (lint '--target' 'x86_64-unknown-linux-gnu')
-
 # Lint with Clippy, denying warnings
 lint *ARGS:
     cargo clippy --workspace --all-targets {{ ARGS }} -- --deny warnings
+
+# Lint with Clippy for {aarch64,x86_64}-unknown-linux-gnu, denying warnings
+lint-targets: (lint '--target' 'aarch64-unknown-linux-gnu') \
+              (lint '--target' 'x86_64-unknown-linux-gnu')
 
 # Check formatting
 fmt-check:
