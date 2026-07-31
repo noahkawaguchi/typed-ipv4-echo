@@ -40,7 +40,7 @@ tun-create:
     sudo ip link set {{ tun-name }} up
     @echo 'TUN device created: name={{ tun-name }}, CIDR={{ tun-cidr }}, user={{ user }}'
 
-# Remove the TUN device manually (it's automatically destroyed on reboot)
+# Remove the TUN device manually instead of waiting for it to be destroyed on reboot (uses sudo)
 tun-del:
     sudo ip link del {{ tun-name }}
 
