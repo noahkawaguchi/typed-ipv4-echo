@@ -53,7 +53,7 @@ tcp:
 
 # Connect to the server using TCP (netcat)
 tcp-nc:
-    nc {{ server-addr }} {{ server-port }}
+    nc -Nnv {{ server-addr }} {{ server-port }}
 
 # Connect to the server using ICMP
 icmp:
@@ -61,7 +61,7 @@ icmp:
 
 # Connect to the server using UDP
 udp:
-    nc -u {{ server-addr }} {{ server-port }}
+    -nc -nu {{ server-addr }} {{ server-port }}
 
 ####################################################################################################
 # Observation and stress testing
