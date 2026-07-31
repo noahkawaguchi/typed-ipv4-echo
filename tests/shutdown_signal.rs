@@ -4,7 +4,7 @@
 //! Written as an integration test so it runs as its own process, since installing a signal handler
 //! and flipping the static shutdown flag mutate process-wide state.
 
-use {std::io, typed_ipv4_echo::sys::ShutdownSignal};
+use {std::io, typenet::sys::ShutdownSignal};
 
 #[test]
 #[expect(unsafe_code, reason = "libc FFI to raise a real SIGINT for testing the handler")]

@@ -1,4 +1,4 @@
-# typed-ipv4-echo
+# Typenet
 
 A type-safe, userspace IPv4 echo server implementing TCP, UDP, and ICMP protocols using Linux TUN devices.
 

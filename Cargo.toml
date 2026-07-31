@@ -1,5 +1,5 @@
 [package]
-name    = "typed-ipv4-echo"
+name    = "typenet"
 version = "0.1.0"
 edition = "2024"
 

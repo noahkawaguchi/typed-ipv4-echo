@@ -10,7 +10,7 @@
 
 use {
     std::{assert_matches, io, os::unix::net::UnixStream, sync::mpsc, thread, time::Duration},
-    typed_ipv4_echo::sys::{ShutdownSignal, poll},
+    typenet::sys::{ShutdownSignal, poll},
 };
 
 #[test]

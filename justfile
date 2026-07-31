@@ -2,7 +2,7 @@
 # Config
 ####################################################################################################
 
-project-name := 'typed-ipv4-echo'
+project-name := 'typenet'
 user := env('USER')
 
 server-addr := '10.0.0.2'
