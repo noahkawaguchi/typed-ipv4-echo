@@ -219,19 +219,20 @@ impl TcpHandler {
                 _,
             ) if tcp_state != TcpState::SynReceived => Some(SendInfo::pure_ack(snd_nxt, rcv_nxt)),
 
-            // ACK during SYN-RECEIVED with an unacceptable sequence number -> per RFC 9293, Section
-            // 3.10.7.4, "First, check sequence number," reply with an ACK reflecting current state
-            // and drop the segment.
+            // ACK during SYN-RECEIVED with an unacceptable sequence number (regardless of whether
+            // it carries data) -> per RFC 9293, Section 3.10.7.4, "First, check sequence number,"
+            // reply with an ACK reflecting current state and drop the segment.
             //
             // Due to the current simplification of not using a reassembly buffer, any SEG.SEQ other
             // than exactly RCV.NXT is treated as unacceptable rather than held for later.
             (
                 Some(&mut ConnState { tcp_state: TcpState::SynReceived, snd_nxt, rcv_nxt, .. }),
                 TcpFlags::Ack,
-                None,
+                _,
             ) if self.seq_num != rcv_nxt => Some(SendInfo::pure_ack(snd_nxt, rcv_nxt)),
 
-            // Handshake ACK (step 3) -> transition to ESTABLISHED, no reply needed
+            // Handshake ACK (step 3) -> transition to ESTABLISHED. If it also carries data, echo
+            // it, otherwise no reply is needed.
             //
             // As per RFC 9293, Section 3.10.7.4, "Fifth, check the ACK field," "SYN-RECEIVED
             // STATE," if SND.UNA < SEG.ACK <= SND.NXT, enter ESTABLISHED and set SND.WND, SND.WL1,
@@ -239,7 +240,7 @@ impl TcpHandler {
             (
                 Some(conn @ ConnState { tcp_state: TcpState::SynReceived, .. }),
                 TcpFlags::Ack,
-                None,
+                maybe_payload,
             ) if self.seq_num == conn.rcv_nxt
                 && conn.snd_una.seq_lt(self.ack_num)
                 && self.ack_num.seq_le(conn.snd_nxt) =>
@@ -254,7 +255,19 @@ impl TcpHandler {
                 });
                 conn.pending.clear(); // Only the SYN-ACK just acknowledged could have been pending
 
-                None
+                maybe_payload
+                    .as_ref()
+                    .map(|payload| {
+                        conn.rcv_nxt.advance_by(u32::from(payload.len().get()));
+                        conn.send_buffer.extend(payload.as_bytes().iter());
+
+                        conn.drain_transmittable()
+                            .map(|maybe_to_send| match maybe_to_send {
+                                Some(to_send) => Self::data_payload(conn, to_send),
+                                None => SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt),
+                            })
+                    })
+                    .transpose()?
             }
 
             // ACK acknowledging data the server has not yet sent (ack_num is past snd_nxt) ->
