@@ -13,7 +13,7 @@ use {
         addr_pairs::{Ipv4AddrPair, PortPair},
         protocol::{
             Protocol,
-            display::AsPrettyPayload as _,
+            display::{AsPrettyPayload as _, WithThousandsSeparators as _},
             handler::Encode,
             pseudo_header_checksum,
             tcp::{
@@ -555,9 +555,9 @@ impl fmt::Display for TcpHandler {
             f,
             "TCP | {} | seq={} ack={} win={} | {}\n{}",
             self.ports,
-            self.seq_num,
-            self.ack_num,
-            self.window,
+            self.seq_num.with_thousands_separators(),
+            self.ack_num.with_thousands_separators(),
+            self.window.with_thousands_separators(),
             self.flags,
             self.payload
                 .as_ref()
