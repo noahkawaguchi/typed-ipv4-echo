@@ -64,6 +64,7 @@ words = [
     "syscall",
     "sysfs",
     "tshark",
+    "typenet",
     "unacked",
     "untransmittable",
     "userspace",

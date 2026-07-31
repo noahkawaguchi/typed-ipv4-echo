@@ -1,4 +1,4 @@
-use typed_ipv4_echo::{
+use typenet::{
     Config, Result, server,
     sys::{ShutdownSignal, poll, tun},
 };
