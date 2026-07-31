@@ -312,24 +312,39 @@ impl TcpHandler {
             }
 
             // FIN-ACK (connection teardown) on an established connection, arriving in order ->
-            // start closing to wait for client's final ACK, reply with FIN-ACK.
+            // echo any trailing data (as much as the window allows, same as plain in-order data),
+            // then start closing to wait for client's final ACK, replying with FIN-ACK. Unlike
+            // FIN-WAIT-1/2, our own FIN hasn't gone out yet, so we can piggyback the data echo on
+            // this same reply.
             (
                 Some(conn @ ConnState { tcp_state: TcpState::Established, .. }),
                 TcpFlags::FinAck,
-                _,
+                maybe_payload,
             ) if self.seq_num == conn.rcv_nxt => {
-                let send_info = SendInfo {
-                    seq_num: conn.snd_nxt,
-                    ack_num: conn.rcv_nxt.wrapping_add(1),
-                    flags: TcpFlags::FinAck,
-                    payload: None,
-                };
-
                 conn.incoming_ack_update(self)?;
 
-                conn.tcp_state = TcpState::LastAck;
-                conn.snd_nxt.advance_by(1); // Our FIN consumes one sequence number
+                if let Some(payload) = maybe_payload {
+                    conn.rcv_nxt.advance_by(u32::from(payload.len().get()));
+                    conn.send_buffer.extend(payload.as_bytes().iter());
+                }
+
                 conn.rcv_nxt.advance_by(1); // Peer's FIN consumes one sequence number
+                conn.tcp_state = TcpState::LastAck;
+
+                let to_send = conn.drain_transmittable()?;
+                let send_len = to_send
+                    .as_ref()
+                    .map_or(0, |payload| u32::from(payload.len().get()));
+
+                let send_info = SendInfo {
+                    seq_num: conn.snd_nxt,
+                    ack_num: conn.rcv_nxt,
+                    flags: TcpFlags::FinAck,
+                    payload: to_send,
+                };
+
+                conn.snd_nxt.advance_by(send_len);
+                conn.snd_nxt.advance_by(1); // Our FIN consumes one sequence number
 
                 conn.pending
                     .push(PendingSegment::new(send_info.clone(), Instant::now()));
@@ -351,8 +366,7 @@ impl TcpHandler {
                 TcpFlags::Ack,
                 Some(payload),
             ) if self.seq_num == conn.rcv_nxt => {
-                let payload_len = u32::from(payload.len().get());
-                conn.rcv_nxt.advance_by(payload_len);
+                conn.rcv_nxt.advance_by(u32::from(payload.len().get()));
 
                 let send_info = SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt);
                 conn.incoming_ack_update(self)?;
@@ -372,11 +386,18 @@ impl TcpHandler {
             // FIN-WAIT-1, the remote peer's FIN arrives before ours is acknowledged (simultaneous
             // close) -> ACK it. If it also acknowledges our FIN, the connection is fully closed
             // (skipping FIN-WAIT-2/TIME-WAIT), otherwise move to CLOSING to await that ACK.
+            //
+            // Our own FIN has already been sent, so any trailing data can't be echoed (same as
+            // plain data arriving in FIN-WAIT-1), but RCV.NXT must still advance past it.
             (
                 Some(conn @ ConnState { tcp_state: TcpState::FinWait1, .. }),
                 TcpFlags::FinAck,
-                None,
+                maybe_payload,
             ) if self.seq_num == conn.rcv_nxt => {
+                if let Some(payload) = maybe_payload {
+                    conn.rcv_nxt.advance_by(u32::from(payload.len().get()));
+                }
+
                 // Consume one sequence number in RCV.NXT for the peer's FIN
                 conn.rcv_nxt.advance_by(1);
 
@@ -393,14 +414,20 @@ impl TcpHandler {
             }
 
             // FIN-WAIT-2, the remote peer's FIN arrives, in order -> ACK it and finish closing (no
-            // TIME-WAIT)
+            // TIME-WAIT). Our own FIN has already been sent, so any trailing data can't be echoed,
+            // but the ACK must still reflect RCV.NXT advanced past it as well as the FIN.
             (
                 Some(&mut ConnState { tcp_state: TcpState::FinWait2, snd_nxt, rcv_nxt, .. }),
                 TcpFlags::FinAck,
-                None,
+                maybe_payload,
             ) if self.seq_num == rcv_nxt => {
                 connections.remove(&key);
-                Some(SendInfo::pure_ack(snd_nxt, rcv_nxt.wrapping_add(1)))
+
+                let payload_len = maybe_payload
+                    .as_ref()
+                    .map_or(0, |payload| u32::from(payload.len().get()));
+
+                Some(SendInfo::pure_ack(snd_nxt, rcv_nxt.wrapping_add(payload_len).wrapping_add(1)))
             }
 
             // CLOSING (simultaneous close), the remote peer's ACK of our FIN arrives -> fully
