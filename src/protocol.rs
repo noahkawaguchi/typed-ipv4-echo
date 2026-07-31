@@ -1,6 +1,7 @@
 pub mod handler;
 pub use tcp::{TcpConnections, TcpHandler};
 
+mod display;
 mod icmp_echo;
 mod tcp;
 mod udp;
@@ -36,16 +37,6 @@ fn pseudo_header_checksum(data: &[u8], ip_pair: Ipv4AddrPair, protocol: Protocol
         .copy_from_slice(data);
 
     Ok(checksum::calculate(checksum_data.try_get(..checksum_len)?))
-}
-
-/// Converts raw payload bytes to a printable string representation of the payload's length and
-/// content. Escapes control and non-printable characters.
-fn payload_to_string(payload: &[u8]) -> String {
-    match str::from_utf8(payload) {
-        Ok("") => String::from("<no payload>"),
-        Ok(s) => format!("{}-byte payload: {}", payload.len(), s.escape_debug()),
-        Err(_) => format!("{}-byte non-UTF-8 payload: {}", payload.len(), payload.escape_ascii()),
-    }
 }
 
 #[derive(Clone, Copy)]

@@ -13,8 +13,9 @@ use {
         addr_pairs::{Ipv4AddrPair, PortPair},
         protocol::{
             Protocol,
+            display::{AsPrettyPayload as _, WithThousandsSeparators as _},
             handler::Encode,
-            payload_to_string, pseudo_header_checksum,
+            pseudo_header_checksum,
             tcp::{
                 connections::ConnKey,
                 flags::TcpFlags,
@@ -552,17 +553,17 @@ impl fmt::Display for TcpHandler {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "TCP | {} | seq={} ack={} | {}\n{}",
+            "TCP | {} | seq={} ack={} win={} | {}\n{}",
             self.ports,
-            self.seq_num,
-            self.ack_num,
+            self.seq_num.with_thousands_separators(),
+            self.ack_num.with_thousands_separators(),
+            self.window.with_thousands_separators(),
             self.flags,
-            payload_to_string(
-                self.payload
-                    .as_ref()
-                    .map(TcpPayload::as_bytes)
-                    .unwrap_or_default()
-            ),
+            self.payload
+                .as_ref()
+                .map(TcpPayload::as_bytes)
+                .unwrap_or_default()
+                .as_pretty_payload()
         )
     }
 }

@@ -3,7 +3,11 @@ use {
         Result,
         addr_pairs::Ipv4AddrPair,
         checksum,
-        protocol::{Protocol, handler::Encode, payload_to_string},
+        protocol::{
+            Protocol,
+            display::{AsPrettyPayload as _, WithThousandsSeparators as _},
+            handler::Encode,
+        },
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
     std::fmt,
@@ -123,9 +127,9 @@ impl fmt::Display for IcmpEchoHandler<'_> {
                 Self::ICMP_TYPE_ECHO_REPLY => "Echo Reply",
                 _ => "unknown type",
             },
-            self.identifier,
-            self.sequence,
-            payload_to_string(self.payload),
+            self.identifier.with_thousands_separators(),
+            self.sequence.with_thousands_separators(),
+            self.payload.as_pretty_payload()
         )
     }
 }

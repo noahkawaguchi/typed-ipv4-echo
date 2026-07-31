@@ -2,7 +2,9 @@ use {
     crate::{
         Result,
         addr_pairs::{Ipv4AddrPair, PortPair},
-        protocol::{Protocol, handler::Encode, payload_to_string, pseudo_header_checksum},
+        protocol::{
+            Protocol, display::AsPrettyPayload as _, handler::Encode, pseudo_header_checksum,
+        },
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
     std::fmt,
@@ -98,7 +100,7 @@ impl Encode for UdpHandler<'_> {
 
 impl fmt::Display for UdpHandler<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "UDP | {}\n{}", self.ports, payload_to_string(self.payload))
+        write!(f, "UDP | {}\n{}", self.ports, self.payload.as_pretty_payload())
     }
 }
 
