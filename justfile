@@ -56,14 +56,14 @@ tcp:
 tcp-nc:
     nc -Nnv {{ server-addr }} {{ server-port }}
 
+# Connect to the server using UDP
+udp:
+    -nc -nu {{ server-addr }} {{ server-port }}
+
 # Connect to the server using ICMP
 [continue]
 icmp:
     ping {{ server-addr }}
-
-# Connect to the server using UDP
-udp:
-    -nc -nu {{ server-addr }} {{ server-port }}
 
 ####################################################################################################
 # Observation and stress testing
@@ -92,6 +92,24 @@ sniff-inspect pcap=f'{{ project-name }}.pcap' x='' V='':
 sniff-clean pcap=f'{{ project-name }}.pcap':
     rm {{ pcap }}
 
+# Send a file through the echo server using TCP and diff the reply against the original
+[
+    arg('input-file', short='f', long, help='File to send'),
+    arg('echo-file', short, long, help='Output location for echoed data'),
+    arg('timeout-secs', short='s', long, help='Number of seconds to wait for echo')
+]
+throughput input-file='README.md' echo-file=f'/tmp/{{ project-name }}-out' timeout-secs='60':
+    nc -Nnvw {{ timeout-secs }} {{ server-addr }} {{ server-port }} \
+        < {{ input-file }} > {{ echo-file }}
+
+    if command -v delta >/dev/null 2>&1; then \
+        delta --paging never {{ input-file }} {{ echo-file }}; \
+    else \
+        diff {{ input-file }} {{ echo-file }}; \
+    fi
+
+    echo 'Echoed data matched input exactly'
+
 # Add emulation of real-world networks to the TUN device (uses sudo)
 [
     arg('delay', short, long),
@@ -116,24 +134,6 @@ loss-show:
 loss-clear:
     sudo tc qdisc del dev {{ tun-name }} root
 
-# Send a file through the echo server using TCP and diff the reply against the original
-[
-    arg('input-file', short='f', long, help='File to send'),
-    arg('echo-file', short, long, help='Output location for echoed data'),
-    arg('timeout-secs', short='s', long, help='Number of seconds to wait for echo')
-]
-throughput input-file='README.md' echo-file=f'/tmp/{{ project-name }}-out' timeout-secs='60':
-    nc -Nnvw {{ timeout-secs }} {{ server-addr }} {{ server-port }} \
-        < {{ input-file }} > {{ echo-file }}
-
-    if command -v delta >/dev/null 2>&1; then \
-        delta --paging never {{ input-file }} {{ echo-file }}; \
-    else \
-        diff {{ input-file }} {{ echo-file }}; \
-    fi
-
-    echo 'Echoed data matched input exactly'
-
 ####################################################################################################
 # Testing and quality
 ####################################################################################################
@@ -152,13 +152,13 @@ cov *ARGS: tun
 # Generate HTML test coverage report and open in browser (includes ignored tests)
 cov-open: (cov '--open')
 
-# Lint with Clippy for {aarch64,x86_64}-unknown-linux-gnu, denying warnings
-lint-targets: (lint '--target' 'aarch64-unknown-linux-gnu') \
-              (lint '--target' 'x86_64-unknown-linux-gnu')
-
 # Lint with Clippy, denying warnings
 lint *ARGS:
     cargo clippy --workspace --all-targets {{ ARGS }} -- --deny warnings
+
+# Lint with Clippy for {aarch64,x86_64}-unknown-linux-gnu, denying warnings
+lint-targets: (lint '--target' 'aarch64-unknown-linux-gnu') \
+              (lint '--target' 'x86_64-unknown-linux-gnu')
 
 # Check formatting
 fmt-check:
