@@ -101,11 +101,11 @@ The server will attach to the TUN device, listen for and reply to packets, and l
 Although the server logs incoming and outgoing packets, the `justfile` also includes recipes for capturing and logging traffic live and reading it back with TShark.
 
 ```bash
-just sniff    # Run in another terminal while creating traffic
-just inspect  # Read back the saved PCAP file
+just sniff          # Run in another terminal while creating traffic
+just sniff-inspect  # Read back the saved PCAP file
 ```
 
-See `just --usage sniff` and `just --usage inspect` for further options.
+See `just --usage sniff` and `just --usage sniff-inspect` for further options.
 
 ## Connecting as a Client
 

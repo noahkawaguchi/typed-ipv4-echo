@@ -81,7 +81,7 @@ sniff pcap=f'{{ project-name }}.pcap' x='':
     arg('x', short, value='-x', help='Show hex and ASCII'),
     arg('V', short, value='-V', help='Show full packet dissection')
 ]
-inspect pcap=f'{{ project-name }}.pcap' x='' V='':
+sniff-inspect pcap=f'{{ project-name }}.pcap' x='' V='':
     {{ tshark-cmd }} -r {{ pcap }} {{ x }} {{ V }} | "${PAGER:-less}"
 
 # Add emulation of real-world networks to the TUN device (uses sudo)
