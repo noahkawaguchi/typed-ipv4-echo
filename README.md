@@ -88,6 +88,24 @@ users.users.<you>.extraGroups = [ "wireshark" ];
 
 ## Running the Server
 
+<details>
+<summary><i>Optional environment variable configuration (click to expand)</i></summary>
+<br />
+
+The following environment variables can be used to configure the TUN device and server. A `.env` file will automatically be read if present.
+
+| Key                     | Meaning                                                   | Default     |
+| ----------------------- | --------------------------------------------------------- | ----------- |
+| TYPENET_TUN_NAME        | Name of the TUN device to create and use                  | `tun0`      |
+| TYPENET_TUN_CIDR        | CIDR used when creating the TUN device                    | 10.0.0.1/24 |
+| TYPENET_GRACE_SECS      | Wait time before shutdown when draining connections       | 5           |
+| TYPENET_INIT_RTO_MILLIS | Initial retransmission timeout before exponential backoff | 500         |
+| TYPENET_MAX_RETRANSMITS | Number of retransmissions before giving up                | 5           |
+
+---
+
+</details>
+
 You will be prompted to create the TUN device on first use, once per reboot, which requires `sudo` privileges.
 
 Build and run the server:
