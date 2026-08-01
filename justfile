@@ -79,6 +79,7 @@ icmp:
 [continue]
 sniff pcap=f'{{ project-name }}.pcap' x='': tun
     {{ tshark-cmd }} -i {{ tun-name }} -w {{ pcap }} {{ x }}
+    @echo 'Saved to {{ pcap }}'
 
 # Read a PCAP file with TShark
 [
