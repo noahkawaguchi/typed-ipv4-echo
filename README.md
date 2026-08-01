@@ -71,20 +71,35 @@ Each variant wraps a concrete protocol handler responsible for:
   - The [Rust toolchain](https://rust-lang.org/tools/install)
   - The command runner [Just](https://github.com/casey/just)
   - `telnet`, `nc`/`netcat`, `ping`, and `tc` (likely already installed)
-  - [TShark](https://www.wireshark.org/docs/man-pages/tshark.html) (only if capturing network traffic or reading PCAP files)
   - [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov) (only if generating test coverage reports)
 
-### If using TShark for live packet capture:
+<details>
+<summary><i>Optional: Capture and save traffic with TShark (click to expand)</i></summary>
+<br />
 
-The `dumpcap` binary requires CAP_NET_RAW and CAP_NET_ADMIN capabilities. It works to just use `sudo` and be done, but to be more granular:
+Although the server itself logs incoming and outgoing packets, [TShark](https://www.wireshark.org/docs/man-pages/tshark.html) can also be used to capture network traffic on the TUN device and save/read PCAP files. In most package managers, the CLI-only version is called `tshark` or `wireshark-cli`, while the full [Wireshark](https://www.wireshark.org) GUI version is called `wireshark`.
+
+If using TShark/Wireshark for live packet capture specifically, the `dumpcap` binary requires CAP_NET_RAW and CAP_NET_ADMIN capabilities. It works to just use `sudo` and be done, but to be more granular:
 
 - On FHS-based distros (i.e. most normal Linux): Grant it the capabilities as described [here](https://wiki.wireshark.org/capturesetup/captureprivileges).
-- On NixOS: Enable the `wireshark` program and add yourself to the `"wireshark"` group. This creates a setcap wrapper that will automatically be given precedence by the `shellHook` in the project's flake.
+- On NixOS: Enable the `wireshark` program and add yourself to the `"wireshark"` group. This creates a setcap wrapper for `dumpcap` in your PATH.
 
 ```nix
 programs.wireshark.enable = true;
 users.users.<you>.extraGroups = [ "wireshark" ];
 ```
+
+You should then be able to capture traffic without `sudo` by running `just sniff` in another terminal while creating traffic on the TUN device as explained below.
+
+```bash
+just sniff          # Capture, log, and save to PCAP
+just sniff-inspect  # Read back the saved PCAP file
+just sniff-clean    # Remove the saved PCAP file
+```
+
+For each of these three recipes, see `just --usage <RECIPE>` for further options.
+
+</details>
 
 ## Running the Server
 
@@ -115,16 +130,6 @@ just serve
 ```
 
 The server will attach to the TUN device, listen for and reply to packets, and log processed data until it receives SIGINT (Ctrl+C).
-
-Although the server logs incoming and outgoing packets, the `justfile` also includes recipes for capturing and logging traffic live and reading it back with TShark.
-
-```bash
-just sniff          # Run in another terminal while creating traffic
-just sniff-inspect  # Read back the saved PCAP file
-just sniff-clean    # Remove the saved PCAP file
-```
-
-For each of these three recipes, see `just --usage <RECIPE>` for further options.
 
 ## Connecting as a Client
 
