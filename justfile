@@ -2,15 +2,17 @@
 # Config
 ####################################################################################################
 
+set dotenv-load
+
 project-name := 'typenet'
 user := env('USER')
 
 server-addr := '10.0.0.2'
 server-port := '8080'
 
-# NOTE: "TUN_DEVICE_NAME" is also read by the server with a "tun0" fallback
-tun-name := env('TUN_DEVICE_NAME', 'tun0')
-tun-cidr := env('TUN_IP_CIDR', '10.0.0.1/24')
+# NOTE: "TYPENET_TUN_NAME" is also read by the server with a "tun0" fallback
+tun-name := env('TYPENET_TUN_NAME', 'tun0')
+tun-cidr := env('TYPENET_TUN_CIDR', '10.0.0.1/24')
 
 tshark-cmd := 'tshark -n --print' \
     + ' -o ip.check_checksum:true -o tcp.check_checksum:true -o udp.check_checksum:true'

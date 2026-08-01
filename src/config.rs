@@ -25,17 +25,17 @@ impl Config {
     /// Returns `Err` if an environment variable is present but unparsable.
     pub fn load() -> Result<Self, String> {
         Ok(Self {
-            // NOTE: "TUN_DEVICE_NAME" is also read in the `justfile` with a "tun0" fallback
-            tun_name: Self::get_env_or_else(|| String::from("tun0"), "TUN_DEVICE_NAME")?,
+            // NOTE: "TYPENET_TUN_NAME" is also read in the `justfile` with a "tun0" fallback
+            tun_name: Self::get_env_or_else(|| String::from("tun0"), "TYPENET_TUN_NAME")?,
 
-            grace_period: Duration::from_secs(Self::get_env_or_else(|| 5, "GRACE_PERIOD_SECS")?),
+            grace_period: Duration::from_secs(Self::get_env_or_else(|| 5, "TYPENET_GRACE_SECS")?),
 
             initial_rto: Duration::from_millis(Self::get_env_or_else(
                 || 500,
-                "INITIAL_RTO_MILLIS",
+                "TYPENET_INIT_RTO_MILLIS",
             )?),
 
-            max_retries: Self::get_env_or_else(|| 5, "MAX_TCP_RETRANSMISSIONS")?,
+            max_retries: Self::get_env_or_else(|| 5, "TYPENET_MAX_RETRANSMITS")?,
         })
     }
 
