@@ -113,9 +113,9 @@ The following environment variables can be used to configure the TUN device and 
 | ----------------------- | --------------------------------------------------------- | ----------- |
 | TYPENET_TUN_NAME        | Name of the TUN device to create and use                  | `tun0`      |
 | TYPENET_TUN_CIDR        | CIDR used when creating the TUN device                    | 10.0.0.1/24 |
-| TYPENET_GRACE_SECS      | Wait time before shutdown when draining connections       | 5           |
 | TYPENET_INIT_RTO_MILLIS | Initial retransmission timeout before exponential backoff | 500         |
 | TYPENET_MAX_RETRANSMITS | Number of retransmissions before giving up                | 5           |
+| TYPENET_GRACE_SECS      | Wait time before shutdown when draining connections       | 5           |
 | TYPENET_LOG_LEVEL       | Level of output for logging (see table below)             | 3           |
 
 | Log level | Meaning                                                                       |

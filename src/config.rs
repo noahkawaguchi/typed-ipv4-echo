@@ -7,10 +7,6 @@ pub struct Config {
     /// The name of the TUN device to attach to.
     pub tun_name: String,
 
-    /// The amount of time to wait for established TCP connections to finish closing after a
-    /// shutdown signal before exiting unconditionally.
-    pub(crate) grace_period: Duration,
-
     /// The initial retransmission timeout, i.e. how long to wait before retransmitting an unacked
     /// TCP segment the first time before exponential backoff.
     pub(crate) initial_rto: Duration,
@@ -18,6 +14,10 @@ pub struct Config {
     /// The number of times to retransmit an unacked TCP segment before giving up and dropping the
     /// connection.
     pub(crate) max_retries: u8,
+
+    /// The amount of time to wait for established TCP connections to finish closing after a
+    /// shutdown signal before exiting unconditionally.
+    pub(crate) grace_period: Duration,
 
     /// The level of output for logging.
     pub log_level: LogLevel,
@@ -34,15 +34,13 @@ impl Config {
             // NOTE: "TYPENET_TUN_NAME" is also read in the `justfile` with a "tun0" fallback
             tun_name: Self::get_env_or_else(|| String::from("tun0"), "TYPENET_TUN_NAME")?,
 
-            grace_period: Duration::from_secs(Self::get_env_or_else(|| 5, "TYPENET_GRACE_SECS")?),
-
             initial_rto: Duration::from_millis(Self::get_env_or_else(
                 || 500,
                 "TYPENET_INIT_RTO_MILLIS",
             )?),
 
             max_retries: Self::get_env_or_else(|| 5, "TYPENET_MAX_RETRANSMITS")?,
-
+            grace_period: Duration::from_secs(Self::get_env_or_else(|| 5, "TYPENET_GRACE_SECS")?),
             log_level: Self::get_env_or_else(LogLevel::default, "TYPENET_LOG_LEVEL")?,
         })
     }
