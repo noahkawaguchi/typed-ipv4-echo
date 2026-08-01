@@ -1,4 +1,7 @@
-use std::{any::type_name, env, str::FromStr, time::Duration};
+use {
+    crate::logger::LogLevel,
+    std::{any::type_name, env, str::FromStr, time::Duration},
+};
 
 pub struct Config {
     /// The name of the TUN device to attach to.
@@ -15,6 +18,9 @@ pub struct Config {
     /// The number of times to retransmit an unacked TCP segment before giving up and dropping the
     /// connection.
     pub max_retries: u8,
+
+    /// The level of output for logging.
+    pub log_level: LogLevel,
 }
 
 impl Config {
@@ -36,6 +42,8 @@ impl Config {
             )?),
 
             max_retries: Self::get_env_or_else(|| 5, "TYPENET_MAX_RETRANSMITS")?,
+
+            log_level: Self::get_env_or_else(LogLevel::default, "TYPENET_LOG_LEVEL")?,
         })
     }
 

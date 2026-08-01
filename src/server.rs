@@ -3,6 +3,7 @@ use {
         ETHERNET_MTU, Result,
         config::Config,
         ipv4_header::Ipv4Header,
+        logger,
         protocol::{
             TcpConnections, TcpHandler,
             handler::{Encode, ProtocolHandler},
@@ -15,8 +16,6 @@ use {
         time::{Duration, Instant},
     },
 };
-
-fn divider() { println!("\n{:=<80}\n", "") }
 
 /// The result of deciding how to react to a shutdown signal.
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
@@ -84,7 +83,7 @@ where
     fn run(&mut self) -> Result {
         let mut read_buf = [0u8; ETHERNET_MTU];
 
-        divider();
+        logger::divider();
 
         loop {
             match (self.poll_readable)(self.device, self.poll_timeout(Instant::now())) {
@@ -100,10 +99,10 @@ where
                 Err(e) => break Err(e.into()),
 
                 Ok(false) if self.grace_period_elapsed(Instant::now()) => {
-                    println!(
+                    logger::server_info(format_args!(
                         "Grace period elapsed with {} remaining connection(s), exiting",
                         self.tcp_connections.len()
-                    );
+                    ));
 
                     break Ok(());
                 }
@@ -111,9 +110,9 @@ where
                 // A retransmit deadline elapsed -> retransmit all expired segments
                 Ok(false) => {
                     for reply_handler in self.tcp_connections.make_retransmissions() {
-                        println!(" ==== Packet sent (retransmission) ====");
+                        logger::pkt_extra(" ==== Packet sent (retransmission) ====");
                         self.send_packet(&reply_handler)?;
-                        divider();
+                        logger::divider();
                     }
                 }
 
@@ -138,27 +137,30 @@ where
                     };
 
                     match self.parse_incoming(read_buf.try_get(..bytes_read)?) {
-                        Err(e) => eprintln!("{e}"),
+                        Err(e) => logger::pkt_err(e),
 
                         Ok((ipv4_header, handler, reply_handler)) => {
-                            println!(" ==== Packet received ====");
-                            println!("{ipv4_header}\n{handler}");
+                            logger::pkt_extra(" ==== Packet received ====");
+                            logger::pkt_in(format_args!("{ipv4_header}\n{handler}\n"))?;
 
                             match reply_handler {
-                                None => println!("\n<no reply>"),
+                                None => logger::pkt_extra("<no reply>"),
 
                                 Some(reply) => {
-                                    println!("\n ==== Packet sent ====");
+                                    logger::pkt_extra(" ==== Packet sent ====");
                                     self.send_packet(&reply)?;
                                 }
                             }
                         }
                     }
 
-                    divider();
+                    logger::divider();
 
                     if self.shutting_down_and_no_connections_closing() {
-                        println!("All connections closed within grace period, exiting");
+                        logger::server_info(
+                            "\nAll connections closed within grace period, exiting",
+                        );
+
                         break Ok(());
                     }
                 }
@@ -171,25 +173,36 @@ where
     fn handle_shutdown_interrupt(&mut self, now: Instant) -> Result<bool> {
         Ok(match self.decide_shutdown(now)? {
             ShutdownDecision::AlreadyDraining { time_left } => {
-                println!("\nDraining connections, {}ms left", time_left.as_millis());
+                logger::server_info(format_args!(
+                    "\nDraining connections, {}ms left",
+                    time_left.as_millis()
+                ));
+
                 false
             }
 
             ShutdownDecision::BeganDraining { to_send, deadline } => {
-                println!("\nShutdown signal received, closing established connections...");
+                logger::server_info(
+                    "\nShutdown signal received, closing established connections...",
+                );
+
+                logger::divider();
 
                 for reply_handler in to_send {
-                    println!("\n ==== Packet sent ====");
+                    logger::pkt_extra(" ==== Packet sent ====");
                     self.send_packet(&reply_handler)?;
                 }
 
-                divider();
+                logger::divider();
                 self.shutdown_deadline = Some(deadline);
                 false
             }
 
             ShutdownDecision::NoConnections => {
-                println!("\nShutdown signal received with no established connections, exiting");
+                logger::server_info(
+                    "\nShutdown signal received with no established connections, exiting",
+                );
+
                 true
             }
         })
@@ -207,8 +220,7 @@ where
         self.device
             .write_all(self.write_buf.try_get(..ipv4_header.total_len.into())?)?;
 
-        println!("{ipv4_header}");
-        println!("{handler}");
+        logger::pkt_out(format_args!("{ipv4_header}\n{handler}"))?;
 
         Ok(())
     }
