@@ -9,15 +9,15 @@ pub struct Config {
 
     /// The amount of time to wait for established TCP connections to finish closing after a
     /// shutdown signal before exiting unconditionally.
-    pub grace_period: Duration,
+    pub(crate) grace_period: Duration,
 
     /// The initial retransmission timeout, i.e. how long to wait before retransmitting an unacked
     /// TCP segment the first time before exponential backoff.
-    pub initial_rto: Duration,
+    pub(crate) initial_rto: Duration,
 
     /// The number of times to retransmit an unacked TCP segment before giving up and dropping the
     /// connection.
-    pub max_retries: u8,
+    pub(crate) max_retries: u8,
 
     /// The level of output for logging.
     pub log_level: LogLevel,
