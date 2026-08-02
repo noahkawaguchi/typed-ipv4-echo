@@ -79,6 +79,7 @@ Each variant wraps a concrete protocol handler responsible for:
   - The command runner [Just](https://github.com/casey/just)
   - `telnet`, `nc`/`netcat`, `ping`, and `tc` (likely already installed)
   - [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov) (only if generating test coverage reports)
+  - [Codebook](https://github.com/blopker/codebook) (only if spell checking)
 
 <details>
 <summary><i>Optional: Capture and save traffic with TShark (click to expand)</i></summary>
