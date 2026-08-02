@@ -54,6 +54,7 @@ words = [
     "revents",
     "rto",
     "rustfmt",
+    "rustup",
     "setcap",
     "sigaction",
     "sigemptyset",
