@@ -31,6 +31,24 @@ pub enum LogLevel {
     PacketVerbose = 3,
 }
 
+impl FromStr for LogLevel {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim() {
+            "0" => Ok(Self::Silent),
+            "1" => Ok(Self::ServerInfo),
+            "2" => Ok(Self::PacketQuiet),
+            "3" => Ok(Self::PacketVerbose),
+            _ => Err("Log level must be a digit between 0 and 3 inclusive"),
+        }
+    }
+}
+
+impl From<LogLevel> for u8 {
+    fn from(value: LogLevel) -> Self { value as Self }
+}
+
 /// Sets the global log level to `level`.
 pub fn set_level(level: LogLevel) { LOG_LEVEL.store(level.into(), Ordering::Relaxed); }
 
@@ -46,13 +64,6 @@ fn load_level() -> LogLevel {
     }
 }
 
-/// Logs information about the server to stdout if the log level allows.
-pub fn server_info(msg: impl Display) {
-    if load_level() >= LogLevel::ServerInfo {
-        println!("{msg}");
-    }
-}
-
 /// Prints a visual divider to stdout if and how the log level allows.
 pub(crate) fn divider() {
     match load_level() {
@@ -60,6 +71,13 @@ pub(crate) fn divider() {
         // Buffered until the next newline or flush, which is desired
         LogLevel::PacketQuiet => print!(" "),
         LogLevel::PacketVerbose => println!("\n{:=<80}\n", ""),
+    }
+}
+
+/// Logs information about the server to stdout if the log level allows.
+pub fn server_info(msg: impl Display) {
+    if load_level() >= LogLevel::ServerInfo {
+        println!("{msg}");
     }
 }
 
@@ -103,23 +121,5 @@ pub(crate) fn pkt_extra(msg: impl Display) {
 pub(crate) fn pkt_err(msg: impl Display) {
     if load_level() >= LogLevel::PacketVerbose {
         eprintln!("{msg}");
-    }
-}
-
-impl From<LogLevel> for u8 {
-    fn from(value: LogLevel) -> Self { value as Self }
-}
-
-impl FromStr for LogLevel {
-    type Err = &'static str;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.trim() {
-            "0" => Ok(Self::Silent),
-            "1" => Ok(Self::ServerInfo),
-            "2" => Ok(Self::PacketQuiet),
-            "3" => Ok(Self::PacketVerbose),
-            _ => Err("Log level must be a digit between 0 and 3 inclusive"),
-        }
     }
 }
