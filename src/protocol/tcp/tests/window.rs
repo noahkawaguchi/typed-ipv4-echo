@@ -165,7 +165,7 @@ fn same_seq_but_fresher_ack_updates_window() -> Result {
     cloned_state.snd_nxt.advance_by(HI_LEN);
     cloned_state.rcv_nxt.advance_by(HI_LEN);
     cloned_state.window_state = Some(WindowState {
-        snd_wnd: CLIENT_PACKET.window,
+        snd_wnd: hi_packet.window,
         snd_wl1: hi_packet.seq_num,
         snd_wl2: hi_packet.ack_num,
     });

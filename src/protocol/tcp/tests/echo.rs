@@ -56,7 +56,7 @@ fn pure_ack_on_established_connection_returns_none() -> Result {
 
     cloned_state.snd_una.advance_by(HELLO_LEN);
     cloned_state.window_state = Some(WindowState {
-        snd_wnd: CLIENT_PACKET.window,
+        snd_wnd: pure_ack.window,
         snd_wl1: pure_ack.seq_num,
         snd_wl2: pure_ack.ack_num,
     });
@@ -199,7 +199,7 @@ fn old_ack_num_does_not_regress_snd_una() -> Result {
     cloned_state.rcv_nxt.advance_by(HI_LEN);
     cloned_state.snd_una.advance_by(HELLO_LEN);
     cloned_state.window_state = Some(WindowState {
-        snd_wnd: CLIENT_PACKET.window,
+        snd_wnd: hi_packet.window,
         snd_wl1: hi_packet.seq_num,
         snd_wl2: hi_packet.ack_num,
     });

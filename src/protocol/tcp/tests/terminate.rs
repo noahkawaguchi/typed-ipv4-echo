@@ -87,7 +87,7 @@ fn fin_ack_acks_prior_data_and_advances_snd_una() -> Result {
     cloned_state.rcv_nxt.advance_by(FIN_BYTE);
     cloned_state.snd_una.advance_by(HELLO_LEN);
     cloned_state.window_state = Some(WindowState {
-        snd_wnd: CLIENT_PACKET.window,
+        snd_wnd: client_fin_ack.window,
         snd_wl1: client_fin_ack.seq_num,
         snd_wl2: client_fin_ack.ack_num,
     });
@@ -138,7 +138,7 @@ fn out_of_order_fin_ack_gets_duplicate_ack_without_closing() -> Result {
     );
 
     cloned_state.window_state = Some(WindowState {
-        snd_wnd: CLIENT_PACKET.window,
+        snd_wnd: client_fin_ack.window,
         snd_wl1: client_fin_ack.seq_num,
         snd_wl2: client_fin_ack.ack_num,
     });
@@ -147,6 +147,62 @@ fn out_of_order_fin_ack_gets_duplicate_ack_without_closing() -> Result {
         connections.try_get()?,
         &cloned_state,
         "Connection must remain established, out-of-order FIN-ACK must not start closing"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn partial_ack_in_last_ack_does_not_close_connection() -> Result {
+    // A LAST-ACK connection that echoed data alongside its own FIN can be ACKed in stages (e.g.
+    // the peer ACKs previously-buffered chunks separately from the byte that covers the FIN). An
+    // ACK that doesn't yet reach SND.NXT (i.e., doesn't yet cover the FIN) must not be
+    // treated as the final ACK completing the close.
+
+    let mut connections = TcpConnections::default().after_handshake(); // rcv_nxt=CLIENT_ISN+1
+    let mut cloned_state = connections.try_get()?.clone();
+
+    // Client's FIN-ACK arrives with trailing data, echoed alongside our own FIN -> LAST-ACK
+    TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE,
+        ack_num: SERVER_ISN + SYN_BYTE,
+        flags: TcpFlags::FinAck,
+        payload: payload_from("Hello")?,
+        ..CLIENT_PACKET
+    }
+    .create_reply(&mut connections)?;
+
+    cloned_state.tcp_state = TcpState::LastAck;
+    cloned_state.snd_nxt.advance_by(HELLO_LEN + FIN_BYTE);
+    cloned_state.rcv_nxt.advance_by(HELLO_LEN + FIN_BYTE);
+
+    assert_eq!(connections.try_get()?, &cloned_state);
+
+    // Client ACKs only the echoed "Hello" (SEG.ACK=SERVER_ISN+1+5), not the FIN yet
+    // (SND.NXT=SERVER_ISN+1+5+1)
+    let partial_ack = TcpHandler {
+        seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN + FIN_BYTE,
+        ack_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
+        ..CLIENT_PACKET
+    };
+
+    assert_eq!(
+        partial_ack.create_reply(&mut connections)?,
+        None,
+        "A partial ACK not yet covering the FIN should not get a reply"
+    );
+
+    cloned_state.snd_una.advance_by(HELLO_LEN);
+    cloned_state.window_state = Some(WindowState {
+        snd_wnd: partial_ack.window,
+        snd_wl1: partial_ack.seq_num,
+        snd_wl2: partial_ack.ack_num,
+    });
+
+    assert_eq!(
+        connections.try_get()?,
+        &cloned_state,
+        "Connection should remain in LAST-ACK, not be removed, since the FIN is still unacked"
     );
 
     Ok(())
@@ -238,7 +294,7 @@ fn fin_wait_1_to_fin_wait_2_on_ack_of_our_fin() -> Result {
     cloned_state.tcp_state = TcpState::FinWait2;
     cloned_state.snd_una.advance_by(FIN_BYTE);
     cloned_state.window_state = Some(WindowState {
-        snd_wnd: CLIENT_PACKET.window,
+        snd_wnd: ack_of_fin.window,
         snd_wl1: ack_of_fin.seq_num,
         snd_wl2: ack_of_fin.ack_num,
     });
@@ -266,7 +322,7 @@ fn fin_wait_2_closes_on_fin_ack_from_peer() -> Result {
     cloned_state.tcp_state = TcpState::FinWait2;
     cloned_state.snd_una.advance_by(FIN_BYTE);
     cloned_state.window_state = Some(WindowState {
-        snd_wnd: CLIENT_PACKET.window,
+        snd_wnd: ack_of_fin.window,
         snd_wl1: ack_of_fin.seq_num,
         snd_wl2: ack_of_fin.ack_num,
     });
@@ -379,7 +435,7 @@ fn data_after_our_fin_in_fin_wait_2_is_acked_without_echo() -> Result {
     cloned_state.tcp_state = TcpState::FinWait2;
     cloned_state.snd_una.advance_by(FIN_BYTE);
     cloned_state.window_state = Some(WindowState {
-        snd_wnd: CLIENT_PACKET.window,
+        snd_wnd: ack_of_fin.window,
         snd_wl1: ack_of_fin.seq_num,
         snd_wl2: ack_of_fin.ack_num,
     });
