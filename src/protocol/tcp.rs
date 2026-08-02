@@ -365,8 +365,22 @@ impl TcpHandler {
                 Some(send_info)
             }
 
-            // Final ACK completing passive close (LAST-ACK) -> remove connection, no reply
-            (Some(ConnState { tcp_state: TcpState::LastAck, .. }), TcpFlags::Ack, None) => {
+            // Partial ACK in LAST-ACK, not yet covering our FIN -> update send-side state like a
+            // plain ACK, keep waiting in LAST-ACK for the real final ACK
+            (Some(conn @ ConnState { tcp_state: TcpState::LastAck, .. }), TcpFlags::Ack, None)
+                if self.ack_num != conn.snd_nxt =>
+            {
+                conn.incoming_ack_update(self)?;
+                None
+            }
+
+            // Final ACK completing passive close (LAST-ACK), fully acknowledging our FIN -> remove
+            // connection, no reply
+            (
+                Some(&mut ConnState { tcp_state: TcpState::LastAck, snd_nxt, .. }),
+                TcpFlags::Ack,
+                None,
+            ) if self.ack_num == snd_nxt => {
                 connections.remove(&key);
                 None
             }
