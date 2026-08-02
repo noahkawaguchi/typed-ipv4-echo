@@ -91,7 +91,7 @@ users.users.<you>.extraGroups = [ "wireshark" ];
 
 You should then be able to capture traffic without `sudo` by running `just sniff` in another terminal while creating traffic on the TUN device as explained below.
 
-```bash
+```sh
 just sniff          # Capture, log, and save to PCAP
 just sniff-inspect  # Read back the saved PCAP file
 just sniff-clean    # Remove the saved PCAP file
@@ -133,7 +133,7 @@ You will be prompted to create the TUN device on first use, once per reboot, whi
 
 Build and run the server:
 
-```bash
+```sh
 just serve
 ```
 
@@ -143,7 +143,7 @@ The server will attach to the TUN device, listen for and reply to packets, and l
 
 With the server running, the different protocols can be tested from another terminal. If connecting with TCP or UDP, type a message and press Enter to see it echoed back.
 
-```bash
+```sh
 just tcp     # TCP using telnet
 just tcp-nc  # TCP using netcat
 just udp
@@ -152,14 +152,14 @@ just icmp
 
 To send a file through the echo server using TCP and diff the echoed reply against the original:
 
-```bash
+```sh
 just throughput                # Defaults to README.md
 just throughput -f Cargo.toml  # Send Cargo.toml instead
 ```
 
 To emulate real-world networks with delay/loss/corruption/duplication/reordering:
 
-```bash
+```sh
 just loss        # Add the emulation to the device (uses sudo)
 just loss-show   # Show current network emulation and packet counters
 just loss-clear  # Remove emulated network conditions (uses sudo)
@@ -171,13 +171,13 @@ See `just --usage throughput` and `just --usage loss` for further options.
 
 As with running the server, you will be prompted to create the TUN device if it does not already exist.
 
-```bash
+```sh
 just test
 ```
 
 Or with a coverage report:
 
-```bash
+```sh
 just cov       # Text summary
 just cov-open  # Generate detailed HTML and open in browser
 ```
