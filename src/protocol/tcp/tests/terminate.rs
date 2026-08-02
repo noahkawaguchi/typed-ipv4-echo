@@ -87,7 +87,7 @@ fn fin_ack_acks_prior_data_and_advances_snd_una() -> Result {
     cloned_state.rcv_nxt.advance_by(FIN_BYTE);
     cloned_state.snd_una.advance_by(HELLO_LEN);
     cloned_state.window_state = Some(WindowState {
-        snd_wnd: CLIENT_PACKET.window,
+        snd_wnd: client_fin_ack.window,
         snd_wl1: client_fin_ack.seq_num,
         snd_wl2: client_fin_ack.ack_num,
     });
@@ -138,7 +138,7 @@ fn out_of_order_fin_ack_gets_duplicate_ack_without_closing() -> Result {
     );
 
     cloned_state.window_state = Some(WindowState {
-        snd_wnd: CLIENT_PACKET.window,
+        snd_wnd: client_fin_ack.window,
         snd_wl1: client_fin_ack.seq_num,
         snd_wl2: client_fin_ack.ack_num,
     });
@@ -294,7 +294,7 @@ fn fin_wait_1_to_fin_wait_2_on_ack_of_our_fin() -> Result {
     cloned_state.tcp_state = TcpState::FinWait2;
     cloned_state.snd_una.advance_by(FIN_BYTE);
     cloned_state.window_state = Some(WindowState {
-        snd_wnd: CLIENT_PACKET.window,
+        snd_wnd: ack_of_fin.window,
         snd_wl1: ack_of_fin.seq_num,
         snd_wl2: ack_of_fin.ack_num,
     });
@@ -322,7 +322,7 @@ fn fin_wait_2_closes_on_fin_ack_from_peer() -> Result {
     cloned_state.tcp_state = TcpState::FinWait2;
     cloned_state.snd_una.advance_by(FIN_BYTE);
     cloned_state.window_state = Some(WindowState {
-        snd_wnd: CLIENT_PACKET.window,
+        snd_wnd: ack_of_fin.window,
         snd_wl1: ack_of_fin.seq_num,
         snd_wl2: ack_of_fin.ack_num,
     });
@@ -435,7 +435,7 @@ fn data_after_our_fin_in_fin_wait_2_is_acked_without_echo() -> Result {
     cloned_state.tcp_state = TcpState::FinWait2;
     cloned_state.snd_una.advance_by(FIN_BYTE);
     cloned_state.window_state = Some(WindowState {
-        snd_wnd: CLIENT_PACKET.window,
+        snd_wnd: ack_of_fin.window,
         snd_wl1: ack_of_fin.seq_num,
         snd_wl2: ack_of_fin.ack_num,
     });

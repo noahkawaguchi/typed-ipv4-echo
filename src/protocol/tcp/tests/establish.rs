@@ -75,7 +75,7 @@ fn handshake_ack_without_data_establishes_connection_and_returns_none() -> Resul
     cloned_state.rcv_nxt = CLIENT_ISN + SYN_BYTE;
     cloned_state.snd_una.advance_by(SYN_BYTE);
     cloned_state.window_state = Some(WindowState {
-        snd_wnd: CLIENT_PACKET.window,
+        snd_wnd: handshake_ack.window,
         snd_wl1: handshake_ack.seq_num,
         snd_wl2: handshake_ack.ack_num,
     });
