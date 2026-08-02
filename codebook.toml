@@ -64,6 +64,7 @@ words = [
     "struct's",
     "subslice",
     "syscall",
+    "syscalls",
     "sysfs",
     "tshark",
     "typenet",

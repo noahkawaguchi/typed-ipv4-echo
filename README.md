@@ -1,20 +1,15 @@
 # Typenet
 
-A type-safe, userspace IPv4 echo server implementing TCP, UDP, and ICMP protocols using Linux TUN devices.
+Typenet is a userspace IPv4/ICMP/TCP/UDP implementation and echo server that operates over Linux TUN devices. This project demonstrates low-level networking in Rust, working with packet bytes and syscalls while focusing on type safety and manual protocol implementations.
 
 ## Table of Contents
 
-1. [Overview](#overview)
-2. [Features](#features)
-3. [Architecture](#architecture)
-4. [Prerequisites](#prerequisites)
-5. [Running the Server](#running-the-server)
-6. [Connecting as a Client](#connecting-as-a-client)
-7. [Testing](#testing)
-
-## Overview
-
-This project demonstrates low-level networking in Rust by implementing a userspace echo server that operates over TCP, UDP, and ICMP. Using a virtual TUN network interface and manually processing raw IPv4 packets, it provides insight into protocol implementation details while upholding type safety, performance, and maintainability.
+1. [Features](#features)
+2. [Architecture](#architecture)
+3. [Prerequisites](#prerequisites)
+4. [Running the Server](#running-the-server)
+5. [Connecting as a Client](#connecting-as-a-client)
+6. [Testing](#testing)
 
 ## Features
 
