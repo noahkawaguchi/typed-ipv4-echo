@@ -18,14 +18,26 @@ This project demonstrates low-level networking in Rust by implementing a userspa
 
 ## Features
 
-- **Minimal Dependencies**: Implements all necessary logic from scratch, depending only on `libc` to access platform C APIs
-- **Multi-Protocol Support**: Manages TCP connections, ICMP Echo Request/Reply, and UDP datagrams
+- **Type Safety**: Leverages Rust's strong type system and zero-cost abstractions to safely create and uphold static guarantees without compromising on performance
+- **Near-Zero Dependencies**: Depends only on the Rust Standard Library and `libc` (raw FFI to access platform C APIs), implementing all other logic from scratch
 - **TUN Device Integration**: Performs low-level packet I/O using Linux TUN virtual network interfaces
-- **Type-Safe Packet Parsing**: Leverages Rust's strong type system and zero-cost abstractions to safely interpret raw bytes as protocol structures
+- **Multi-Protocol Support**: Manages TCP connections, ICMP Echo Request/Reply, and UDP datagrams
+- **Flexible Configuration and Logging**: Allows customization of key parameters at runtime (see [Environment Variables](#environment-variables) below)
 - **Graceful Shutdown**: Catches SIGINT, drains TCP connections with a timeout, and exits cleanly
-- **Comprehensive Testing**: Includes unit tests for all packet handling logic with edge case coverage
 - **Strict Linting**: Forbids panicking constructs like `unwrap` and `expect` completely and isolates limited use of `unsafe`
 - **Continuous Integration**: Runs tests, linting, formatting checks, and spell checks in CI and requires all to pass before merging into main
+
+### TCP Implementation
+
+Although the TCP implementation is not complete, it covers a significant portion of RFC 9293 and is capable of reliable transmission of data in degraded network conditions (see [Network Emulation](#network-emulation) below). Some highlights include:
+
+- Three-way handshake (passive open)
+- 4-tuple-keyed state machine
+- Data receipt and transmission (currently echo only)
+- Retransmissions with binary exponential backoff
+- Flow control (respects peer's window and buffers remaining bytes to send when the window opens)
+- Active close, passive close, and simultaneous close
+- Handling of unknown and aborted connections
 
 ## Architecture
 
@@ -103,6 +115,8 @@ For each of these three recipes, see `just --usage <RECIPE>` for further options
 
 ## Running the Server
 
+### Environment Variables
+
 <details>
 <summary><i>Optional environment variable configuration (click to expand)</i></summary>
 <br />
@@ -125,13 +139,11 @@ The following environment variables can be used to configure the TUN device and 
 | 2         | Minimal indicators for each packet with no details                            |
 | 3         | Full details for each packet                                                  |
 
----
-
 </details>
 
-You will be prompted to create the TUN device on first use, once per reboot, which requires `sudo` privileges.
+### Build and Run
 
-Build and run the server:
+You will be prompted to create the TUN device on first use, once per reboot, which requires `sudo` privileges.
 
 ```sh
 just serve
@@ -157,6 +169,10 @@ just throughput                # Defaults to README.md
 just throughput -f Cargo.toml  # Send Cargo.toml instead
 ```
 
+See `just --usage throughput` for further options.
+
+### Network Emulation
+
 To emulate real-world networks with delay/loss/corruption/duplication/reordering:
 
 ```sh
@@ -165,7 +181,7 @@ just loss-show   # Show current network emulation and packet counters
 just loss-clear  # Remove emulated network conditions (uses sudo)
 ```
 
-See `just --usage throughput` and `just --usage loss` for further options.
+See `just --usage loss` for further options.
 
 ## Testing
 
@@ -182,11 +198,11 @@ just cov       # Text summary
 just cov-open  # Generate detailed HTML and open in browser
 ```
 
-The project includes comprehensive unit tests for:
+The project includes comprehensive unit and integration tests for:
 
+- Parsing, send/receive logic, and encoding for IPv4 headers, TCP segments, ICMP Echo Request/Reply, and UDP datagrams
+- Server loop packet I/O, timers, and connection draining
+- Low-level signal handling and syscall interrupts
 - Internet checksum calculation
-- IPv4 header parsing and creation
-- ICMP Echo Request/Reply handling
-- TCP handshake, connection state, and data echo logic
-- UDP datagram parsing and echo responses
-- Edge cases like malformed packets, empty payloads, and boundary values
+- Serial number arithmetic
+- Custom type invariants
