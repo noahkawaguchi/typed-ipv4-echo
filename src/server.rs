@@ -141,13 +141,13 @@ where
 
                         Ok((ipv4_header, handler, reply_handler)) => {
                             logger::pkt_extra(" ==== Packet received ====");
-                            logger::pkt_in(format_args!("{ipv4_header}\n{handler}\n"))?;
+                            logger::pkt_in(&ipv4_header, &handler)?;
 
                             match reply_handler {
-                                None => logger::pkt_extra("<no reply>"),
+                                None => logger::pkt_extra("\n<no reply>"),
 
                                 Some(reply) => {
-                                    logger::pkt_extra(" ==== Packet sent ====");
+                                    logger::pkt_extra("\n ==== Packet sent ====");
                                     self.send_packet(&reply)?;
                                 }
                             }
@@ -220,7 +220,7 @@ where
         self.device
             .write_all(self.write_buf.try_get(..ipv4_header.total_len.into())?)?;
 
-        logger::pkt_out(format_args!("{ipv4_header}\n{handler}"))?;
+        logger::pkt_out(&ipv4_header, handler)?;
 
         Ok(())
     }

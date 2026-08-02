@@ -1,8 +1,14 @@
-use std::{
-    fmt::Display,
-    io::{self, Write as _},
-    str::FromStr,
-    sync::atomic::{AtomicU8, Ordering},
+use {
+    crate::{
+        ipv4_header::Ipv4Header,
+        protocol::handler::{Encode, ProtocolHandler},
+    },
+    std::{
+        fmt::Display,
+        io::{self, Write as _},
+        str::FromStr,
+        sync::atomic::{AtomicU8, Ordering},
+    },
 };
 
 /// Internal atomic representation of the global log level.
@@ -58,28 +64,28 @@ pub(crate) fn divider() {
 }
 
 /// Logs receipt of a packet to stdout if and how the log level allows.
-pub(crate) fn pkt_in(msg: impl Display) -> io::Result<()> {
+pub(crate) fn pkt_in(ipv4_header: &Ipv4Header, proto_handler: &ProtocolHandler) -> io::Result<()> {
     match load_level() {
         LogLevel::Silent | LogLevel::ServerInfo => {}
         LogLevel::PacketQuiet => {
             print!("↓");
             io::stdout().flush()?;
         }
-        LogLevel::PacketVerbose => println!("{msg}"),
+        LogLevel::PacketVerbose => println!("{ipv4_header}\n{proto_handler}"),
     }
 
     Ok(())
 }
 
 /// Logs transmission of a packet to stdout if and how the log level allows.
-pub(crate) fn pkt_out(msg: impl Display) -> io::Result<()> {
+pub(crate) fn pkt_out(ipv4_header: &Ipv4Header, proto_handler: &impl Encode) -> io::Result<()> {
     match load_level() {
         LogLevel::Silent | LogLevel::ServerInfo => {}
         LogLevel::PacketQuiet => {
             print!("↑");
             io::stdout().flush()?;
         }
-        LogLevel::PacketVerbose => println!("{msg}"),
+        LogLevel::PacketVerbose => println!("{ipv4_header}\n{proto_handler}"),
     }
 
     Ok(())
