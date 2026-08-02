@@ -77,7 +77,7 @@ Each variant wraps a concrete protocol handler responsible for:
 <summary><i>Optional: Capture and save traffic with TShark (click to expand)</i></summary>
 <br />
 
-Although the server itself logs incoming and outgoing packets, [TShark](https://www.wireshark.org/docs/man-pages/tshark.html) can also be used to capture network traffic on the TUN device and save/read PCAP files. In most package managers, the CLI-only version is called `tshark` or `wireshark-cli`, while the full [Wireshark](https://www.wireshark.org) GUI version is called `wireshark`.
+Although the server has logging functionality built in, [TShark](https://www.wireshark.org/docs/man-pages/tshark.html) can also be used to capture network traffic on the TUN device and save/read PCAP files. In most package managers, the CLI-only version is called `tshark` or `wireshark-cli`, while the full [Wireshark](https://www.wireshark.org) GUI version is called `wireshark`.
 
 If using TShark/Wireshark for live packet capture specifically, the `dumpcap` binary requires CAP_NET_RAW and CAP_NET_ADMIN capabilities. It works to just use `sudo` and be done, but to be more granular:
 
@@ -113,9 +113,17 @@ The following environment variables can be used to configure the TUN device and 
 | ----------------------- | --------------------------------------------------------- | ----------- |
 | TYPENET_TUN_NAME        | Name of the TUN device to create and use                  | `tun0`      |
 | TYPENET_TUN_CIDR        | CIDR used when creating the TUN device                    | 10.0.0.1/24 |
-| TYPENET_GRACE_SECS      | Wait time before shutdown when draining connections       | 5           |
 | TYPENET_INIT_RTO_MILLIS | Initial retransmission timeout before exponential backoff | 500         |
 | TYPENET_MAX_RETRANSMITS | Number of retransmissions before giving up                | 5           |
+| TYPENET_GRACE_SECS      | Wait time before shutdown when draining connections       | 5           |
+| TYPENET_LOG_LEVEL       | Level of output for logging (see table below)             | 3           |
+
+| Log level | Meaning                                                                       |
+| --------- | ----------------------------------------------------------------------------- |
+| 0         | No output at all                                                              |
+| 1         | Server startup and shutdown information, but nothing about individual packets |
+| 2         | Minimal indicators for each packet with no details                            |
+| 3         | Full details for each packet                                                  |
 
 ---
 
