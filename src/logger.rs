@@ -7,31 +7,9 @@ use {
         fmt,
         io::{self, Write as _},
         str::FromStr,
-        sync::{
-            LazyLock,
-            atomic::{AtomicU8, Ordering},
-        },
         time::Instant,
     },
 };
-
-/// Internal atomic representation of the global log level.
-static LOG_LEVEL: AtomicU8 = AtomicU8::new(LogLevel::PacketFull as u8);
-
-/// The `Instant` of the first timestamp access (i.e. first timestamped log).
-static FIRST_TIMESTAMP_TIME: LazyLock<Instant> = LazyLock::new(Instant::now);
-
-struct Timestamp;
-
-impl fmt::Display for Timestamp {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let elapsed = Instant::now().saturating_duration_since(*FIRST_TIMESTAMP_TIME);
-        let secs = elapsed.as_secs();
-        let (mins, sub_min_secs) = (secs / 60, secs % 60);
-        let (hrs, sub_hr_mins) = (mins / 60, mins % 60);
-        write!(f, "{hrs:02}:{sub_hr_mins:02}:{sub_min_secs:02}.{:03}", elapsed.subsec_millis())
-    }
-}
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 #[repr(u8)]
@@ -72,90 +50,111 @@ impl From<LogLevel> for u8 {
     fn from(value: LogLevel) -> Self { value as Self }
 }
 
-/// Sets the global log level to `level`.
-pub fn set_level(level: LogLevel) { LOG_LEVEL.store(level.into(), Ordering::Relaxed); }
+/// Wrapper struct for displaying the time elapsed since the inner `Instant`.
+struct Timestamp(Instant);
 
-/// Loads the atomic and converts it to `LogLevel`, silently accepting values greater than 4 as
-/// equivalent to 4. This function should stay private to this module because outside the module,
-/// trying to convert a `u8` that doesn't exactly match a variant should be considered an error.
-fn load_level() -> LogLevel {
-    match LOG_LEVEL.load(Ordering::Relaxed) {
-        0 => LogLevel::Silent,
-        1 => LogLevel::ServerInfo,
-        2 => LogLevel::PacketQuiet,
-        3 => LogLevel::PacketDetails,
-        4.. => LogLevel::PacketFull,
+impl fmt::Display for Timestamp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let elapsed = Instant::now().saturating_duration_since(self.0);
+        let secs = elapsed.as_secs();
+        let (mins, sub_min_secs) = (secs / 60, secs % 60);
+        let (hrs, sub_hr_mins) = (mins / 60, mins % 60);
+        write!(f, "{hrs:02}:{sub_hr_mins:02}:{sub_min_secs:02}.{:03}", elapsed.subsec_millis())
     }
 }
 
-/// Prints a visual divider to stdout if and how the log level allows.
-pub(crate) fn divider() {
-    match load_level() {
-        LogLevel::Silent | LogLevel::ServerInfo => {}
-        // Buffered until the next newline or flush, which is desired
-        LogLevel::PacketQuiet => print!(" "),
-        LogLevel::PacketDetails | LogLevel::PacketFull => println!("\n{:=<80}\n", ""),
-    }
+pub struct Logger {
+    /// The level of output for logging.
+    level: LogLevel,
+
+    /// The `Instant` at which `self` was created.
+    birth: Instant,
 }
 
-/// Logs a bare newline from the server without a timestamp.
-pub(crate) fn server_newline() {
-    if load_level() >= LogLevel::ServerInfo {
-        println!();
-    }
-}
+impl Logger {
+    pub(crate) fn new(level: LogLevel) -> Self { Self { level, birth: Instant::now() } }
 
-/// Logs information about the server to stdout if the log level allows.
-pub fn server_info(msg: impl fmt::Display) {
-    if load_level() >= LogLevel::ServerInfo {
-        println!("[{Timestamp}] {msg}");
-    }
-}
-
-/// Logs receipt of a packet to stdout if and how the log level allows.
-pub(crate) fn pkt_in(ipv4_header: &Ipv4Header, proto_handler: &ProtocolHandler) -> io::Result<()> {
-    pkt_in_or_out(true, ipv4_header, proto_handler)
-}
-
-/// Logs transmission of a packet to stdout if and how the log level allows.
-pub(crate) fn pkt_out(ipv4_header: &Ipv4Header, proto_handler: &impl Encode) -> io::Result<()> {
-    pkt_in_or_out(false, ipv4_header, proto_handler)
-}
-
-/// Logs receipt or transmission of a packet to stdout if and how the log level allows.
-fn pkt_in_or_out(
-    is_in: bool,
-    ipv4_header: &Ipv4Header,
-    proto_handler: &impl Encode,
-) -> io::Result<()> {
-    match load_level() {
-        LogLevel::Silent | LogLevel::ServerInfo => {}
-        LogLevel::PacketQuiet => {
-            print!("{}", if is_in { "↓" } else { "↑" });
-            io::stdout().flush()?;
-        }
-        level @ (LogLevel::PacketDetails | LogLevel::PacketFull) => {
-            println!(
-                "{Timestamp}\n{ipv4_header}\n{proto_handler}\n{}",
-                proto_handler.pretty_payload(level == LogLevel::PacketFull)
-            );
+    /// Prints a visual divider to stdout if and how the log level allows.
+    pub(crate) fn divider(&self) {
+        match self.level {
+            LogLevel::Silent | LogLevel::ServerInfo => {}
+            // Buffered until the next newline or flush, which is desired
+            LogLevel::PacketQuiet => print!(" "),
+            LogLevel::PacketDetails | LogLevel::PacketFull => println!("\n{:=<80}\n", ""),
         }
     }
 
-    Ok(())
-}
-
-/// Logs packet-related information and formatting other than the packets themselves to stdout if
-/// the log level allows.
-pub(crate) fn pkt_extra(msg: impl fmt::Display) {
-    if load_level() >= LogLevel::PacketDetails {
-        println!("{msg}");
+    /// Logs a bare newline from the server without a timestamp.
+    pub(crate) fn server_newline(&self) {
+        if self.level >= LogLevel::ServerInfo {
+            println!();
+        }
     }
-}
 
-/// Logs an error handling a packet to stderr if the log level allows.
-pub(crate) fn pkt_err(msg: impl fmt::Display) {
-    if load_level() >= LogLevel::PacketDetails {
-        eprintln!("[{Timestamp}] {msg}");
+    /// Logs information about the server to stdout if the log level allows.
+    pub(crate) fn server_info(&self, msg: impl fmt::Display) {
+        if self.level >= LogLevel::ServerInfo {
+            println!("[{}] {msg}", Timestamp(self.birth));
+        }
+    }
+
+    /// Logs receipt of a packet to stdout if and how the log level allows.
+    pub(crate) fn pkt_in(
+        &self,
+        ipv4_header: &Ipv4Header,
+        proto_handler: &ProtocolHandler,
+    ) -> io::Result<()> {
+        self.pkt_in_or_out(true, ipv4_header, proto_handler)
+    }
+
+    /// Logs transmission of a packet to stdout if and how the log level allows.
+    pub(crate) fn pkt_out(
+        &self,
+        ipv4_header: &Ipv4Header,
+        proto_handler: &impl Encode,
+    ) -> io::Result<()> {
+        self.pkt_in_or_out(false, ipv4_header, proto_handler)
+    }
+
+    /// Logs receipt or transmission of a packet to stdout if and how the log level allows.
+    fn pkt_in_or_out(
+        &self,
+        is_in: bool,
+        ipv4_header: &Ipv4Header,
+        proto_handler: &impl Encode,
+    ) -> io::Result<()> {
+        match self.level {
+            LogLevel::Silent | LogLevel::ServerInfo => {}
+
+            LogLevel::PacketQuiet => {
+                print!("{}", if is_in { "↓" } else { "↑" });
+                io::stdout().flush()?;
+            }
+
+            level @ (LogLevel::PacketDetails | LogLevel::PacketFull) => {
+                println!(
+                    "{}\n{ipv4_header}\n{proto_handler}\n{}",
+                    Timestamp(self.birth),
+                    proto_handler.pretty_payload(level == LogLevel::PacketFull)
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Logs packet-related information and formatting other than the packets themselves to stdout
+    /// if the log level allows.
+    pub(crate) fn pkt_extra(&self, msg: impl fmt::Display) {
+        if self.level >= LogLevel::PacketDetails {
+            println!("{msg}");
+        }
+    }
+
+    /// Logs an error handling a packet to stderr if the log level allows.
+    pub(crate) fn pkt_err(&self, msg: impl fmt::Display) {
+        if self.level >= LogLevel::PacketDetails {
+            eprintln!("[{}] {msg}", Timestamp(self.birth));
+        }
     }
 }

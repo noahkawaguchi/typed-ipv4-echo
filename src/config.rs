@@ -20,7 +20,7 @@ pub struct Config {
     pub(crate) grace_period: Duration,
 
     /// The level of output for logging.
-    pub log_level: LogLevel,
+    pub(crate) log_level: LogLevel,
 }
 
 impl Config {

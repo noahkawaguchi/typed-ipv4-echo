@@ -3,7 +3,7 @@ use {
         ETHERNET_MTU, Result,
         config::Config,
         ipv4_header::Ipv4Header,
-        logger,
+        logger::Logger,
         protocol::{
             TcpConnections, TcpHandler,
             handler::{Encode, ProtocolHandler},
@@ -49,9 +49,17 @@ where
     P: Fn(&D, Option<Duration>) -> io::Result<bool>,
     S: Fn() -> bool,
 {
+    let logger = Logger::new(config.log_level);
+
+    logger.server_info(format_args!(
+        "Waiting for packets on TUN device {} (Ctrl+C to stop)",
+        config.tun_name
+    ));
+
     Server {
         write_buf: [0u8; ETHERNET_MTU],
         tcp_connections: TcpConnections::new(config.initial_rto, config.max_retries),
+        logger,
         device,
         poll_readable,
         shutdown_check,
@@ -64,6 +72,7 @@ where
 struct Server<'a, D, P, S> {
     write_buf: [u8; ETHERNET_MTU],
     tcp_connections: TcpConnections,
+    logger: Logger,
     device: &'a mut D,
     poll_readable: P,
     shutdown_check: S,
@@ -83,7 +92,7 @@ where
     fn run(&mut self) -> Result {
         let mut read_buf = [0u8; ETHERNET_MTU];
 
-        logger::divider();
+        self.logger.divider();
 
         loop {
             match (self.poll_readable)(self.device, self.poll_timeout(Instant::now())) {
@@ -99,8 +108,8 @@ where
                 Err(e) => break Err(e.into()),
 
                 Ok(false) if self.grace_period_elapsed(Instant::now()) => {
-                    logger::server_newline();
-                    logger::server_info(format_args!(
+                    self.logger.server_newline();
+                    self.logger.server_info(format_args!(
                         "Grace period elapsed with {} remaining connection(s), exiting",
                         self.tcp_connections.len()
                     ));
@@ -111,9 +120,11 @@ where
                 // A retransmit deadline elapsed -> retransmit all expired segments
                 Ok(false) => {
                     for reply_handler in self.tcp_connections.make_retransmissions() {
-                        logger::pkt_extra(" ==== Packet sent (retransmission) ====");
+                        self.logger
+                            .pkt_extra(" ==== Packet sent (retransmission) ====");
+
                         self.send_packet(&reply_handler)?;
-                        logger::divider();
+                        self.logger.divider();
                     }
                 }
 
@@ -138,28 +149,30 @@ where
                     };
 
                     match self.parse_incoming(read_buf.try_get(..bytes_read)?) {
-                        Err(e) => logger::pkt_err(e),
+                        Err(e) => self.logger.pkt_err(e),
 
                         Ok((ipv4_header, handler, reply_handler)) => {
-                            logger::pkt_extra(" ==== Packet received ====");
-                            logger::pkt_in(&ipv4_header, &handler)?;
+                            self.logger.pkt_extra(" ==== Packet received ====");
+                            self.logger.pkt_in(&ipv4_header, &handler)?;
 
                             match reply_handler {
-                                None => logger::pkt_extra("\n<no reply>"),
+                                None => self.logger.pkt_extra("\n<no reply>"),
 
                                 Some(reply) => {
-                                    logger::pkt_extra("\n ==== Packet sent ====");
+                                    self.logger.pkt_extra("\n ==== Packet sent ====");
                                     self.send_packet(&reply)?;
                                 }
                             }
                         }
                     }
 
-                    logger::divider();
+                    self.logger.divider();
 
                     if self.shutting_down_and_no_connections_closing() {
-                        logger::server_newline();
-                        logger::server_info("All connections closed within grace period, exiting");
+                        self.logger.server_newline();
+                        self.logger
+                            .server_info("All connections closed within grace period, exiting");
+
                         break Ok(());
                     }
                 }
@@ -170,11 +183,11 @@ where
     /// Reacts to an `EINTR` caused by the shutdown signal, performing I/O resulting from the
     /// shutdown decision as necessary. Returns whether to proceed to shutdown immediately.
     fn handle_shutdown_interrupt(&mut self, now: Instant) -> Result<bool> {
-        logger::server_newline(); // Because ^C is probably in the terminal
+        self.logger.server_newline(); // Because ^C is probably in the terminal
 
         Ok(match self.decide_shutdown(now)? {
             ShutdownDecision::AlreadyDraining { time_left } => {
-                logger::server_info(format_args!(
+                self.logger.server_info(format_args!(
                     "Draining connections, {}.{:03}s left",
                     time_left.as_secs(),
                     time_left.subsec_millis()
@@ -184,21 +197,23 @@ where
             }
 
             ShutdownDecision::BeganDraining { to_send, deadline } => {
-                logger::server_info("Shutdown signal received, closing established connections...");
-                logger::divider();
+                self.logger
+                    .server_info("Shutdown signal received, closing established connections...");
+
+                self.logger.divider();
 
                 for reply_handler in to_send {
-                    logger::pkt_extra(" ==== Packet sent ====");
+                    self.logger.pkt_extra(" ==== Packet sent ====");
                     self.send_packet(&reply_handler)?;
                 }
 
-                logger::divider();
+                self.logger.divider();
                 self.shutdown_deadline = Some(deadline);
                 false
             }
 
             ShutdownDecision::NoConnections => {
-                logger::server_info(
+                self.logger.server_info(
                     "Shutdown signal received with no established connections, exiting",
                 );
 
@@ -219,7 +234,7 @@ where
         self.device
             .write_all(self.write_buf.try_get(..ipv4_header.total_len.into())?)?;
 
-        logger::pkt_out(&ipv4_header, handler)?;
+        self.logger.pkt_out(&ipv4_header, handler)?;
 
         Ok(())
     }
@@ -302,6 +317,7 @@ mod tests {
 
     use {
         super::*,
+        crate::logger::LogLevel,
         mocks::*,
         std::{
             assert_matches,
@@ -331,6 +347,7 @@ mod tests {
         Server {
             write_buf: [0u8; ETHERNET_MTU],
             tcp_connections,
+            logger: Logger::new(LogLevel::Silent),
             device,
             poll_readable,
             shutdown_check,
@@ -346,6 +363,7 @@ mod tests {
         Server {
             write_buf: [0u8; ETHERNET_MTU],
             tcp_connections: TcpConnections::default(),
+            logger: Logger::new(LogLevel::Silent),
             // "Memory leak" of zero bytes, so no memory leak (or allocation)
             device: Box::leak(Box::new(())),
             poll_readable: (),
