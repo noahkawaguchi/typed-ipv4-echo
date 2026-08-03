@@ -16,7 +16,7 @@ Typenet is a userspace IPv4/ICMP/TCP/UDP implementation and echo server that ope
 
 - **Type Safety**: Leverages Rust's strong type system and zero-cost abstractions to safely create and uphold static guarantees without compromising on performance
 - **Near-Zero Dependencies**: Depends only on the Rust Standard Library and `libc` (raw FFI to access platform C APIs), implementing all other logic from scratch
-- **TUN Device Integration**: Performs low-level packet I/O using Linux TUN virtual network interfaces
+- **TUN Device Integration**: Performs low-level packet I/O using Linux TUN virtual network interfaces rather than sockets
 - **Multi-Protocol Support**: Manages TCP connections, ICMP Echo Request/Reply, and UDP datagrams
 - **Flexible Configuration and Logging**: Allows customization of key parameters at runtime (see [Environment Variables](#environment-variables) below)
 - **Graceful Shutdown**: Catches SIGINT, drains TCP connections with a timeout, and exits cleanly
@@ -70,7 +70,7 @@ Each variant wraps a concrete protocol handler responsible for:
 
 ## Prerequisites
 
-- Linux (for its TUN device API)
+- Linux (for its TUN devices and various low-level APIs)
 - `sudo` privileges (for creating and managing TUN devices)
 - For [Nix](https://github.com/NixOS/nix) users, the toolchain is included as a flake.
 - Otherwise, install:
