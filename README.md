@@ -1,31 +1,37 @@
 # Typenet
 
-A type-safe, userspace IPv4 echo server implementing TCP, UDP, and ICMP protocols using Linux TUN devices.
+Typenet is a userspace IPv4/ICMP/TCP/UDP implementation and echo server that operates over Linux TUN devices. This project demonstrates low-level networking in Rust, working with packet bytes and syscalls while focusing on type safety and manual protocol implementations.
 
 ## Table of Contents
 
-1. [Overview](#overview)
-2. [Features](#features)
-3. [Architecture](#architecture)
-4. [Prerequisites](#prerequisites)
-5. [Running the Server](#running-the-server)
-6. [Connecting as a Client](#connecting-as-a-client)
-7. [Testing](#testing)
-
-## Overview
-
-This project demonstrates low-level networking in Rust by implementing a userspace echo server that operates over TCP, UDP, and ICMP. Using a virtual TUN network interface and manually processing raw IPv4 packets, it provides insight into protocol implementation details while upholding type safety, performance, and maintainability.
+1. [Features](#features)
+2. [Architecture](#architecture)
+3. [Prerequisites](#prerequisites)
+4. [Running the Server](#running-the-server)
+5. [Connecting as a Client](#connecting-as-a-client)
+6. [Testing](#testing)
+7. [Development and CI](#development-and-ci)
 
 ## Features
 
-- **Minimal Dependencies**: Implements all necessary logic from scratch, depending only on `libc` to access platform C APIs
+- **Type Safety**: Leverages Rust's strong type system and zero-cost abstractions to safely create and uphold static guarantees without compromising on performance
+- **Near-Zero Dependencies**: Depends only on the Rust Standard Library and `libc` (raw FFI to access platform C APIs), implementing all other logic from scratch
+- **TUN Device Integration**: Performs low-level packet I/O using Linux TUN virtual network interfaces rather than sockets
 - **Multi-Protocol Support**: Manages TCP connections, ICMP Echo Request/Reply, and UDP datagrams
-- **TUN Device Integration**: Performs low-level packet I/O using Linux TUN virtual network interfaces
-- **Type-Safe Packet Parsing**: Leverages Rust's strong type system and zero-cost abstractions to safely interpret raw bytes as protocol structures
+- **Flexible Configuration and Logging**: Allows customization of key parameters at runtime (see [Environment Variables](#environment-variables) below)
 - **Graceful Shutdown**: Catches SIGINT, drains TCP connections with a timeout, and exits cleanly
-- **Comprehensive Testing**: Includes unit tests for all packet handling logic with edge case coverage
-- **Strict Linting**: Forbids panicking constructs like `unwrap` and `expect` completely and isolates limited use of `unsafe`
-- **Continuous Integration**: Runs tests, linting, formatting checks, and spell checks in CI and requires all to pass before merging into main
+
+### TCP Implementation
+
+Although the TCP implementation is not complete, it covers a significant portion of RFC 9293 and is capable of reliable transmission of data in degraded network conditions (see [Network Emulation](#network-emulation) below). Some highlights include:
+
+- Three-way handshake (passive open)
+- 4-tuple-keyed state machine
+- Data receipt and transmission (currently echo only)
+- Retransmissions with binary exponential backoff
+- Flow control (respects peer's window and buffers remaining bytes to send when the window opens)
+- Active close, passive close, and simultaneous close
+- Handling of unknown and aborted connections
 
 ## Architecture
 
@@ -64,7 +70,7 @@ Each variant wraps a concrete protocol handler responsible for:
 
 ## Prerequisites
 
-- Linux (for its TUN device API)
+- Linux (for its TUN devices and various low-level APIs)
 - `sudo` privileges (for creating and managing TUN devices)
 - For [Nix](https://github.com/NixOS/nix) users, the toolchain is included as a flake.
 - Otherwise, install:
@@ -72,6 +78,7 @@ Each variant wraps a concrete protocol handler responsible for:
   - The command runner [Just](https://github.com/casey/just)
   - `telnet`, `nc`/`netcat`, `ping`, and `tc` (likely already installed)
   - [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov) (only if generating test coverage reports)
+  - [Codebook](https://github.com/blopker/codebook) (only if spell checking)
 
 <details>
 <summary><i>Optional: Capture and save traffic with TShark (click to expand)</i></summary>
@@ -91,7 +98,7 @@ users.users.<you>.extraGroups = [ "wireshark" ];
 
 You should then be able to capture traffic without `sudo` by running `just sniff` in another terminal while creating traffic on the TUN device as explained below.
 
-```bash
+```sh
 just sniff          # Capture, log, and save to PCAP
 just sniff-inspect  # Read back the saved PCAP file
 just sniff-clean    # Remove the saved PCAP file
@@ -102,6 +109,8 @@ For each of these three recipes, see `just --usage <RECIPE>` for further options
 </details>
 
 ## Running the Server
+
+### Environment Variables
 
 <details>
 <summary><i>Optional environment variable configuration (click to expand)</i></summary>
@@ -125,15 +134,13 @@ The following environment variables can be used to configure the TUN device and 
 | 2         | Minimal indicators for each packet with no details                            |
 | 3         | Full details for each packet                                                  |
 
----
-
 </details>
+
+### Build and Run
 
 You will be prompted to create the TUN device on first use, once per reboot, which requires `sudo` privileges.
 
-Build and run the server:
-
-```bash
+```sh
 just serve
 ```
 
@@ -143,7 +150,7 @@ The server will attach to the TUN device, listen for and reply to packets, and l
 
 With the server running, the different protocols can be tested from another terminal. If connecting with TCP or UDP, type a message and press Enter to see it echoed back.
 
-```bash
+```sh
 just tcp     # TCP using telnet
 just tcp-nc  # TCP using netcat
 just udp
@@ -152,41 +159,61 @@ just icmp
 
 To send a file through the echo server using TCP and diff the echoed reply against the original:
 
-```bash
+```sh
 just throughput                # Defaults to README.md
 just throughput -f Cargo.toml  # Send Cargo.toml instead
 ```
 
+See `just --usage throughput` for further options.
+
+### Network Emulation
+
 To emulate real-world networks with delay/loss/corruption/duplication/reordering:
 
-```bash
+```sh
 just loss        # Add the emulation to the device (uses sudo)
 just loss-show   # Show current network emulation and packet counters
 just loss-clear  # Remove emulated network conditions (uses sudo)
 ```
 
-See `just --usage throughput` and `just --usage loss` for further options.
+See `just --usage loss` for further options.
 
 ## Testing
 
 As with running the server, you will be prompted to create the TUN device if it does not already exist.
 
-```bash
+```sh
 just test
 ```
 
 Or with a coverage report:
 
-```bash
+```sh
 just cov       # Text summary
 just cov-open  # Generate detailed HTML and open in browser
 ```
 
-The project includes comprehensive unit tests for:
+The project includes comprehensive unit and integration tests for:
 
+- Parsing, send/receive logic, and encoding for IPv4 headers, TCP segments, ICMP Echo Request/Reply, and UDP datagrams
+- Server loop packet I/O, timers, and connection draining
+- Low-level signal handling and syscall interrupts
 - Internet checksum calculation
-- IPv4 header parsing and creation
-- ICMP Echo Request/Reply handling
-- TCP handshake, connection state, and data echo logic
-- UDP datagram parsing and echo responses
-- Edge cases like malformed packets, empty payloads, and boundary values
+- Serial number arithmetic
+- Custom type invariants
+
+## Development and CI
+
+Tests, lints, format checking, and spell checking run in CI (as defined in [.github/workflows/ci.yml](.github/workflows/ci.yml)) and must all pass before merging into `main`. Tests and lints run on both `ubuntu-24.04-arm` and `ubuntu-24.04` because the results can differ between architectures, especially due to the C FFI.
+
+The project takes a strict approach to linting (as defined in [Cargo.toml](Cargo.toml)), completely forbidding panicking constructs like `unwrap` and `expect` and isolating limited use of `unsafe`.
+
+The [justfile](justfile) includes recipes for running CI checks locally. The `lint-targets` recipe cross-compiles and lints for both `aarch64-unknown-linux-gnu` and `x86_64-unknown-linux-gnu`. If not using Nix, this requires `rustup target add <TARGET>` for one or both of the targets depending on whether your host platform is already one of the two.
+
+```sh
+just lint
+just lint-targets
+just fmt-check
+just spell-check
+just all-checks  # All CI checks (including tests)
+```
