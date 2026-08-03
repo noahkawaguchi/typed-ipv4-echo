@@ -125,14 +125,15 @@ The following environment variables can be used to configure the TUN device and 
 | TYPENET_INIT_RTO_MILLIS | Initial retransmission timeout before exponential backoff | 500         |
 | TYPENET_MAX_RETRANSMITS | Number of retransmissions before giving up                | 5           |
 | TYPENET_GRACE_SECS      | Wait time before shutdown when draining connections       | 5           |
-| TYPENET_LOG_LEVEL       | Level of output for logging (see table below)             | 3           |
+| TYPENET_LOG_LEVEL       | Level of output for logging (see table below)             | 4           |
 
 | Log level | Meaning                                                                       |
 | --------- | ----------------------------------------------------------------------------- |
 | 0         | No output at all                                                              |
 | 1         | Server startup and shutdown information, but nothing about individual packets |
 | 2         | Minimal indicators for each packet with no details                            |
-| 3         | Full details for each packet                                                  |
+| 3         | Packet header details but only payload lengths and whether they are UTF-8     |
+| 4         | Packet header details and payload content                                     |
 
 </details>
 

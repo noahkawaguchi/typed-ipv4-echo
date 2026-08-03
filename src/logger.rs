@@ -12,7 +12,7 @@ use {
 };
 
 /// Internal atomic representation of the global log level.
-static LOG_LEVEL: AtomicU8 = AtomicU8::new(LogLevel::PacketVerbose as u8);
+static LOG_LEVEL: AtomicU8 = AtomicU8::new(LogLevel::PacketFull as u8);
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 #[repr(u8)]
@@ -26,9 +26,12 @@ pub enum LogLevel {
     /// Minimal indicators for each packet with no details.
     PacketQuiet = 2,
 
-    /// Full details for each packet.
+    /// Packet header details but only payload lengths and whether they are UTF-8.
+    PacketDetails = 3,
+
+    /// Packet header details and payload content.
     #[default]
-    PacketVerbose = 3,
+    PacketFull = 4,
 }
 
 impl FromStr for LogLevel {
@@ -39,8 +42,9 @@ impl FromStr for LogLevel {
             "0" => Ok(Self::Silent),
             "1" => Ok(Self::ServerInfo),
             "2" => Ok(Self::PacketQuiet),
-            "3" => Ok(Self::PacketVerbose),
-            _ => Err("Log level must be a digit between 0 and 3 inclusive"),
+            "3" => Ok(Self::PacketDetails),
+            "4" => Ok(Self::PacketFull),
+            _ => Err("Log level must be a digit between 0 and 4 inclusive"),
         }
     }
 }
@@ -52,15 +56,16 @@ impl From<LogLevel> for u8 {
 /// Sets the global log level to `level`.
 pub fn set_level(level: LogLevel) { LOG_LEVEL.store(level.into(), Ordering::Relaxed); }
 
-/// Loads the atomic and converts it to `LogLevel`, silently accepting values greater than 3 as
-/// equivalent to 3. This function should stay private to this module because outside the module,
+/// Loads the atomic and converts it to `LogLevel`, silently accepting values greater than 4 as
+/// equivalent to 4. This function should stay private to this module because outside the module,
 /// trying to convert a `u8` that doesn't exactly match a variant should be considered an error.
 fn load_level() -> LogLevel {
     match LOG_LEVEL.load(Ordering::Relaxed) {
         0 => LogLevel::Silent,
         1 => LogLevel::ServerInfo,
         2 => LogLevel::PacketQuiet,
-        3.. => LogLevel::PacketVerbose,
+        3 => LogLevel::PacketDetails,
+        4.. => LogLevel::PacketFull,
     }
 }
 
@@ -70,7 +75,7 @@ pub(crate) fn divider() {
         LogLevel::Silent | LogLevel::ServerInfo => {}
         // Buffered until the next newline or flush, which is desired
         LogLevel::PacketQuiet => print!(" "),
-        LogLevel::PacketVerbose => println!("\n{:=<80}\n", ""),
+        LogLevel::PacketDetails | LogLevel::PacketFull => println!("\n{:=<80}\n", ""),
     }
 }
 
@@ -89,8 +94,11 @@ pub(crate) fn pkt_in(ipv4_header: &Ipv4Header, proto_handler: &ProtocolHandler) 
             print!("↓");
             io::stdout().flush()?;
         }
-        LogLevel::PacketVerbose => {
-            println!("{ipv4_header}\n{proto_handler}\n{}", proto_handler.pretty_payload(true));
+        level @ (LogLevel::PacketDetails | LogLevel::PacketFull) => {
+            println!(
+                "{ipv4_header}\n{proto_handler}\n{}",
+                proto_handler.pretty_payload(level == LogLevel::PacketFull)
+            );
         }
     }
 
@@ -105,8 +113,11 @@ pub(crate) fn pkt_out(ipv4_header: &Ipv4Header, proto_handler: &impl Encode) -> 
             print!("↑");
             io::stdout().flush()?;
         }
-        LogLevel::PacketVerbose => {
-            println!("{ipv4_header}\n{proto_handler}\n{}", proto_handler.pretty_payload(true));
+        level @ (LogLevel::PacketDetails | LogLevel::PacketFull) => {
+            println!(
+                "{ipv4_header}\n{proto_handler}\n{}",
+                proto_handler.pretty_payload(level == LogLevel::PacketFull)
+            );
         }
     }
 
@@ -116,14 +127,14 @@ pub(crate) fn pkt_out(ipv4_header: &Ipv4Header, proto_handler: &impl Encode) -> 
 /// Logs packet-related information and formatting other than the packets themselves to stdout if
 /// the log level allows.
 pub(crate) fn pkt_extra(msg: impl Display) {
-    if load_level() >= LogLevel::PacketVerbose {
+    if load_level() >= LogLevel::PacketDetails {
         println!("{msg}");
     }
 }
 
 /// Logs an error handling a packet to stderr if the log level allows.
 pub(crate) fn pkt_err(msg: impl Display) {
-    if load_level() >= LogLevel::PacketVerbose {
+    if load_level() >= LogLevel::PacketDetails {
         eprintln!("{msg}");
     }
 }
