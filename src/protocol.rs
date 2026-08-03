@@ -72,11 +72,11 @@ impl From<Protocol> for u8 {
 
 impl fmt::Display for Protocol {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Icmp => write!(f, "ICMP"),
-            Self::Tcp => write!(f, "TCP"),
-            Self::Udp => write!(f, "UDP"),
-        }
+        f.write_str(match self {
+            Self::Icmp => "ICMP",
+            Self::Tcp => "TCP",
+            Self::Udp => "UDP",
+        })
     }
 }
 

@@ -66,18 +66,14 @@ impl From<TcpFlags> for u8 {
 
 impl fmt::Display for TcpFlags {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Self::Syn => "SYN",
-                Self::SynAck => "SYN-ACK",
-                Self::Ack => "ACK",
-                Self::FinAck => "FIN-ACK",
-                Self::Rst => "RST",
-                Self::RstAck => "RST-ACK",
-            }
-        )
+        f.write_str(match self {
+            Self::Syn => "SYN",
+            Self::SynAck => "SYN-ACK",
+            Self::Ack => "ACK",
+            Self::FinAck => "FIN-ACK",
+            Self::Rst => "RST",
+            Self::RstAck => "RST-ACK",
+        })
     }
 }
 

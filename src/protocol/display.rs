@@ -1,7 +1,7 @@
 use std::fmt::{self, Write as _};
 
 /// Wrapper implementing `Display` to convert the raw bytes of a payload into a printable
-/// representation of its length and content (if UTF-8).
+/// representation of its length, whether it is UTF-8, and optionally its content.
 pub struct PrettyPayload<'a> {
     pub(super) data: &'a [u8],
     pub(super) include_content: bool,
