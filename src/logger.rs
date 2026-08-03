@@ -114,29 +114,24 @@ pub fn server_info(msg: impl fmt::Display) {
 
 /// Logs receipt of a packet to stdout if and how the log level allows.
 pub(crate) fn pkt_in(ipv4_header: &Ipv4Header, proto_handler: &ProtocolHandler) -> io::Result<()> {
-    match load_level() {
-        LogLevel::Silent | LogLevel::ServerInfo => {}
-        LogLevel::PacketQuiet => {
-            print!("↓");
-            io::stdout().flush()?;
-        }
-        level @ (LogLevel::PacketDetails | LogLevel::PacketFull) => {
-            println!(
-                "{Timestamp}\n{ipv4_header}\n{proto_handler}\n{}",
-                proto_handler.pretty_payload(level == LogLevel::PacketFull)
-            );
-        }
-    }
-
-    Ok(())
+    pkt_in_or_out(true, ipv4_header, proto_handler)
 }
 
 /// Logs transmission of a packet to stdout if and how the log level allows.
 pub(crate) fn pkt_out(ipv4_header: &Ipv4Header, proto_handler: &impl Encode) -> io::Result<()> {
+    pkt_in_or_out(false, ipv4_header, proto_handler)
+}
+
+/// Logs receipt or transmission of a packet to stdout if and how the log level allows.
+fn pkt_in_or_out(
+    is_in: bool,
+    ipv4_header: &Ipv4Header,
+    proto_handler: &impl Encode,
+) -> io::Result<()> {
     match load_level() {
         LogLevel::Silent | LogLevel::ServerInfo => {}
         LogLevel::PacketQuiet => {
-            print!("↑");
+            print!("{}", if is_in { "↓" } else { "↑" });
             io::stdout().flush()?;
         }
         level @ (LogLevel::PacketDetails | LogLevel::PacketFull) => {
