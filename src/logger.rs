@@ -4,15 +4,34 @@ use {
         protocol::handler::{Encode, ProtocolHandler},
     },
     std::{
-        fmt::Display,
+        fmt,
         io::{self, Write as _},
         str::FromStr,
-        sync::atomic::{AtomicU8, Ordering},
+        sync::{
+            LazyLock,
+            atomic::{AtomicU8, Ordering},
+        },
+        time::Instant,
     },
 };
 
 /// Internal atomic representation of the global log level.
 static LOG_LEVEL: AtomicU8 = AtomicU8::new(LogLevel::PacketFull as u8);
+
+/// The `Instant` of the first timestamp access (i.e. first timestamped log).
+static FIRST_TIMESTAMP_TIME: LazyLock<Instant> = LazyLock::new(Instant::now);
+
+struct Timestamp;
+
+impl fmt::Display for Timestamp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let elapsed = Instant::now().saturating_duration_since(*FIRST_TIMESTAMP_TIME);
+        let secs = elapsed.as_secs();
+        let (mins, sub_min_secs) = (secs / 60, secs % 60);
+        let (hrs, sub_hr_mins) = (mins / 60, mins % 60);
+        write!(f, "{hrs:02}:{sub_hr_mins:02}:{sub_min_secs:02}.{:03}", elapsed.subsec_millis())
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 #[repr(u8)]
@@ -79,10 +98,17 @@ pub(crate) fn divider() {
     }
 }
 
-/// Logs information about the server to stdout if the log level allows.
-pub fn server_info(msg: impl Display) {
+/// Logs a bare newline from the server without a timestamp.
+pub(crate) fn server_newline() {
     if load_level() >= LogLevel::ServerInfo {
-        println!("{msg}");
+        println!();
+    }
+}
+
+/// Logs information about the server to stdout if the log level allows.
+pub fn server_info(msg: impl fmt::Display) {
+    if load_level() >= LogLevel::ServerInfo {
+        println!("[{Timestamp}] {msg}");
     }
 }
 
@@ -96,7 +122,7 @@ pub(crate) fn pkt_in(ipv4_header: &Ipv4Header, proto_handler: &ProtocolHandler) 
         }
         level @ (LogLevel::PacketDetails | LogLevel::PacketFull) => {
             println!(
-                "{ipv4_header}\n{proto_handler}\n{}",
+                "{Timestamp}\n{ipv4_header}\n{proto_handler}\n{}",
                 proto_handler.pretty_payload(level == LogLevel::PacketFull)
             );
         }
@@ -115,7 +141,7 @@ pub(crate) fn pkt_out(ipv4_header: &Ipv4Header, proto_handler: &impl Encode) -> 
         }
         level @ (LogLevel::PacketDetails | LogLevel::PacketFull) => {
             println!(
-                "{ipv4_header}\n{proto_handler}\n{}",
+                "{Timestamp}\n{ipv4_header}\n{proto_handler}\n{}",
                 proto_handler.pretty_payload(level == LogLevel::PacketFull)
             );
         }
@@ -126,15 +152,15 @@ pub(crate) fn pkt_out(ipv4_header: &Ipv4Header, proto_handler: &impl Encode) -> 
 
 /// Logs packet-related information and formatting other than the packets themselves to stdout if
 /// the log level allows.
-pub(crate) fn pkt_extra(msg: impl Display) {
+pub(crate) fn pkt_extra(msg: impl fmt::Display) {
     if load_level() >= LogLevel::PacketDetails {
         println!("{msg}");
     }
 }
 
 /// Logs an error handling a packet to stderr if the log level allows.
-pub(crate) fn pkt_err(msg: impl Display) {
+pub(crate) fn pkt_err(msg: impl fmt::Display) {
     if load_level() >= LogLevel::PacketDetails {
-        eprintln!("{msg}");
+        eprintln!("[{Timestamp}] {msg}");
     }
 }

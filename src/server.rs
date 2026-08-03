@@ -99,6 +99,7 @@ where
                 Err(e) => break Err(e.into()),
 
                 Ok(false) if self.grace_period_elapsed(Instant::now()) => {
+                    logger::server_newline();
                     logger::server_info(format_args!(
                         "Grace period elapsed with {} remaining connection(s), exiting",
                         self.tcp_connections.len()
@@ -157,10 +158,8 @@ where
                     logger::divider();
 
                     if self.shutting_down_and_no_connections_closing() {
-                        logger::server_info(
-                            "\nAll connections closed within grace period, exiting",
-                        );
-
+                        logger::server_newline();
+                        logger::server_info("All connections closed within grace period, exiting");
                         break Ok(());
                     }
                 }
@@ -171,21 +170,21 @@ where
     /// Reacts to an `EINTR` caused by the shutdown signal, performing I/O resulting from the
     /// shutdown decision as necessary. Returns whether to proceed to shutdown immediately.
     fn handle_shutdown_interrupt(&mut self, now: Instant) -> Result<bool> {
+        logger::server_newline(); // Because ^C is probably in the terminal
+
         Ok(match self.decide_shutdown(now)? {
             ShutdownDecision::AlreadyDraining { time_left } => {
                 logger::server_info(format_args!(
-                    "\nDraining connections, {}ms left",
-                    time_left.as_millis()
+                    "Draining connections, {}.{:03}s left",
+                    time_left.as_secs(),
+                    time_left.subsec_millis()
                 ));
 
                 false
             }
 
             ShutdownDecision::BeganDraining { to_send, deadline } => {
-                logger::server_info(
-                    "\nShutdown signal received, closing established connections...",
-                );
-
+                logger::server_info("Shutdown signal received, closing established connections...");
                 logger::divider();
 
                 for reply_handler in to_send {
@@ -200,7 +199,7 @@ where
 
             ShutdownDecision::NoConnections => {
                 logger::server_info(
-                    "\nShutdown signal received with no established connections, exiting",
+                    "Shutdown signal received with no established connections, exiting",
                 );
 
                 true

@@ -10,11 +10,8 @@ fn main() -> Result {
     logger::set_level(config.log_level);
 
     let mut tun = tun::attach(&config.tun_name)?;
+    logger::server_info(format_args!("Attached to TUN device {}", config.tun_name));
 
-    logger::server_info(format_args!(
-        "Attached to TUN device {}\nWaiting for packets... (Ctrl+C to stop)",
-        config.tun_name
-    ));
-
+    logger::server_info("Waiting for packets... (Ctrl+C to stop)");
     server::run(&mut tun, |fd, timeout| poll::readable(fd, timeout), || shutdown.load(), &config)
 }
