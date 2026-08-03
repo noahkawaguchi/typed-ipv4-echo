@@ -3,13 +3,15 @@ use {
         Result,
         addr_pairs::Ipv4AddrPair,
         protocol::{
-            Protocol, TcpConnections, icmp_echo::IcmpEchoHandler, tcp::TcpHandler, udp::UdpHandler,
+            Protocol, TcpConnections, display::PrettyPayload, icmp_echo::IcmpEchoHandler,
+            tcp::TcpHandler, udp::UdpHandler,
         },
     },
     std::fmt,
 };
 
-/// Trait for protocol-handling types that can be encoded into a byte buffer.
+/// Trait for protocol-handling types that can be encoded into a byte buffer and displayed as a
+/// string.
 pub trait Encode: fmt::Display {
     /// Copies data from `self` to write the protocol-specific header and payload into `buf`,
     /// returning the number of bytes written.
@@ -20,6 +22,10 @@ pub trait Encode: fmt::Display {
 
     /// Returns the pair of IPv4 addresses of `self`.
     fn get_ip_pair(&self) -> Ipv4AddrPair;
+
+    /// Wraps raw payload bytes that may be UTF-8, non-UTF-8, or empty in a `PrettyPayload` for
+    /// pretty printing.
+    fn pretty_payload(&self) -> PrettyPayload<'_>;
 }
 
 /// Enum for static dispatch over the supported protocol-specific handlers.
@@ -76,6 +82,14 @@ impl Encode for ProtocolHandler<'_> {
             Self::Icmp(handler) => handler.get_ip_pair(),
             Self::Tcp(handler) => handler.get_ip_pair(),
             Self::Udp(handler) => handler.get_ip_pair(),
+        }
+    }
+
+    fn pretty_payload(&self) -> PrettyPayload<'_> {
+        match self {
+            Self::Icmp(handler) => handler.pretty_payload(),
+            Self::Tcp(handler) => handler.pretty_payload(),
+            Self::Udp(handler) => handler.pretty_payload(),
         }
     }
 }

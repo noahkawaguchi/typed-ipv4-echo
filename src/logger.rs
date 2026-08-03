@@ -89,7 +89,9 @@ pub(crate) fn pkt_in(ipv4_header: &Ipv4Header, proto_handler: &ProtocolHandler) 
             print!("↓");
             io::stdout().flush()?;
         }
-        LogLevel::PacketVerbose => println!("{ipv4_header}\n{proto_handler}"),
+        LogLevel::PacketVerbose => {
+            println!("{ipv4_header}\n{proto_handler}\n{}", proto_handler.pretty_payload());
+        }
     }
 
     Ok(())
@@ -103,7 +105,9 @@ pub(crate) fn pkt_out(ipv4_header: &Ipv4Header, proto_handler: &impl Encode) -> 
             print!("↑");
             io::stdout().flush()?;
         }
-        LogLevel::PacketVerbose => println!("{ipv4_header}\n{proto_handler}"),
+        LogLevel::PacketVerbose => {
+            println!("{ipv4_header}\n{proto_handler}\n{}", proto_handler.pretty_payload());
+        }
     }
 
     Ok(())

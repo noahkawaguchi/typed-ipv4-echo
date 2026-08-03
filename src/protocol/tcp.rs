@@ -13,7 +13,7 @@ use {
         addr_pairs::{Ipv4AddrPair, PortPair},
         protocol::{
             Protocol,
-            display::{AsPrettyPayload as _, WithThousandsSeparators as _},
+            display::{PrettyPayload, WithThousandsSeparators as _},
             handler::Encode,
             pseudo_header_checksum,
             tcp::{
@@ -601,23 +601,27 @@ impl Encode for TcpHandler {
     fn proto(&self) -> Protocol { Protocol::Tcp }
 
     fn get_ip_pair(&self) -> Ipv4AddrPair { self.ip_pair }
+
+    fn pretty_payload(&self) -> PrettyPayload<'_> {
+        PrettyPayload(
+            self.payload
+                .as_ref()
+                .map(TcpPayload::as_bytes)
+                .unwrap_or_default(),
+        )
+    }
 }
 
 impl fmt::Display for TcpHandler {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "TCP | {} | seq={} ack={} win={} | {}\n{}",
+            "TCP | {} | seq={} ack={} win={} | {}",
             self.ports,
             self.seq_num.with_thousands_separators(),
             self.ack_num.with_thousands_separators(),
             self.window.with_thousands_separators(),
-            self.flags,
-            self.payload
-                .as_ref()
-                .map(TcpPayload::as_bytes)
-                .unwrap_or_default()
-                .as_pretty_payload()
+            self.flags
         )
     }
 }
