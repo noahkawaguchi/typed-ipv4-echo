@@ -24,8 +24,8 @@ pub trait Encode: fmt::Display {
     fn get_ip_pair(&self) -> Ipv4AddrPair;
 
     /// Wraps raw payload bytes that may be UTF-8, non-UTF-8, or empty in a `PrettyPayload` for
-    /// pretty printing.
-    fn pretty_payload(&self) -> PrettyPayload<'_>;
+    /// pretty printing. If `include_content` is `false`, prints length only.
+    fn pretty_payload(&self, include_content: bool) -> PrettyPayload<'_>;
 }
 
 /// Enum for static dispatch over the supported protocol-specific handlers.
@@ -85,11 +85,11 @@ impl Encode for ProtocolHandler<'_> {
         }
     }
 
-    fn pretty_payload(&self) -> PrettyPayload<'_> {
+    fn pretty_payload(&self, include_content: bool) -> PrettyPayload<'_> {
         match self {
-            Self::Icmp(handler) => handler.pretty_payload(),
-            Self::Tcp(handler) => handler.pretty_payload(),
-            Self::Udp(handler) => handler.pretty_payload(),
+            Self::Icmp(handler) => handler.pretty_payload(include_content),
+            Self::Tcp(handler) => handler.pretty_payload(include_content),
+            Self::Udp(handler) => handler.pretty_payload(include_content),
         }
     }
 }

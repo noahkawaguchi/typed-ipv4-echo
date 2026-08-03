@@ -1,28 +1,42 @@
-use std::fmt;
+use std::fmt::{self, Write as _};
 
 /// Wrapper implementing `Display` to convert the raw bytes of a payload into a printable
 /// representation of its length and content (if UTF-8).
-pub struct PrettyPayload<'a>(pub(super) &'a [u8]);
+pub struct PrettyPayload<'a> {
+    pub(super) data: &'a [u8],
+    pub(super) include_content: bool,
+}
 
 impl fmt::Display for PrettyPayload<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match str::from_utf8(self.0) {
-            Ok("") => write!(f, "<no payload>"),
+        match str::from_utf8(self.data) {
+            Ok("") => f.write_str("<no payload>"),
 
-            Ok(s) => write!(f, "{}-byte UTF-8 payload: {}", s.len(), s.escape_debug()),
+            Ok(s) => {
+                write!(f, "{}-byte UTF-8 payload", s.len())?;
+
+                if self.include_content {
+                    write!(f, ": {}", s.escape_debug())?;
+                }
+
+                Ok(())
+            }
 
             Err(_) => {
-                let len = self.0.len();
+                let len = self.data.len();
 
-                write!(f, "{len}-byte non-UTF-8 payload:")?;
+                write!(f, "{len}-byte non-UTF-8 payload")?;
 
-                self.0.iter().enumerate().try_for_each(|(i, b)| {
-                    if len <= 16 || i % 16 != 0 {
-                        write!(f, " {b:02x}")
-                    } else {
-                        write!(f, "\n{b:02x}")
+                if self.include_content {
+                    f.write_char(':')?;
+
+                    for (i, b) in self.data.iter().enumerate() {
+                        f.write_char(if len <= 16 || i % 16 != 0 { ' ' } else { '\n' })?;
+                        write!(f, "{b:02x}")?;
                     }
-                })
+                }
+
+                Ok(())
             }
         }
     }

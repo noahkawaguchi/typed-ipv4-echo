@@ -114,7 +114,9 @@ impl Encode for IcmpEchoHandler<'_> {
 
     fn get_ip_pair(&self) -> Ipv4AddrPair { self.ip_pair }
 
-    fn pretty_payload(&self) -> PrettyPayload<'_> { PrettyPayload(self.payload) }
+    fn pretty_payload(&self, include_content: bool) -> PrettyPayload<'_> {
+        PrettyPayload { data: self.payload, include_content }
+    }
 }
 
 impl fmt::Display for IcmpEchoHandler<'_> {
