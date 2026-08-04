@@ -5,7 +5,7 @@ use {
         checksum,
         protocol::{
             Protocol,
-            display::{AsPrettyPayload as _, WithThousandsSeparators as _},
+            display::{PrettyPayload, WithThousandsSeparators as _},
             handler::Encode,
         },
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
@@ -113,13 +113,17 @@ impl Encode for IcmpEchoHandler<'_> {
     fn proto(&self) -> Protocol { Protocol::Icmp }
 
     fn get_ip_pair(&self) -> Ipv4AddrPair { self.ip_pair }
+
+    fn pretty_payload(&self, include_content: bool) -> PrettyPayload<'_> {
+        PrettyPayload { data: self.payload, include_content }
+    }
 }
 
 impl fmt::Display for IcmpEchoHandler<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "ICMP | type={} code={} ({}) | identifier={} sequence={}\n{}",
+            "ICMP | type={} code={} ({}) | identifier={} sequence={}",
             self.icmp_type,
             Self::ICMP_CODE_ECHO,
             match self.icmp_type {
@@ -128,8 +132,7 @@ impl fmt::Display for IcmpEchoHandler<'_> {
                 _ => "unknown type",
             },
             self.identifier.with_thousands_separators(),
-            self.sequence.with_thousands_separators(),
-            self.payload.as_pretty_payload()
+            self.sequence.with_thousands_separators()
         )
     }
 }

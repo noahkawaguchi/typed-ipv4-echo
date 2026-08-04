@@ -1,27 +1,45 @@
-use std::fmt;
+use std::fmt::{self, Write as _};
 
 /// Wrapper implementing `Display` to convert the raw bytes of a payload into a printable
-/// representation of its length and content (if UTF-8).
-pub(super) struct PrettyPayload<'a>(&'a [u8]);
+/// representation of its length, whether it is UTF-8, and optionally its content.
+pub struct PrettyPayload<'a> {
+    pub(super) data: &'a [u8],
+    pub(super) include_content: bool,
+}
 
 impl fmt::Display for PrettyPayload<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match str::from_utf8(self.0) {
-            Ok("") => write!(f, "<no payload>"),
-            Ok(s) => write!(f, "{}-byte UTF-8 payload: {}", self.0.len(), s.escape_debug()),
-            Err(_) => write!(f, "{}-byte non-UTF-8 payload", self.0.len()),
+        match str::from_utf8(self.data) {
+            Ok("") => f.write_str("<no payload>"),
+
+            Ok(s) => {
+                write!(f, "{}-byte UTF-8 payload", s.len())?;
+
+                if self.include_content {
+                    write!(f, ": {}", s.escape_debug())?;
+                }
+
+                Ok(())
+            }
+
+            Err(_) => {
+                let len = self.data.len();
+
+                write!(f, "{len}-byte non-UTF-8 payload")?;
+
+                if self.include_content {
+                    f.write_char(':')?;
+
+                    for (i, b) in self.data.iter().enumerate() {
+                        f.write_char(if len <= 16 || i % 16 != 0 { ' ' } else { '\n' })?;
+                        write!(f, "{b:02x}")?;
+                    }
+                }
+
+                Ok(())
+            }
         }
     }
-}
-
-pub(super) trait AsPrettyPayload {
-    /// Wraps the raw bytes of `self` in a `PrettyPayload` for pretty printing as a payload that may
-    /// be empty, UTF-8, or non-UTF-8.
-    fn as_pretty_payload(&self) -> PrettyPayload<'_>;
-}
-
-impl AsPrettyPayload for &[u8] {
-    fn as_pretty_payload(&self) -> PrettyPayload<'_> { PrettyPayload(self) }
 }
 
 /// Wrapper implementing `Display` for thousands-separator formatting.

@@ -1,6 +1,6 @@
 use {
     crate::logger::LogLevel,
-    std::{any::type_name, env, str::FromStr, time::Duration},
+    std::{any::type_name, env, fmt::Display, str::FromStr, time::Duration},
 };
 
 pub struct Config {
@@ -20,7 +20,7 @@ pub struct Config {
     pub(crate) grace_period: Duration,
 
     /// The level of output for logging.
-    pub log_level: LogLevel,
+    pub(crate) log_level: LogLevel,
 }
 
 impl Config {
@@ -55,6 +55,7 @@ impl Config {
     fn get_env_or_else<T, F>(op: F, key: &str) -> Result<T, String>
     where
         T: FromStr,
+        T::Err: Display,
         F: FnOnce() -> T,
     {
         match env::var(key) {
@@ -64,9 +65,9 @@ impl Config {
                 Err(format!("Environment variable {key} present but not valid Unicode"))
             }
 
-            Ok(val) => val.parse().map_err(|_| {
+            Ok(val) => val.parse().map_err(|e| {
                 format!(
-                    "Environment variable {key} present but could not be parsed as {}",
+                    "Environment variable {key} present but could not be parsed as {}: {e}",
                     type_name::<T>()
                 )
             }),
