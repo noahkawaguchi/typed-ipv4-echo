@@ -154,6 +154,8 @@ just log-clean   # Remove `logs` directory
 
 ## Connecting as a Client
 
+### Interactive Use
+
 With the server running, the different protocols can be tested from another terminal. If connecting with TCP or UDP, type a message and press Enter to see it echoed back.
 
 ```sh
@@ -162,6 +164,134 @@ just tcp-nc  # TCP using netcat
 just udp
 just icmp
 ```
+
+<details>
+<summary><i>Example log: "hello world" exchange and server shutdown (click to expand)</i></summary>
+<br />
+
+This example includes a brief exchange of "hello" and "world" before active close from the server side and draining of TCP connections.
+
+```log
+[00:00:00.000] Waiting for packets on TUN device tun0 (Ctrl+C to stop)
+
+================================================================================
+
+ ==== Packet received ====
+00:00:01.681
+IPv4 | 60 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 53666 -> 8080 | seq=1,250,353,561 ack=0 win=64,240 | SYN
+<no payload>
+
+ ==== Packet sent ====
+00:00:01.681
+IPv4 | 40 bytes total | TCP | 10.0.0.2 -> 10.0.0.1
+TCP | 8080 -> 53666 | seq=2,732,711,060 ack=1,250,353,562 win=65,535 | SYN-ACK
+<no payload>
+
+================================================================================
+
+ ==== Packet received ====
+00:00:01.681
+IPv4 | 40 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 53666 -> 8080 | seq=1,250,353,562 ack=2,732,711,061 win=64,240 | ACK
+<no payload>
+
+<no reply>
+
+================================================================================
+
+ ==== Packet received ====
+00:00:02.957
+IPv4 | 46 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 53666 -> 8080 | seq=1,250,353,562 ack=2,732,711,061 win=64,240 | ACK
+6-byte UTF-8 payload: hello\n
+
+ ==== Packet sent ====
+00:00:02.957
+IPv4 | 46 bytes total | TCP | 10.0.0.2 -> 10.0.0.1
+TCP | 8080 -> 53666 | seq=2,732,711,061 ack=1,250,353,568 win=65,535 | ACK
+6-byte UTF-8 payload: hello\n
+
+================================================================================
+
+ ==== Packet received ====
+00:00:02.957
+IPv4 | 40 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 53666 -> 8080 | seq=1,250,353,568 ack=2,732,711,067 win=64,234 | ACK
+<no payload>
+
+<no reply>
+
+================================================================================
+
+ ==== Packet received ====
+00:00:04.306
+IPv4 | 46 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 53666 -> 8080 | seq=1,250,353,568 ack=2,732,711,067 win=64,234 | ACK
+6-byte UTF-8 payload: world\n
+
+ ==== Packet sent ====
+00:00:04.306
+IPv4 | 46 bytes total | TCP | 10.0.0.2 -> 10.0.0.1
+TCP | 8080 -> 53666 | seq=2,732,711,067 ack=1,250,353,574 win=65,535 | ACK
+6-byte UTF-8 payload: world\n
+
+================================================================================
+
+ ==== Packet received ====
+00:00:04.307
+IPv4 | 40 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 53666 -> 8080 | seq=1,250,353,574 ack=2,732,711,073 win=64,228 | ACK
+<no payload>
+
+<no reply>
+
+================================================================================
+
+
+[00:00:06.030] Shutdown signal received, closing established connections...
+
+================================================================================
+
+ ==== Packet sent ====
+00:00:06.030
+IPv4 | 40 bytes total | TCP | 10.0.0.2 -> 10.0.0.1
+TCP | 8080 -> 53666 | seq=2,732,711,073 ack=1,250,353,574 win=65,535 | FIN-ACK
+<no payload>
+
+================================================================================
+
+ ==== Packet received ====
+00:00:06.074
+IPv4 | 40 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 53666 -> 8080 | seq=1,250,353,574 ack=2,732,711,074 win=64,227 | ACK
+<no payload>
+
+<no reply>
+
+================================================================================
+
+ ==== Packet received ====
+00:00:07.321
+IPv4 | 40 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 53666 -> 8080 | seq=1,250,353,574 ack=2,732,711,074 win=64,227 | FIN-ACK
+<no payload>
+
+ ==== Packet sent ====
+00:00:07.321
+IPv4 | 40 bytes total | TCP | 10.0.0.2 -> 10.0.0.1
+TCP | 8080 -> 53666 | seq=2,732,711,074 ack=1,250,353,575 win=65,535 | ACK
+<no payload>
+
+================================================================================
+
+
+[00:00:07.321] All connections closed within grace period, exiting
+```
+
+</details>
+
+### File Transfer
 
 To send a file through the echo server using TCP and diff the echoed reply against the original:
 
@@ -172,9 +302,146 @@ just throughput -f Cargo.toml  # Send Cargo.toml instead
 
 See `just --usage throughput` for further options.
 
+<details>
+<summary><i>Example log: echoing <code>Cargo.toml</code> (click to expand)</i></summary>
+<br />
+
+This example shows the bytes of `Cargo.toml` being echoed through the server instead of simple interactive use.
+
+```log
+[00:00:00.000] Waiting for packets on TUN device tun0 (Ctrl+C to stop)
+
+================================================================================
+
+ ==== Packet received ====
+00:00:03.974
+IPv4 | 60 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 58716 -> 8080 | seq=2,581,556,073 ack=0 win=64,240 | SYN
+<no payload>
+
+ ==== Packet sent ====
+00:00:03.974
+IPv4 | 40 bytes total | TCP | 10.0.0.2 -> 10.0.0.1
+TCP | 8080 -> 58716 | seq=3,071,982,751 ack=2,581,556,074 win=65,535 | SYN-ACK
+<no payload>
+
+================================================================================
+
+ ==== Packet received ====
+00:00:03.974
+IPv4 | 40 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 58716 -> 8080 | seq=2,581,556,074 ack=3,071,982,752 win=64,240 | ACK
+<no payload>
+
+<no reply>
+
+================================================================================
+
+ ==== Packet received ====
+00:00:03.975
+IPv4 | 576 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 58716 -> 8080 | seq=2,581,556,074 ack=3,071,982,752 win=64,240 | ACK
+536-byte UTF-8 payload
+
+ ==== Packet sent ====
+00:00:03.975
+IPv4 | 576 bytes total | TCP | 10.0.0.2 -> 10.0.0.1
+TCP | 8080 -> 58716 | seq=3,071,982,752 ack=2,581,556,610 win=65,535 | ACK
+536-byte UTF-8 payload
+
+================================================================================
+
+ ==== Packet received ====
+00:00:03.975
+IPv4 | 576 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 58716 -> 8080 | seq=2,581,556,610 ack=3,071,982,752 win=64,240 | ACK
+536-byte UTF-8 payload
+
+ ==== Packet sent ====
+00:00:03.975
+IPv4 | 576 bytes total | TCP | 10.0.0.2 -> 10.0.0.1
+TCP | 8080 -> 58716 | seq=3,071,983,288 ack=2,581,557,146 win=65,535 | ACK
+536-byte UTF-8 payload
+
+================================================================================
+
+ ==== Packet received ====
+00:00:03.975
+IPv4 | 320 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 58716 -> 8080 | seq=2,581,557,146 ack=3,071,982,752 win=64,240 | ACK
+280-byte UTF-8 payload
+
+ ==== Packet sent ====
+00:00:03.975
+IPv4 | 320 bytes total | TCP | 10.0.0.2 -> 10.0.0.1
+TCP | 8080 -> 58716 | seq=3,071,983,824 ack=2,581,557,426 win=65,535 | ACK
+280-byte UTF-8 payload
+
+================================================================================
+
+ ==== Packet received ====
+00:00:03.975
+IPv4 | 40 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 58716 -> 8080 | seq=2,581,557,426 ack=3,071,982,752 win=64,240 | FIN-ACK
+<no payload>
+
+ ==== Packet sent ====
+00:00:03.975
+IPv4 | 40 bytes total | TCP | 10.0.0.2 -> 10.0.0.1
+TCP | 8080 -> 58716 | seq=3,071,984,104 ack=2,581,557,427 win=65,535 | FIN-ACK
+<no payload>
+
+================================================================================
+
+ ==== Packet received ====
+00:00:03.975
+IPv4 | 40 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 58716 -> 8080 | seq=2,581,557,427 ack=3,071,983,288 win=63,784 | ACK
+<no payload>
+
+<no reply>
+
+================================================================================
+
+ ==== Packet received ====
+00:00:03.975
+IPv4 | 40 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 58716 -> 8080 | seq=2,581,557,427 ack=3,071,983,824 win=63,784 | ACK
+<no payload>
+
+<no reply>
+
+================================================================================
+
+ ==== Packet received ====
+00:00:03.975
+IPv4 | 40 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 58716 -> 8080 | seq=2,581,557,427 ack=3,071,984,104 win=63,784 | ACK
+<no payload>
+
+<no reply>
+
+================================================================================
+
+ ==== Packet received ====
+00:00:03.975
+IPv4 | 40 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 58716 -> 8080 | seq=2,581,557,427 ack=3,071,984,105 win=63,784 | ACK
+<no payload>
+
+<no reply>
+
+================================================================================
+
+
+[00:00:07.262] Shutdown signal received with no established connections, exiting
+```
+
+</details>
+
 ### Network Emulation
 
-To emulate real-world networks with delay/loss/corruption/duplication/reordering:
+To emulate real-world networks with delay/loss/corruption/duplication/reordering, run the `loss` recipe and then try connecting to the server again.
 
 ```sh
 just loss        # Add the emulation to the device (uses sudo)
@@ -183,6 +450,169 @@ just loss-clear  # Remove emulated network conditions (uses sudo)
 ```
 
 See `just --usage loss` for further options.
+
+<details>
+<summary><i>Example log: degraded network conditions (click to expand)</i></summary>
+<br />
+
+This example includes:
+
+- Not letting an out-of-order FIN prematurely close the connection
+- Dropping packets with invalid checksums
+- Retransmitting a segment with exponential backoff until it is acknowledged
+
+<!--
+Commands used here for future reference:
+  just loss --loss 50% --corrupt 25% --duplicate 50%
+  just throughput --input-file Cargo.toml
+-->
+
+```log
+[00:00:00.000] Waiting for packets on TUN device tun0 (Ctrl+C to stop)
+
+================================================================================
+
+ ==== Packet received ====
+00:00:01.779
+IPv4 | 60 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 45952 -> 8080 | seq=3,407,599,708 ack=0 win=64,240 | SYN
+<no payload>
+
+ ==== Packet sent ====
+00:00:01.780
+IPv4 | 40 bytes total | TCP | 10.0.0.2 -> 10.0.0.1
+TCP | 8080 -> 45952 | seq=948,924,240 ack=3,407,599,709 win=65,535 | SYN-ACK
+<no payload>
+
+================================================================================
+
+ ==== Packet received ====
+00:00:01.864
+IPv4 | 576 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 45952 -> 8080 | seq=3,407,599,709 ack=948,924,241 win=64,240 | ACK
+536-byte UTF-8 payload
+
+ ==== Packet sent ====
+00:00:01.864
+IPv4 | 576 bytes total | TCP | 10.0.0.2 -> 10.0.0.1
+TCP | 8080 -> 45952 | seq=948,924,241 ack=3,407,600,245 win=65,535 | ACK
+536-byte UTF-8 payload
+
+================================================================================
+
+ ==== Packet received ====
+00:00:01.864
+IPv4 | 576 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 45952 -> 8080 | seq=3,407,600,245 ack=948,924,241 win=64,240 | ACK
+536-byte UTF-8 payload
+
+ ==== Packet sent ====
+00:00:01.864
+IPv4 | 576 bytes total | TCP | 10.0.0.2 -> 10.0.0.1
+TCP | 8080 -> 45952 | seq=948,924,777 ack=3,407,600,781 win=65,535 | ACK
+536-byte UTF-8 payload
+
+================================================================================
+
+ ==== Packet received ====
+00:00:01.872
+IPv4 | 40 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 45952 -> 8080 | seq=3,407,601,061 ack=948,924,241 win=64,240 | FIN-ACK
+<no payload>
+
+ ==== Packet sent ====
+00:00:01.872
+IPv4 | 40 bytes total | TCP | 10.0.0.2 -> 10.0.0.1
+TCP | 8080 -> 45952 | seq=948,925,313 ack=3,407,600,781 win=65,535 | ACK
+<no payload>
+
+================================================================================
+
+[00:00:01.933] Skipping packet: Invalid TCP checksum
+
+================================================================================
+
+ ==== Packet received ====
+00:00:01.956
+IPv4 | 40 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 45952 -> 8080 | seq=3,407,601,062 ack=948,925,313 win=63,784 | ACK
+<no payload>
+
+<no reply>
+
+================================================================================
+
+ ==== Packet received ====
+00:00:01.957
+IPv4 | 40 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 45952 -> 8080 | seq=3,407,601,062 ack=948,924,777 win=63,784 | ACK
+<no payload>
+
+<no reply>
+
+================================================================================
+
+ ==== Packet received ====
+00:00:02.238
+IPv4 | 320 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 45952 -> 8080 | seq=3,407,600,781 ack=948,925,313 win=63,784 | FIN-ACK
+280-byte UTF-8 payload
+
+ ==== Packet sent ====
+00:00:02.238
+IPv4 | 320 bytes total | TCP | 10.0.0.2 -> 10.0.0.1
+TCP | 8080 -> 45952 | seq=948,925,313 ack=3,407,601,062 win=65,535 | FIN-ACK
+280-byte UTF-8 payload
+
+================================================================================
+
+[00:00:02.336] Skipping packet: Invalid IPv4 header checksum
+
+================================================================================
+
+ ==== Packet sent (retransmission) ====
+00:00:02.742
+IPv4 | 320 bytes total | TCP | 10.0.0.2 -> 10.0.0.1
+TCP | 8080 -> 45952 | seq=948,925,313 ack=3,407,601,062 win=65,535 | FIN-ACK
+280-byte UTF-8 payload
+
+================================================================================
+
+ ==== Packet sent (retransmission) ====
+00:00:03.743
+IPv4 | 320 bytes total | TCP | 10.0.0.2 -> 10.0.0.1
+TCP | 8080 -> 45952 | seq=948,925,313 ack=3,407,601,062 win=65,535 | FIN-ACK
+280-byte UTF-8 payload
+
+================================================================================
+
+[00:00:03.909] Skipping packet: Invalid TCP checksum
+
+================================================================================
+
+ ==== Packet sent (retransmission) ====
+00:00:05.746
+IPv4 | 320 bytes total | TCP | 10.0.0.2 -> 10.0.0.1
+TCP | 8080 -> 45952 | seq=948,925,313 ack=3,407,601,062 win=65,535 | FIN-ACK
+280-byte UTF-8 payload
+
+================================================================================
+
+ ==== Packet received ====
+00:00:05.847
+IPv4 | 40 bytes total | TCP | 10.0.0.1 -> 10.0.0.2
+TCP | 45952 -> 8080 | seq=3,407,601,062 ack=948,925,594 win=63,784 | ACK
+<no payload>
+
+<no reply>
+
+================================================================================
+
+
+[00:00:09.633] Shutdown signal received with no established connections, exiting
+```
+
+</details>
 
 ## Testing
 
