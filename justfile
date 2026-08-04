@@ -14,6 +14,9 @@ server-port := '8080'
 tun-name := env('TYPENET_TUN_NAME', 'tun0')
 tun-cidr := env('TYPENET_TUN_CIDR', '10.0.0.1/24')
 
+logs-dir := justfile_dir() / 'logs'
+log-file := logs-dir / project-name + '_' + datetime('%F_%T') + '.log'
+
 tshark-cmd := 'tshark -n --print' \
     + ' -o ip.check_checksum:true -o tcp.check_checksum:true -o udp.check_checksum:true'
 
@@ -23,8 +26,19 @@ tshark-cmd := 'tshark -n --print' \
 
 # Run the server (default recipe)
 [continue]
-serve: tun
-    cargo run
+serve *ARGS: tun
+    cargo run {{ ARGS }}
+
+# Run the server and save a log file to the `logs` directory
+[continue]
+serve-save:
+    mkdir -p '{{ logs-dir }}'
+    just serve "--quiet 2>&1 | tee --ignore-interrupts --append '{{ log-file }}'"
+    @echo 'Saved to {{ log-file }}'
+
+# Remove the `logs` directory
+log-clean:
+    rm -rf '{{ logs-dir }}'
 
 # Create the TUN device if it doesn't already exist
 tun:
