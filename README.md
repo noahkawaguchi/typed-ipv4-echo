@@ -139,13 +139,18 @@ The following environment variables can be used to configure the TUN device and 
 
 ### Build and Run
 
-You will be prompted to create the TUN device on first use, once per reboot, which requires `sudo` privileges.
+You will be prompted to create the TUN device on first use, once per reboot, which requires `sudo` privileges. The server will attach to the TUN device, listen for and reply to packets, and log processed data until it receives SIGINT (Ctrl+C).
 
 ```sh
 just serve
 ```
 
-The server will attach to the TUN device, listen for and reply to packets, and log processed data until it receives SIGINT (Ctrl+C).
+The [justfile](justfile) also includes recipes for saving logs to file.
+
+```sh
+just serve-save  # Run and save log file to `logs` directory
+just log-clean   # Remove `logs` directory
+```
 
 ## Connecting as a Client
 
