@@ -265,7 +265,7 @@ impl TcpHandler {
                     .as_ref()
                     .map(|payload| {
                         conn.rcv_nxt += payload.len().into();
-                        conn.send_buffer.extend(payload.as_bytes().iter());
+                        conn.send_buffer.extend(payload.as_bytes());
 
                         conn.drain_transmittable()
                             .map(|maybe_to_send| match maybe_to_send {
@@ -308,7 +308,7 @@ impl TcpHandler {
             ) if self.seq_num == conn.rcv_nxt => {
                 conn.incoming_ack_update(self)?;
                 conn.rcv_nxt += payload.len().into();
-                conn.send_buffer.extend(payload.as_bytes().iter());
+                conn.send_buffer.extend(payload.as_bytes());
 
                 Some(match conn.drain_transmittable()? {
                     Some(to_send) => Self::data_payload(conn, to_send),
@@ -342,7 +342,7 @@ impl TcpHandler {
 
                 if let Some(payload) = maybe_payload {
                     conn.rcv_nxt += payload.len().into();
-                    conn.send_buffer.extend(payload.as_bytes().iter());
+                    conn.send_buffer.extend(payload.as_bytes());
                 }
 
                 conn.rcv_nxt += FIN_BYTE; // Peer's FIN consumes one sequence number
