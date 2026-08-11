@@ -12,27 +12,29 @@ use {
 /// A distance between two points in TCP sequence number space.
 #[derive(Clone, Copy, Default)]
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
-pub(super) struct SeqDist<T>(Wrapping<T>);
+pub(super) struct SeqDist<T> {
+    wrapping: Wrapping<T>,
+}
 
 impl<T> SeqDist<T> {
-    pub(super) const fn new(primitive: T) -> Self { Self(Wrapping(primitive)) }
+    pub(super) const fn new(primitive: T) -> Self { Self { wrapping: Wrapping(primitive) } }
 }
 
 impl From<SeqDist<u16>> for SeqDist<u32> {
-    fn from(value: SeqDist<u16>) -> Self { Self(Wrapping(value.0.0.into())) }
+    fn from(value: SeqDist<u16>) -> Self { Self { wrapping: Wrapping(value.wrapping.0.into()) } }
 }
 
 impl<T: From<u16>> From<NonZeroU16> for SeqDist<T> {
-    fn from(value: NonZeroU16) -> Self { Self(Wrapping(value.get().into())) }
+    fn from(value: NonZeroU16) -> Self { Self { wrapping: Wrapping(value.get().into()) } }
 }
 
 impl SeqDist<u16> {
-    pub(super) const fn to_be_bytes(self) -> [u8; 2] { self.0.0.to_be_bytes() }
+    pub(super) const fn to_be_bytes(self) -> [u8; 2] { self.wrapping.0.to_be_bytes() }
 }
 
 impl SeqDist<u32> {
     pub(super) const fn saturating_sub(self, rhs: Self) -> Self {
-        Self(Wrapping(self.0.0.saturating_sub(rhs.0.0)))
+        Self { wrapping: Wrapping(self.wrapping.0.saturating_sub(rhs.wrapping.0)) }
     }
 }
 
@@ -42,7 +44,7 @@ where
 {
     type Error = <Self as TryFrom<T>>::Error;
 
-    fn try_from(value: SeqDist<T>) -> Result<Self, Self::Error> { Self::try_from(value.0.0) }
+    fn try_from(value: SeqDist<T>) -> Result<Self, Self::Error> { Self::try_from(value.wrapping.0) }
 }
 
 impl<T> fmt::Display for ThousandsSeparated<SeqDist<T>>
@@ -51,7 +53,7 @@ where
     ThousandsSeparated<T>: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        ThousandsSeparated(self.0.0.0).fmt(f)
+        ThousandsSeparated(self.0.wrapping.0).fmt(f)
     }
 }
 
@@ -85,7 +87,7 @@ impl<D> Add<SeqDist<u32>> for SeqPoint<D> {
     type Output = Self;
 
     fn add(self, rhs: SeqDist<u32>) -> Self::Output {
-        Self { wrapping: self.wrapping + rhs.0, phantom: PhantomData }
+        Self { wrapping: self.wrapping + rhs.wrapping, phantom: PhantomData }
     }
 }
 
@@ -96,7 +98,7 @@ impl<D> AddAssign<SeqDist<u32>> for SeqPoint<D> {
 impl<D> Sub for SeqPoint<D> {
     type Output = SeqDist<u32>;
 
-    fn sub(self, rhs: Self) -> Self::Output { SeqDist(self.wrapping - rhs.wrapping) }
+    fn sub(self, rhs: Self) -> Self::Output { SeqDist { wrapping: self.wrapping - rhs.wrapping } }
 }
 
 impl<D> PartialOrd for SeqPoint<D> {
@@ -128,29 +130,29 @@ mod tests {
 
     impl SeqDist<u32> {
         pub(in super::super) const fn const_add(self, rhs: Self) -> Self {
-            Self(Wrapping(self.0.0.wrapping_add(rhs.0.0)))
+            Self { wrapping: Wrapping(self.wrapping.0.wrapping_add(rhs.wrapping.0)) }
         }
     }
 
     impl Add for SeqDist<u32> {
         type Output = Self;
 
-        fn add(self, rhs: Self) -> Self::Output { Self(self.0 + rhs.0) }
+        fn add(self, rhs: Self) -> Self::Output { Self { wrapping: self.wrapping + rhs.wrapping } }
     }
 
     impl Sub for SeqDist<u32> {
         type Output = Self;
 
-        fn sub(self, rhs: Self) -> Self::Output { Self(self.0 - rhs.0) }
+        fn sub(self, rhs: Self) -> Self::Output { Self { wrapping: self.wrapping - rhs.wrapping } }
     }
 
     impl<D> SeqPoint<D> {
         pub(in super::super) const fn const_add(self, rhs: SeqDist<u32>) -> Self {
-            Self::new(self.wrapping.0.wrapping_add(rhs.0.0))
+            Self::new(self.wrapping.0.wrapping_add(rhs.wrapping.0))
         }
 
         pub(in super::super) const fn const_sub(self, rhs: SeqDist<u32>) -> Self {
-            Self::new(self.wrapping.0.wrapping_sub(rhs.0.0))
+            Self::new(self.wrapping.0.wrapping_sub(rhs.wrapping.0))
         }
 
         /// Leaks the inner primitive type for use in test constants. This should be removed once
@@ -162,7 +164,7 @@ mod tests {
         type Output = Self;
 
         fn sub(self, rhs: SeqDist<u32>) -> Self::Output {
-            Self { wrapping: self.wrapping - rhs.0, phantom: PhantomData }
+            Self { wrapping: self.wrapping - rhs.wrapping, phantom: PhantomData }
         }
     }
 
