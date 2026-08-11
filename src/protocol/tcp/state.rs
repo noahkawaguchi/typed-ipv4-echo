@@ -112,7 +112,7 @@ impl ConnState {
 
         let sent_but_not_acked = self.snd_nxt - self.snd_una;
         let space_in_window =
-            SeqDist::new(u32::from(window_state.snd_wnd)).saturating_sub(sent_but_not_acked);
+            SeqDist::<u32>::from(window_state.snd_wnd).saturating_sub(sent_but_not_acked);
         let bytes_to_send = usize::try_from(space_in_window)?.min(self.send_buffer.len());
 
         TcpPayload::try_from_iter(self.send_buffer.drain(..bytes_to_send)).map_err(Into::into)
@@ -194,7 +194,7 @@ pub(super) enum TcpState {
 pub(super) struct WindowState {
     /// SND.WND or send window. "This represents the sequence numbers that the remote (receiving)
     /// TCP endpoint is willing to receive" (RFC 9293, Section 4).
-    pub(super) snd_wnd: u16,
+    pub(super) snd_wnd: SeqDist<u16>,
 
     /// SND.WL1. "segment sequence number used for last window update" (RFC 9293, Section 3.3.1).
     ///

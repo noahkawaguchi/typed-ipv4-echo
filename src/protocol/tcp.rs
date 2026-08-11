@@ -35,10 +35,10 @@ use {
 const TCP_HDR_MIN_LEN: u8 = 20;
 
 /// The single phantom byte consumed by SYN.
-const SYN_BYTE: SeqDist = SeqDist::new(1);
+const SYN_BYTE: SeqDist<u32> = SeqDist::new(1);
 
 /// The single phantom byte consumed by FIN.
-const FIN_BYTE: SeqDist = SeqDist::new(1);
+const FIN_BYTE: SeqDist<u32> = SeqDist::new(1);
 
 /// Manages TCP headers, data, and reply logic. Field definitions below from RFC 9293, Section 3.1.
 #[cfg_attr(test, derive(Debug, PartialEq, Eq, Clone))]
@@ -68,7 +68,7 @@ pub struct TcpHandler {
 
     /// "The number of data octets beginning with the one indicated in the acknowledgment field
     /// that the sender of this segment is willing to accept."
-    window: u16,
+    window: SeqDist<u16>,
 
     payload: Option<TcpPayload>,
 }
@@ -100,7 +100,7 @@ impl TcpHandler {
     /// However, a dynamic RCV.WND could be used in the future to bound the send buffer's growth,
     /// throttling the peer's sending rate if they keep sending more data than they are willing to
     /// receive.
-    const RCV_WND: u16 = u16::MAX;
+    const RCV_WND: SeqDist<u16> = SeqDist::new(u16::MAX);
 
     /// Parses `data` as a TCP header and payload.
     pub(super) fn parse(data: &[u8], ip_pair: Ipv4AddrPair) -> Result<Self> {
@@ -135,7 +135,7 @@ impl TcpHandler {
             ])),
             offset_bytes,
             flags: tcp_header[13].try_into()?,
-            window: u16::from_be_bytes([tcp_header[14], tcp_header[15]]),
+            window: SeqDist::new(u16::from_be_bytes([tcp_header[14], tcp_header[15]])),
             payload: TcpPayload::try_from_iter(
                 data.get(offset_bytes.into()..)
                     .into_iter()
@@ -492,9 +492,8 @@ impl TcpHandler {
                 } else {
                     // Check whether `seq_num` falls within the receive window [RCV.NXT, RCV.NXT +
                     // RCV.WND). true -> Case 3, false -> Case 1.
-                    (rcv_nxt <= self.seq_num
-                        && self.seq_num < rcv_nxt + SeqDist::new(u32::from(Self::RCV_WND)))
-                    .then_some(SendInfo::pure_ack(snd_nxt, rcv_nxt))
+                    (rcv_nxt <= self.seq_num && self.seq_num < rcv_nxt + Self::RCV_WND.into())
+                        .then_some(SendInfo::pure_ack(snd_nxt, rcv_nxt))
                 }
             }
 

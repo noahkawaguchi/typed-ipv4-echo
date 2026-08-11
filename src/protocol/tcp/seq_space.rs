@@ -3,27 +3,51 @@ use {
     std::{
         cmp::Ordering,
         fmt,
-        num::{TryFromIntError, Wrapping},
+        num::Wrapping,
         ops::{Add, AddAssign, Sub},
     },
 };
 
 /// A distance between two points in TCP sequence number space.
 #[derive(Clone, Copy)]
-pub(super) struct SeqDist(Wrapping<u32>);
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
+pub(super) struct SeqDist<T>(Wrapping<T>);
 
-impl SeqDist {
-    pub(super) const fn new(primitive: u32) -> Self { Self(Wrapping(primitive)) }
+impl<T> SeqDist<T> {
+    pub(super) const fn new(primitive: T) -> Self { Self(Wrapping(primitive)) }
+}
 
+impl From<SeqDist<u16>> for SeqDist<u32> {
+    fn from(value: SeqDist<u16>) -> Self { Self(Wrapping(value.0.0.into())) }
+}
+
+impl SeqDist<u16> {
+    pub(super) const fn to_be_bytes(self) -> [u8; 2] { self.0.0.to_be_bytes() }
+}
+
+impl SeqDist<u32> {
     pub(super) const fn saturating_sub(self, rhs: Self) -> Self {
         Self(Wrapping(self.0.0.saturating_sub(rhs.0.0)))
     }
 }
 
-impl TryFrom<SeqDist> for usize {
-    type Error = TryFromIntError;
+impl<T> TryFrom<SeqDist<T>> for usize
+where
+    Self: TryFrom<T>,
+{
+    type Error = <Self as TryFrom<T>>::Error;
 
-    fn try_from(value: SeqDist) -> Result<Self, Self::Error> { Self::try_from(value.0.0) }
+    fn try_from(value: SeqDist<T>) -> Result<Self, Self::Error> { Self::try_from(value.0.0) }
+}
+
+impl<T> fmt::Display for ThousandsSeparated<SeqDist<T>>
+where
+    T: Copy,
+    ThousandsSeparated<T>: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        ThousandsSeparated(self.0.0.0).fmt(f)
+    }
 }
 
 /// A specific point in TCP sequence number space.
@@ -37,18 +61,18 @@ impl SeqPoint {
     pub(super) const fn to_be_bytes(self) -> [u8; 4] { self.0.0.to_be_bytes() }
 }
 
-impl Add<SeqDist> for SeqPoint {
+impl Add<SeqDist<u32>> for SeqPoint {
     type Output = Self;
 
-    fn add(self, rhs: SeqDist) -> Self::Output { Self(self.0 + rhs.0) }
+    fn add(self, rhs: SeqDist<u32>) -> Self::Output { Self(self.0 + rhs.0) }
 }
 
-impl AddAssign<SeqDist> for SeqPoint {
-    fn add_assign(&mut self, rhs: SeqDist) { *self = *self + rhs; }
+impl AddAssign<SeqDist<u32>> for SeqPoint {
+    fn add_assign(&mut self, rhs: SeqDist<u32>) { *self = *self + rhs; }
 }
 
 impl Sub for SeqPoint {
-    type Output = SeqDist;
+    type Output = SeqDist<u32>;
 
     fn sub(self, rhs: Self) -> Self::Output { SeqDist(self.0 - rhs.0) }
 }
@@ -72,7 +96,7 @@ impl PartialOrd for SeqPoint {
 
 impl fmt::Display for ThousandsSeparated<SeqPoint> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", ThousandsSeparated(self.0.0.0))
+        ThousandsSeparated(self.0.0.0).fmt(f)
     }
 }
 
@@ -80,24 +104,30 @@ impl fmt::Display for ThousandsSeparated<SeqPoint> {
 mod tests {
     use super::*;
 
-    impl SeqDist {
+    impl SeqDist<u32> {
         pub(in super::super) const fn const_add(self, rhs: Self) -> Self {
             Self(Wrapping(self.0.0.wrapping_add(rhs.0.0)))
         }
     }
 
-    impl Add for SeqDist {
+    impl Add for SeqDist<u32> {
         type Output = Self;
 
         fn add(self, rhs: Self) -> Self::Output { Self(self.0 + rhs.0) }
     }
 
+    impl Sub for SeqDist<u32> {
+        type Output = Self;
+
+        fn sub(self, rhs: Self) -> Self::Output { Self(self.0 - rhs.0) }
+    }
+
     impl SeqPoint {
-        pub(in super::super) const fn const_add(self, rhs: SeqDist) -> Self {
+        pub(in super::super) const fn const_add(self, rhs: SeqDist<u32>) -> Self {
             Self(Wrapping(self.0.0.wrapping_add(rhs.0.0)))
         }
 
-        pub(in super::super) const fn const_sub(self, rhs: SeqDist) -> Self {
+        pub(in super::super) const fn const_sub(self, rhs: SeqDist<u32>) -> Self {
             Self(Wrapping(self.0.0.wrapping_sub(rhs.0.0)))
         }
 
@@ -106,10 +136,10 @@ mod tests {
         pub(in super::super) const fn leak_primitive(self) -> u32 { self.0.0 }
     }
 
-    impl Sub<SeqDist> for SeqPoint {
+    impl Sub<SeqDist<u32>> for SeqPoint {
         type Output = Self;
 
-        fn sub(self, rhs: SeqDist) -> Self::Output { Self(self.0 - rhs.0) }
+        fn sub(self, rhs: SeqDist<u32>) -> Self::Output { Self(self.0 - rhs.0) }
     }
 
     #[test]

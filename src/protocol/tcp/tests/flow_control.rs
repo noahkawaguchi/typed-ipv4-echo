@@ -1,7 +1,7 @@
 use super::*;
 
 /// Creates a `ConnState` that is the same as `AFTER_HANDSHAKE` except for a custom `snd_wnd`.
-fn after_handshake_with_snd_wnd(snd_wnd: u16) -> ConnState {
+fn after_handshake_with_snd_wnd(snd_wnd: SeqDist<u16>) -> ConnState {
     ConnState {
         window_state: Some(WindowState {
             snd_wnd,
@@ -14,14 +14,16 @@ fn after_handshake_with_snd_wnd(snd_wnd: u16) -> ConnState {
 
 #[test]
 fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result {
+    const WINDOW: SeqDist<u16> = SeqDist::new(3);
+
     let mut connections = TcpConnections::default();
-    let mut expected_state = after_handshake_with_snd_wnd(3);
+    let mut expected_state = after_handshake_with_snd_wnd(WINDOW);
     connections.insert(expected_state.clone());
 
     let reply = TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE,
         ack_num: SERVER_ISN + SYN_BYTE,
-        window: 3,
+        window: WINDOW,
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     }
@@ -38,7 +40,7 @@ fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result {
         "Only the first 3 bytes fit in the advertised window of 3"
     );
 
-    expected_state.snd_nxt += SeqDist::new(3);
+    expected_state.snd_nxt += WINDOW.into();
     expected_state.rcv_nxt += HELLO_LEN;
     expected_state.send_buffer.extend(b"lo");
 
@@ -53,17 +55,19 @@ fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result {
 
 #[test]
 fn window_opening_via_ack_drains_buffered_remainder() -> Result {
-    const HEL_LEN: SeqDist = SeqDist::new(3);
+    const HEL_LEN: SeqDist<u32> = SeqDist::new(3);
+    const INITIAL_WINDOW: SeqDist<u16> = SeqDist::new(3);
+    const LARGER_WINDOW: SeqDist<u16> = SeqDist::new(10);
 
     let mut connections = TcpConnections::default();
-    let mut expected_state = after_handshake_with_snd_wnd(3);
+    let mut expected_state = after_handshake_with_snd_wnd(INITIAL_WINDOW);
     connections.insert(expected_state.clone());
 
     // "Hello" (5 bytes), window only allows 3 -> "Hel" sent, "lo" buffered
     TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE,
         ack_num: SERVER_ISN + SYN_BYTE,
-        window: 3,
+        window: INITIAL_WINDOW,
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     }
@@ -79,7 +83,7 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
     let window_update = TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
         ack_num: SERVER_ISN + SYN_BYTE + HEL_LEN,
-        window: 10,
+        window: LARGER_WINDOW,
         ..CLIENT_PACKET
     };
 
@@ -97,9 +101,9 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
     );
 
     expected_state.snd_una += HEL_LEN;
-    expected_state.snd_nxt += SeqDist::new(2);
+    expected_state.snd_nxt += HELLO_LEN - HEL_LEN;
     expected_state.window_state = Some(WindowState {
-        snd_wnd: 10,
+        snd_wnd: LARGER_WINDOW,
         snd_wl1: window_update.seq_num,
         snd_wl2: window_update.ack_num,
     });
@@ -116,14 +120,16 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
 
 #[test]
 fn zero_window_buffers_entire_payload_and_gets_bare_ack() -> Result {
+    const ZERO_WINDOW: SeqDist<u16> = SeqDist::new(0);
+
     let mut connections = TcpConnections::default();
-    let mut expected_state = after_handshake_with_snd_wnd(0);
+    let mut expected_state = after_handshake_with_snd_wnd(ZERO_WINDOW);
     connections.insert(expected_state.clone());
 
     let reply = TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE,
         ack_num: SERVER_ISN + SYN_BYTE,
-        window: 0,
+        window: ZERO_WINDOW,
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     }

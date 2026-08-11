@@ -6,7 +6,7 @@ fn new_ack_adopts_window_from_segment() -> Result {
     // segment's advertised window (RFC 9293, Section 3.10.7.4), not just leave it at whatever it
     // was seeded with at handshake time.
 
-    const NEW_WND: u16 = 12_345;
+    const NEW_WND: SeqDist<u16> = SeqDist::new(12_345);
 
     let mut connections = TcpConnections::default().after_handshake();
     let mut cloned_state = connections.try_get()?.clone();
@@ -44,7 +44,7 @@ fn new_ack_adopts_window_from_segment() -> Result {
 
     cloned_state.snd_una += HELLO_LEN;
     cloned_state.window_state = Some(WindowState {
-        snd_wnd: NEW_WND,
+        snd_wnd: window_update.window,
         snd_wl1: window_update.seq_num,
         snd_wl2: window_update.ack_num,
     });
@@ -90,14 +90,14 @@ fn stale_segment_does_not_clobber_send_window() -> Result {
     let fresh_window_update = TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
         ack_num: SERVER_ISN + SYN_BYTE,
-        window: 1000,
+        window: SeqDist::new(1000),
         ..CLIENT_PACKET
     };
 
     assert_eq!(fresh_window_update.create_reply(&mut connections)?, None);
 
     cloned_state.window_state = Some(WindowState {
-        snd_wnd: 1000,
+        snd_wnd: fresh_window_update.window,
         snd_wl1: fresh_window_update.seq_num,
         snd_wl2: fresh_window_update.ack_num,
     });
@@ -110,7 +110,7 @@ fn stale_segment_does_not_clobber_send_window() -> Result {
         TcpHandler {
             seq_num: CLIENT_ISN + SYN_BYTE,
             ack_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
-            window: 65_000,
+            window: SeqDist::new(65_000),
             ..CLIENT_PACKET
         }
         .create_reply(&mut connections)?,
@@ -177,7 +177,7 @@ fn same_seq_but_fresher_ack_updates_window() -> Result {
     let window_update_1 = TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
         ack_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
-        window: 1000,
+        window: SeqDist::new(1000),
         ..CLIENT_PACKET
     };
 
@@ -185,7 +185,7 @@ fn same_seq_but_fresher_ack_updates_window() -> Result {
 
     cloned_state.snd_una += HELLO_LEN;
     cloned_state.window_state = Some(WindowState {
-        snd_wnd: 1000,
+        snd_wnd: window_update_1.window,
         snd_wl1: window_update_1.seq_num,
         snd_wl2: window_update_1.ack_num,
     });
@@ -197,7 +197,7 @@ fn same_seq_but_fresher_ack_updates_window() -> Result {
     let window_update_2 = TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
         ack_num: SERVER_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
-        window: 2000,
+        window: SeqDist::new(2000),
         ..CLIENT_PACKET
     };
 
@@ -205,7 +205,7 @@ fn same_seq_but_fresher_ack_updates_window() -> Result {
 
     cloned_state.snd_una += HI_LEN;
     cloned_state.window_state = Some(WindowState {
-        snd_wnd: 2000,
+        snd_wnd: window_update_2.window,
         snd_wl1: window_update_2.seq_num,
         snd_wl2: window_update_2.ack_num,
     });
@@ -226,7 +226,7 @@ fn duplicate_ack_updates_window() -> Result {
     // SND.UNA <= SEG.ACK <= SND.NXT. A duplicate ACK (SEG.ACK == SND.UNA) must still be allowed
     // to update SND.WND, such as a window-opening segment that doesn't acknowledge any new data.
 
-    const NEW_WND: u16 = 777;
+    const NEW_WND: SeqDist<u16> = SeqDist::new(777);
 
     // SND.UNA=SND.NXT=SERVER_ISN+1, RCV.NXT=CLIENT_ISN+1
     let mut connections = TcpConnections::default().after_handshake();
@@ -266,7 +266,7 @@ fn duplicate_ack_updates_window() -> Result {
     assert_eq!(dup_ack_fresh_seq.create_reply(&mut connections)?, None);
 
     cloned_state.window_state = Some(WindowState {
-        snd_wnd: NEW_WND,
+        snd_wnd: dup_ack_fresh_seq.window,
         snd_wl1: dup_ack_fresh_seq.seq_num,
         snd_wl2: dup_ack_fresh_seq.ack_num,
     });

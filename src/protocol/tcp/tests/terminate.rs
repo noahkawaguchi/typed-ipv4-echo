@@ -673,10 +673,12 @@ fn fin_ack_with_data_in_established_buffers_the_untransmittable_remainder() -> R
     // data can never actually be sent afterward, since our own FIN in this same reply ends our byte
     // stream.
 
+    const SMALL_WINDOW: SeqDist<u16> = SeqDist::new(3);
+
     let mut connections = TcpConnections::default();
     let mut expected_state = ConnState {
         window_state: Some(WindowState {
-            snd_wnd: 3,
+            snd_wnd: SMALL_WINDOW,
             snd_wl1: CLIENT_ISN + SYN_BYTE,
             snd_wl2: SERVER_ISN + SYN_BYTE,
         }),
@@ -687,7 +689,7 @@ fn fin_ack_with_data_in_established_buffers_the_untransmittable_remainder() -> R
     let reply = TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE,
         ack_num: SERVER_ISN + SYN_BYTE,
-        window: 3,
+        window: SMALL_WINDOW,
         flags: TcpFlags::FinAck,
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET
@@ -707,7 +709,7 @@ fn fin_ack_with_data_in_established_buffers_the_untransmittable_remainder() -> R
     );
 
     expected_state.tcp_state = TcpState::LastAck;
-    expected_state.snd_nxt += SeqDist::new(3) + FIN_BYTE;
+    expected_state.snd_nxt += SeqDist::<u32>::from(SMALL_WINDOW) + FIN_BYTE;
     expected_state.rcv_nxt += HELLO_LEN + FIN_BYTE;
     expected_state.send_buffer.extend(b"lo");
 
