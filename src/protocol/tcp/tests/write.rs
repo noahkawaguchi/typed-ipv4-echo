@@ -2,7 +2,7 @@ use {super::*, crate::ETHERNET_MTU};
 
 #[test]
 fn write_into_produces_correct_bytes_with_no_payload() -> Result {
-    let handler = TcpHandler {
+    let handler = TcpHandler::<Remote, Local> {
         ip_pair: IP_PAIR,
         ports: PortPair { src: 80, dst: 1234 },
         seq_num: SeqPoint::new(0x1000_0000),
@@ -34,7 +34,7 @@ fn write_into_produces_correct_bytes_with_no_payload() -> Result {
 
 #[test]
 fn write_into_produces_correct_bytes_with_payload() -> Result {
-    let handler = TcpHandler {
+    let handler = TcpHandler::<Remote, Local> {
         ip_pair: IP_PAIR,
         ports: PortPair { src: 80, dst: 1234 },
         seq_num: SeqPoint::new(1),

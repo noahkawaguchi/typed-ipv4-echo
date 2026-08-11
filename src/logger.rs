@@ -1,7 +1,10 @@
 use {
     crate::{
         ipv4_header::Ipv4Header,
-        protocol::handler::{Encode, ProtocolHandler},
+        protocol::{
+            Local, Remote,
+            handler::{Encode, ProtocolHandler},
+        },
     },
     std::{
         fmt,
@@ -102,7 +105,7 @@ impl Logger {
     pub(crate) fn pkt_in(
         &self,
         ipv4_header: &Ipv4Header,
-        proto_handler: &ProtocolHandler,
+        proto_handler: &ProtocolHandler<Remote, Local>,
     ) -> io::Result<()> {
         self.pkt_in_or_out(true, ipv4_header, proto_handler)
     }

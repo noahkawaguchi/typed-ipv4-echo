@@ -1,9 +1,12 @@
 use {
     crate::{
         Result,
-        protocol::tcp::{
-            SYN_BYTE, SendInfo, SeqDist, SeqPoint, TcpFlags, TcpHandler, TcpPayload,
-            pending_segment::PendingSegment,
+        protocol::{
+            Local, Remote,
+            tcp::{
+                SYN_BYTE, SendInfo, SeqDist, SeqPoint, TcpFlags, TcpHandler, TcpPayload,
+                pending_segment::PendingSegment,
+            },
         },
     },
     std::{collections::VecDeque, time::Instant},
@@ -16,13 +19,13 @@ pub(super) struct ConnState {
     pub(super) tcp_state: TcpState,
 
     /// "SND.NXT = next sequence number to be sent" (RFC 9293, Section 3.4).
-    pub(super) snd_nxt: SeqPoint,
+    pub(super) snd_nxt: SeqPoint<Local>,
 
     /// "RCV.NXT = next sequence number expected on an incoming segment" (RFC 9293, Section 3.4).
-    pub(super) rcv_nxt: SeqPoint,
+    pub(super) rcv_nxt: SeqPoint<Remote>,
 
     /// "SND.UNA = oldest unacknowledged sequence number" (RFC 9293, Section 3.4).
-    pub(super) snd_una: SeqPoint,
+    pub(super) snd_una: SeqPoint<Local>,
 
     /// SND.WND, SND.WL1, and SND.WL2. Should be `None` until establishment, then always `Some`.
     pub(super) window_state: Option<WindowState>,
@@ -69,7 +72,10 @@ impl ConnState {
     /// Ignores ACKs that are old (before SND.UNA) or for data not yet sent (past SND.NXT). For
     /// updates to SND.UNA and the retransmission queue, ignores duplicate ACKs
     /// (SND.UNA == SEG.ACK).
-    pub(super) fn incoming_ack_update(&mut self, seg: &TcpHandler) -> Result<(), &'static str> {
+    pub(super) fn incoming_ack_update(
+        &mut self,
+        seg: &TcpHandler<Remote, Local>,
+    ) -> Result<(), &'static str> {
         let Some(window_state) = &self.window_state else {
             return Err("`incoming_ack_update` called with uninitialized window state");
         };
@@ -200,12 +206,12 @@ pub(super) struct WindowState {
     ///
     /// Purely used for internal bookkeeping alongside `snd_wl2` to determine whether a window
     /// value is fresh or stale/reordered.
-    pub(super) snd_wl1: SeqPoint,
+    pub(super) snd_wl1: SeqPoint<Remote>,
 
     /// SND.WL2. "segment acknowledgment number used for last window update" (RFC 9293, Section
     /// 3.3.1).
     ///
     /// Purely used for internal bookkeeping alongside `snd_wl1` to determine whether a window
     /// value is fresh or stale/reordered.
-    pub(super) snd_wl2: SeqPoint,
+    pub(super) snd_wl2: SeqPoint<Local>,
 }

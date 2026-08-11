@@ -34,7 +34,11 @@ fn syn_parses_and_produces_a_reply() -> Result {
     assert_matches!(
         Server { tcp_connections: TcpConnections::default(), ..decision_test_server() }
             .parse_incoming(&bytes),
-        Ok((_, ProtocolHandler::Tcp(_), Some(ProtocolHandler::Tcp(_))))
+        Ok(ParsedExchange {
+            ipv4_header: _,
+            incoming_handler: ProtocolHandler::Tcp(_),
+            reply_handler: Some(ProtocolHandler::Tcp(_)),
+        })
     );
 
     Ok(())
@@ -50,7 +54,11 @@ fn handshake_ack_parses_and_produces_no_reply() -> Result {
             ..decision_test_server()
         }
         .parse_incoming(&bytes),
-        Ok((_, ProtocolHandler::Tcp(_), None))
+        Ok(ParsedExchange {
+            ipv4_header: _,
+            incoming_handler: ProtocolHandler::Tcp(_),
+            reply_handler: None
+        })
     );
 
     Ok(())

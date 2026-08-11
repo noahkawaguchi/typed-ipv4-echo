@@ -12,7 +12,7 @@ use {
         Result,
         addr_pairs::{Ipv4AddrPair, PortPair},
         protocol::{
-            Protocol,
+            Local, Protocol, Remote,
             display::{PrettyPayload, WithThousandsSeparators as _},
             handler::Encode,
             pseudo_header_checksum,
@@ -41,8 +41,11 @@ const SYN_BYTE: SeqDist<u32> = SeqDist::new(1);
 const FIN_BYTE: SeqDist<u32> = SeqDist::new(1);
 
 /// Manages TCP headers, data, and reply logic. Field definitions below from RFC 9293, Section 3.1.
+/// `S` is the send direction (originated from the sender's ISN), while `R` is the receive
+/// direction (originated from the destination's ISN). In other words, this is a segment from `S` to
+/// `R`.
 #[cfg_attr(test, derive(Debug, PartialEq, Eq, Clone))]
-pub struct TcpHandler {
+pub struct TcpHandler<S, R> {
     /// Not a part of the TCP header, but required for connection state and checksum calculation.
     ip_pair: Ipv4AddrPair,
 
@@ -51,12 +54,12 @@ pub struct TcpHandler {
     /// "The sequence number of the first data octet in this segment (except when the SYN flag is
     /// set). If SYN is set, the sequence number is the initial sequence number (ISN) and the first
     /// data octet is ISN+1."
-    seq_num: SeqPoint,
+    seq_num: SeqPoint<S>,
 
     /// "If the ACK control bit is set, this field contains the value of the next sequence number
     /// the sender of the segment is expecting to receive. Once a connection is established, this
     /// is always sent."
-    ack_num: SeqPoint,
+    ack_num: SeqPoint<R>,
 
     /// **This field is stored in units of bytes.**
     ///
@@ -77,33 +80,23 @@ pub struct TcpHandler {
 #[derive(Clone)]
 #[cfg_attr(test, derive(Debug))]
 struct SendInfo {
-    seq_num: SeqPoint,
-    ack_num: SeqPoint,
+    seq_num: SeqPoint<Local>,
+    ack_num: SeqPoint<Remote>,
     flags: TcpFlags,
     payload: Option<TcpPayload>,
 }
 
 impl SendInfo {
-    const fn pure_ack(seq_num: SeqPoint, ack_num: SeqPoint) -> Self {
+    const fn pure_ack(seq_num: SeqPoint<Local>, ack_num: SeqPoint<Remote>) -> Self {
         Self { seq_num, ack_num, flags: TcpFlags::Ack, payload: None }
     }
 }
 
-impl TcpHandler {
-    /// "This represents the sequence numbers the local (receiving) TCP endpoint is willing to
-    /// receive... segments overlapping the range RCV.NXT to RCV.NXT + RCV.WND - 1 carry acceptable
-    /// data or control" (RFC 9293, Section 4).
-    ///
-    /// Currently left at max because as an echo server, there's no receive-side buffer accumulating
-    /// data for an application.
-    ///
-    /// However, a dynamic RCV.WND could be used in the future to bound the send buffer's growth,
-    /// throttling the peer's sending rate if they keep sending more data than they are willing to
-    /// receive.
-    const RCV_WND: SeqDist<u16> = SeqDist::new(u16::MAX);
-
-    /// Parses `data` as a TCP header and payload.
-    pub(super) fn parse(data: &[u8], ip_pair: Ipv4AddrPair) -> Result<Self> {
+impl<S, R> TcpHandler<S, R> {
+    /// Parses `data` as a TCP header and payload, which could be local to remote or remote to
+    /// local. The local to remote direction is for tests only. Only the remote to local direction
+    /// should be exposed in production code.
+    fn inner_parse(data: &[u8], ip_pair: Ipv4AddrPair) -> Result<Self> {
         let Some(tcp_header) = data.first_chunk::<{ TCP_HDR_MIN_LEN as usize }>() else {
             return Err(format!("Too short for TCP header ({} bytes)", data.len()).into());
         };
@@ -144,22 +137,12 @@ impl TcpHandler {
             )?,
         })
     }
+}
 
-    fn from_pairs_and_info(
-        ip_pair: Ipv4AddrPair,
-        ports: PortPair,
-        SendInfo { seq_num, ack_num, flags, payload }: SendInfo,
-    ) -> Self {
-        Self {
-            ip_pair,
-            ports,
-            seq_num,
-            ack_num,
-            offset_bytes: TCP_HDR_MIN_LEN,
-            flags,
-            window: Self::RCV_WND,
-            payload,
-        }
+impl TcpHandler<Remote, Local> {
+    /// Parses `data` as a TCP header and payload in the remote to local direction.
+    pub(super) fn parse(data: &[u8], ip_pair: Ipv4AddrPair) -> Result<Self> {
+        Self::inner_parse(data, ip_pair)
     }
 
     /// Creates a TCP header and payload for replying to `self`, or returns `Ok(None)` for no reply.
@@ -167,7 +150,10 @@ impl TcpHandler {
         clippy::too_many_lines,
         reason = "Large match expression to express reply cases clearly"
     )]
-    pub(super) fn create_reply(&self, connections: &mut TcpConnections) -> Result<Option<Self>> {
+    pub(super) fn create_reply(
+        &self,
+        connections: &mut TcpConnections,
+    ) -> Result<Option<TcpHandler<Local, Remote>>> {
         let key = ConnKey {
             client_ip: self.ip_pair.src,
             client_port: self.ports.src,
@@ -485,8 +471,9 @@ impl TcpHandler {
                 } else {
                     // Check whether `seq_num` falls within the receive window [RCV.NXT, RCV.NXT +
                     // RCV.WND). true -> Case 3, false -> Case 1.
-                    (rcv_nxt <= self.seq_num && self.seq_num < rcv_nxt + Self::RCV_WND.into())
-                        .then_some(SendInfo::pure_ack(snd_nxt, rcv_nxt))
+                    (rcv_nxt <= self.seq_num
+                        && self.seq_num < rcv_nxt + TcpHandler::<Local, Remote>::RCV_WND.into())
+                    .then_some(SendInfo::pure_ack(snd_nxt, rcv_nxt))
                 }
             }
 
@@ -505,7 +492,11 @@ impl TcpHandler {
             }),
         }
         .map(|send_info| {
-            Self::from_pairs_and_info(self.ip_pair.swapped(), self.ports.swapped(), send_info)
+            TcpHandler::<Local, Remote>::from_pairs_and_info(
+                self.ip_pair.swapped(),
+                self.ports.swapped(),
+                send_info,
+            )
         }))
     }
 
@@ -528,7 +519,38 @@ impl TcpHandler {
     }
 }
 
-impl Encode for TcpHandler {
+impl TcpHandler<Local, Remote> {
+    /// "This represents the sequence numbers the local (receiving) TCP endpoint is willing to
+    /// receive... segments overlapping the range RCV.NXT to RCV.NXT + RCV.WND - 1 carry acceptable
+    /// data or control" (RFC 9293, Section 4).
+    ///
+    /// Currently left at max because as an echo server, there's no receive-side buffer accumulating
+    /// data for an application.
+    ///
+    /// However, a dynamic RCV.WND could be used in the future to bound the send buffer's growth,
+    /// throttling the peer's sending rate if they keep sending more data than they are willing to
+    /// receive.
+    const RCV_WND: SeqDist<u16> = SeqDist::new(u16::MAX);
+
+    fn from_pairs_and_info(
+        ip_pair: Ipv4AddrPair,
+        ports: PortPair,
+        SendInfo { seq_num, ack_num, flags, payload }: SendInfo,
+    ) -> Self {
+        Self {
+            ip_pair,
+            ports,
+            seq_num,
+            ack_num,
+            offset_bytes: TCP_HDR_MIN_LEN,
+            flags,
+            window: Self::RCV_WND,
+            payload,
+        }
+    }
+}
+
+impl<S, R> Encode for TcpHandler<S, R> {
     fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
         // Source and destination ports
         buf.try_get_mut(..2)?
@@ -610,7 +632,7 @@ impl Encode for TcpHandler {
     }
 }
 
-impl fmt::Display for TcpHandler {
+impl<S, R> fmt::Display for TcpHandler<S, R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -645,19 +667,10 @@ mod tests {
         std::{assert_matches, collections::VecDeque},
     };
 
-    impl TcpHandler {
+    impl TcpHandler<Remote, Local> {
         /// A SYN requesting a new connection using the regular `CLIENT_PACKET` consts, which should
         /// generate a SYN-ACK reply.
         pub(crate) const CLIENT_SYN: Self = Self { flags: TcpFlags::Syn, ..CLIENT_PACKET };
-
-        /// The server's SYN-ACK reply for the standard SYN-RECEIVED connection using the module's
-        /// standard test consts.
-        pub(crate) const SERVER_SYN_ACK: Self = Self {
-            seq_num: SERVER_ISN,
-            ack_num: CLIENT_ISN.const_add(SYN_BYTE),
-            flags: TcpFlags::SynAck,
-            ..SERVER_REPLY
-        };
 
         /// The handshake-completing ACK matching the module's standard test consts, which should be
         /// accepted if in SYN-RECEIVED by transitioning to ESTABLISHED and replying with `None`.
@@ -665,6 +678,26 @@ mod tests {
             seq_num: CLIENT_ISN.const_add(SYN_BYTE),
             ack_num: SERVER_ISN.const_add(SYN_BYTE),
             ..CLIENT_PACKET
+        };
+
+        /// The client's FIN-ACK completing active close after our own FIN was sent (FIN-WAIT-1),
+        /// which also acknowledges our FIN, so the connection should close immediately.
+        pub(crate) const CLIENT_FIN_ACK_COMPLETING_CLOSE: Self = Self {
+            seq_num: CLIENT_ISN.const_add(SYN_BYTE),
+            ack_num: SERVER_ISN.const_add(SYN_BYTE.const_add(FIN_BYTE)),
+            flags: TcpFlags::FinAck,
+            ..CLIENT_PACKET
+        };
+    }
+
+    impl TcpHandler<Local, Remote> {
+        /// The server's SYN-ACK reply for the standard SYN-RECEIVED connection using the module's
+        /// standard test consts.
+        pub(crate) const SERVER_SYN_ACK: Self = Self {
+            seq_num: SERVER_ISN,
+            ack_num: CLIENT_ISN.const_add(SYN_BYTE),
+            flags: TcpFlags::SynAck,
+            ..SERVER_REPLY
         };
 
         /// The server's FIN-ACK reply when actively initiating close right after the handshake for
@@ -676,15 +709,6 @@ mod tests {
             ..SERVER_REPLY
         };
 
-        /// The client's FIN-ACK completing active close after our own FIN was sent (FIN-WAIT-1),
-        /// which also acknowledges our FIN, so the connection should close immediately.
-        pub(crate) const CLIENT_FIN_ACK_COMPLETING_CLOSE: Self = Self {
-            seq_num: CLIENT_ISN.const_add(SYN_BYTE),
-            ack_num: SERVER_ISN.const_add(SYN_BYTE.const_add(FIN_BYTE)),
-            flags: TcpFlags::FinAck,
-            ..CLIENT_PACKET
-        };
-
         /// The server's final ACK completing close from FIN-WAIT-1, matching the module's standard
         /// test consts for a connection closing right after the handshake, after its FIN
         /// was both acked and matched by the peer's own FIN in the same segment.
@@ -693,5 +717,11 @@ mod tests {
             ack_num: CLIENT_ISN.const_add(SYN_BYTE.const_add(FIN_BYTE)),
             ..SERVER_REPLY
         };
+
+        /// Parses `data` as a TCP header and payload in the local to remote direction for testing
+        /// purposes only.
+        pub(crate) fn test_parse(data: &[u8], ip_pair: Ipv4AddrPair) -> Result<Self> {
+            Self::inner_parse(data, ip_pair)
+        }
     }
 }

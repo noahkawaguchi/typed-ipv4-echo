@@ -2,9 +2,12 @@ use {
     crate::{
         Result,
         addr_pairs::{Ipv4AddrPair, PortPair},
-        protocol::tcp::{
-            FIN_BYTE, PendingSegment, SendInfo, TcpFlags, TcpHandler,
-            state::{ConnState, TcpState},
+        protocol::{
+            Local, Remote,
+            tcp::{
+                FIN_BYTE, PendingSegment, SendInfo, TcpFlags, TcpHandler,
+                state::{ConnState, TcpState},
+            },
         },
     },
     std::{
@@ -91,7 +94,7 @@ impl TcpConnections {
     /// Reproduces every pending unacked segment that is due for retransmission. If any connection
     /// has a due segment that has already been retried `max_retries` times, gives up and removes
     /// that connection entirely.
-    pub fn make_retransmissions(&mut self) -> Vec<TcpHandler> {
+    pub fn make_retransmissions(&mut self) -> Vec<TcpHandler<Local, Remote>> {
         let now = Instant::now();
 
         let due_keys = self
@@ -133,7 +136,7 @@ impl TcpConnections {
 
     /// Initiates active close (RFC 9293 "CLOSE" call) for every connection currently ESTABLISHED,
     /// transitioning each to FIN-WAIT-1 and returning a FIN-ACK reply for it.
-    pub fn close_established(&mut self) -> Vec<TcpHandler> {
+    pub fn close_established(&mut self) -> Vec<TcpHandler<Local, Remote>> {
         let now = Instant::now();
 
         self.table

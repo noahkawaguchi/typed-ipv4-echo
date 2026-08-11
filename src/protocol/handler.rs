@@ -3,8 +3,11 @@ use {
         Result,
         addr_pairs::Ipv4AddrPair,
         protocol::{
-            Protocol, TcpConnections, display::PrettyPayload, icmp_echo::IcmpEchoHandler,
-            tcp::TcpHandler, udp::UdpHandler,
+            Local, Protocol, Remote,
+            display::PrettyPayload,
+            icmp_echo::IcmpEchoHandler,
+            tcp::{TcpConnections, TcpHandler},
+            udp::UdpHandler,
         },
     },
     std::fmt,
@@ -28,15 +31,16 @@ pub trait Encode: fmt::Display {
     fn pretty_payload(&self, include_content: bool) -> PrettyPayload<'_>;
 }
 
-/// Enum for static dispatch over the supported protocol-specific handlers.
+/// Enum for static dispatch over the supported protocol-specific handlers. Sent from `S` to be
+/// received by `R`.
 #[cfg_attr(test, derive(Debug))]
-pub enum ProtocolHandler<'a> {
+pub enum ProtocolHandler<'a, S, R> {
     Icmp(IcmpEchoHandler<'a>),
-    Tcp(TcpHandler),
+    Tcp(TcpHandler<S, R>),
     Udp(UdpHandler<'a>),
 }
 
-impl<'a> ProtocolHandler<'a> {
+impl<'a> ProtocolHandler<'a, Remote, Local> {
     /// Parses `data` as the header and payload of a packet of protocol type `protocol`.
     pub fn parse(data: &'a [u8], protocol: Protocol, ip_pair: Ipv4AddrPair) -> Result<Self> {
         match protocol {
@@ -50,17 +54,28 @@ impl<'a> ProtocolHandler<'a> {
 
     /// Creates a protocol-specific header and payload for replying to `self`, or returns `Ok(None)`
     /// for no reply.
-    pub fn create_reply(&self, tcp_connections: &mut TcpConnections) -> Result<Option<Self>> {
+    pub fn create_reply(
+        &self,
+        tcp_connections: &mut TcpConnections,
+    ) -> Result<Option<ProtocolHandler<'a, Local, Remote>>> {
         match self {
-            Self::Icmp(handler) => Ok(Some(Self::Icmp(handler.create_reply()))),
+            Self::Icmp(handler) => {
+                Ok(Some(ProtocolHandler::<Local, Remote>::Icmp(handler.create_reply())))
+            }
+
             // TCP is the only one that's actually optional or fallible
-            Self::Tcp(handler) => Ok(handler.create_reply(tcp_connections)?.map(Self::Tcp)),
-            Self::Udp(handler) => Ok(Some(Self::Udp(handler.create_reply()))),
+            Self::Tcp(handler) => Ok(handler
+                .create_reply(tcp_connections)?
+                .map(ProtocolHandler::<Local, Remote>::Tcp)),
+
+            Self::Udp(handler) => {
+                Ok(Some(ProtocolHandler::<Local, Remote>::Udp(handler.create_reply())))
+            }
         }
     }
 }
 
-impl Encode for ProtocolHandler<'_> {
+impl<S, R> Encode for ProtocolHandler<'_, S, R> {
     fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
         match self {
             Self::Icmp(handler) => handler.write_into(buf),
@@ -94,7 +109,7 @@ impl Encode for ProtocolHandler<'_> {
     }
 }
 
-impl fmt::Display for ProtocolHandler<'_> {
+impl<S, R> fmt::Display for ProtocolHandler<'_, S, R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Icmp(handler) => write!(f, "{handler}"),
