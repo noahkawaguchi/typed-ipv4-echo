@@ -40,6 +40,22 @@ const SYN_BYTE: SeqDist<u32> = SeqDist::new(1);
 /// The single phantom byte consumed by FIN.
 const FIN_BYTE: SeqDist<u32> = SeqDist::new(1);
 
+/// Fields that differ when determining a segment to send.
+#[derive(Clone)]
+#[cfg_attr(test, derive(Debug))]
+struct SendInfo {
+    seq_num: SeqPoint<Local>,
+    ack_num: SeqPoint<Remote>,
+    flags: TcpFlags,
+    payload: Option<TcpPayload>,
+}
+
+impl SendInfo {
+    const fn pure_ack(seq_num: SeqPoint<Local>, ack_num: SeqPoint<Remote>) -> Self {
+        Self { seq_num, ack_num, flags: TcpFlags::Ack, payload: None }
+    }
+}
+
 /// Manages TCP headers, data, and reply logic. Field definitions below from RFC 9293, Section 3.1.
 /// `S` is the send direction (originated from the sender's ISN), while `R` is the receive
 /// direction (originated from the destination's ISN). In other words, this is a segment from `S` to
@@ -74,22 +90,6 @@ pub struct TcpHandler<S, R> {
     window: SeqDist<u16>,
 
     payload: Option<TcpPayload>,
-}
-
-/// Fields that differ when determining a segment to send.
-#[derive(Clone)]
-#[cfg_attr(test, derive(Debug))]
-struct SendInfo {
-    seq_num: SeqPoint<Local>,
-    ack_num: SeqPoint<Remote>,
-    flags: TcpFlags,
-    payload: Option<TcpPayload>,
-}
-
-impl SendInfo {
-    const fn pure_ack(seq_num: SeqPoint<Local>, ack_num: SeqPoint<Remote>) -> Self {
-        Self { seq_num, ack_num, flags: TcpFlags::Ack, payload: None }
-    }
 }
 
 impl<S, R> TcpHandler<S, R> {
