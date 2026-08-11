@@ -5,8 +5,8 @@ fn write_into_produces_correct_bytes_with_no_payload() -> Result {
     let handler = TcpHandler {
         ip_pair: IP_PAIR,
         ports: PortPair { src: 80, dst: 1234 },
-        seq_num: 0x1000_0000,
-        ack_num: 0x0000_1001,
+        seq_num: SeqPoint::new(0x1000_0000),
+        ack_num: SeqPoint::new(0x0000_1001),
         offset_bytes: 20,
         flags: TcpFlags::SynAck,
         window: 29_200,
@@ -37,8 +37,8 @@ fn write_into_produces_correct_bytes_with_payload() -> Result {
     let handler = TcpHandler {
         ip_pair: IP_PAIR,
         ports: PortPair { src: 80, dst: 1234 },
-        seq_num: 1,
-        ack_num: 4102,
+        seq_num: SeqPoint::new(1),
+        ack_num: SeqPoint::new(4102),
         offset_bytes: 20,
         flags: TcpFlags::Ack,
         window: u16::MAX,

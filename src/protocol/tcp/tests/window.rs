@@ -27,8 +27,8 @@ fn new_ack_adopts_window_from_segment() -> Result {
     }
     .create_reply(&mut connections)?;
 
-    cloned_state.snd_nxt.advance_by(HELLO_LEN);
-    cloned_state.rcv_nxt.advance_by(HELLO_LEN);
+    cloned_state.snd_nxt += HELLO_LEN;
+    cloned_state.rcv_nxt += HELLO_LEN;
 
     assert_eq!(connections.try_get()?, &cloned_state, "State confirmation before window update");
 
@@ -42,7 +42,7 @@ fn new_ack_adopts_window_from_segment() -> Result {
 
     assert_eq!(window_update.create_reply(&mut connections)?, None);
 
-    cloned_state.snd_una.advance_by(HELLO_LEN);
+    cloned_state.snd_una += HELLO_LEN;
     cloned_state.window_state = Some(WindowState {
         snd_wnd: NEW_WND,
         snd_wl1: window_update.seq_num,
@@ -79,8 +79,8 @@ fn stale_segment_does_not_clobber_send_window() -> Result {
     }
     .create_reply(&mut connections)?;
 
-    cloned_state.snd_nxt.advance_by(HELLO_LEN);
-    cloned_state.rcv_nxt.advance_by(HELLO_LEN);
+    cloned_state.snd_nxt += HELLO_LEN;
+    cloned_state.rcv_nxt += HELLO_LEN;
 
     assert_eq!(connections.try_get()?, &cloned_state, "State confirmation before window update");
 
@@ -117,7 +117,7 @@ fn stale_segment_does_not_clobber_send_window() -> Result {
         None
     );
 
-    cloned_state.snd_una.advance_by(HELLO_LEN);
+    cloned_state.snd_una += HELLO_LEN;
 
     assert_eq!(
         connections.try_get()?,
@@ -149,8 +149,8 @@ fn same_seq_but_fresher_ack_updates_window() -> Result {
     }
     .create_reply(&mut connections)?;
 
-    cloned_state.snd_nxt.advance_by(HELLO_LEN);
-    cloned_state.rcv_nxt.advance_by(HELLO_LEN);
+    cloned_state.snd_nxt += HELLO_LEN;
+    cloned_state.rcv_nxt += HELLO_LEN;
     assert_eq!(connections.try_get()?, &cloned_state);
 
     let hi_packet = TcpHandler {
@@ -162,8 +162,8 @@ fn same_seq_but_fresher_ack_updates_window() -> Result {
 
     hi_packet.create_reply(&mut connections)?;
 
-    cloned_state.snd_nxt.advance_by(HI_LEN);
-    cloned_state.rcv_nxt.advance_by(HI_LEN);
+    cloned_state.snd_nxt += HI_LEN;
+    cloned_state.rcv_nxt += HI_LEN;
     cloned_state.window_state = Some(WindowState {
         snd_wnd: hi_packet.window,
         snd_wl1: hi_packet.seq_num,
@@ -183,7 +183,7 @@ fn same_seq_but_fresher_ack_updates_window() -> Result {
 
     assert_eq!(window_update_1.create_reply(&mut connections)?, None);
 
-    cloned_state.snd_una.advance_by(HELLO_LEN);
+    cloned_state.snd_una += HELLO_LEN;
     cloned_state.window_state = Some(WindowState {
         snd_wnd: 1000,
         snd_wl1: window_update_1.seq_num,
@@ -203,7 +203,7 @@ fn same_seq_but_fresher_ack_updates_window() -> Result {
 
     assert_eq!(window_update_2.create_reply(&mut connections)?, None);
 
-    cloned_state.snd_una.advance_by(HI_LEN);
+    cloned_state.snd_una += HI_LEN;
     cloned_state.window_state = Some(WindowState {
         snd_wnd: 2000,
         snd_wl1: window_update_2.seq_num,
@@ -248,8 +248,8 @@ fn duplicate_ack_updates_window() -> Result {
     }
     .create_reply(&mut connections)?;
 
-    cloned_state.snd_nxt.advance_by(HELLO_LEN);
-    cloned_state.rcv_nxt.advance_by(HELLO_LEN);
+    cloned_state.snd_nxt += HELLO_LEN;
+    cloned_state.rcv_nxt += HELLO_LEN;
 
     assert_eq!(connections.try_get()?, &cloned_state, "State confirmation before window update");
 

@@ -21,7 +21,7 @@ use {
                 flags::TcpFlags,
                 payload::TcpPayload,
                 pending_segment::PendingSegment,
-                seq_space::{AdvanceBy as _, SeqLe as _, SeqLt as _},
+                seq_space::{SeqDist, SeqPoint},
                 state::{ConnState, TcpState, WindowState},
             },
         },
@@ -45,12 +45,12 @@ pub struct TcpHandler {
     /// "The sequence number of the first data octet in this segment (except when the SYN flag is
     /// set). If SYN is set, the sequence number is the initial sequence number (ISN) and the first
     /// data octet is ISN+1."
-    seq_num: u32,
+    seq_num: SeqPoint,
 
     /// "If the ACK control bit is set, this field contains the value of the next sequence number
     /// the sender of the segment is expecting to receive. Once a connection is established, this
     /// is always sent."
-    ack_num: u32,
+    ack_num: SeqPoint,
 
     /// **This field is stored in units of bytes.**
     ///
@@ -71,14 +71,14 @@ pub struct TcpHandler {
 #[derive(Clone)]
 #[cfg_attr(test, derive(Debug))]
 struct SendInfo {
-    seq_num: u32,
-    ack_num: u32,
+    seq_num: SeqPoint,
+    ack_num: SeqPoint,
     flags: TcpFlags,
     payload: Option<TcpPayload>,
 }
 
 impl SendInfo {
-    const fn pure_ack(seq_num: u32, ack_num: u32) -> Self {
+    const fn pure_ack(seq_num: SeqPoint, ack_num: SeqPoint) -> Self {
         Self { seq_num, ack_num, flags: TcpFlags::Ack, payload: None }
     }
 }
@@ -115,18 +115,18 @@ impl TcpHandler {
                 src: u16::from_be_bytes([tcp_header[0], tcp_header[1]]),
                 dst: u16::from_be_bytes([tcp_header[2], tcp_header[3]]),
             },
-            seq_num: u32::from_be_bytes([
+            seq_num: SeqPoint::new(u32::from_be_bytes([
                 tcp_header[4],
                 tcp_header[5],
                 tcp_header[6],
                 tcp_header[7],
-            ]),
-            ack_num: u32::from_be_bytes([
+            ])),
+            ack_num: SeqPoint::new(u32::from_be_bytes([
                 tcp_header[8],
                 tcp_header[9],
                 tcp_header[10],
                 tcp_header[11],
-            ]),
+            ])),
             offset_bytes,
             flags: tcp_header[13].try_into()?,
             window: u16::from_be_bytes([tcp_header[14], tcp_header[15]]),
@@ -175,8 +175,8 @@ impl TcpHandler {
             (None, TcpFlags::Syn, _) => {
                 // seq num = random ISN, local ack num = remote seq num + 1
                 let send_info = SendInfo {
-                    seq_num: sys::random_u32()?,
-                    ack_num: self.seq_num.wrapping_add(1),
+                    seq_num: SeqPoint::new(sys::random_u32()?),
+                    ack_num: self.seq_num + SeqDist::new(1),
                     flags: TcpFlags::SynAck,
                     payload: None,
                 };
@@ -196,7 +196,7 @@ impl TcpHandler {
             ) => {
                 let send_info = SendInfo {
                     seq_num: *snd_una, // ISN
-                    ack_num: self.seq_num.wrapping_add(1),
+                    ack_num: self.seq_num + SeqDist::new(1),
                     flags: TcpFlags::SynAck,
                     payload: None,
                 };
@@ -242,8 +242,8 @@ impl TcpHandler {
                 TcpFlags::Ack,
                 maybe_payload,
             ) if self.seq_num == conn.rcv_nxt
-                && conn.snd_una.seq_lt(self.ack_num)
-                && self.ack_num.seq_le(conn.snd_nxt) =>
+                && conn.snd_una < self.ack_num
+                && self.ack_num <= conn.snd_nxt =>
             {
                 conn.tcp_state = TcpState::Established;
                 conn.rcv_nxt = self.seq_num;
@@ -258,7 +258,7 @@ impl TcpHandler {
                 maybe_payload
                     .as_ref()
                     .map(|payload| {
-                        conn.rcv_nxt.advance_by(u32::from(payload.len().get()));
+                        conn.rcv_nxt += SeqDist::new(u32::from(payload.len().get()));
                         conn.send_buffer.extend(payload.as_bytes().iter());
 
                         conn.drain_transmittable()
@@ -277,7 +277,7 @@ impl TcpHandler {
                 Some(&mut ConnState { tcp_state: TcpState::Established, snd_nxt, rcv_nxt, .. }),
                 TcpFlags::Ack,
                 _,
-            ) if snd_nxt.seq_lt(self.ack_num) => Some(SendInfo::pure_ack(snd_nxt, rcv_nxt)),
+            ) if snd_nxt < self.ack_num => Some(SendInfo::pure_ack(snd_nxt, rcv_nxt)),
 
             // Pure ACK (no payload) on an established connection (acknowledgment of data sent by
             // the server) -> advance SND.UNA, then send however much the window allows from the
@@ -303,7 +303,7 @@ impl TcpHandler {
                 let payload_len = u32::from(payload.len().get());
 
                 conn.incoming_ack_update(self)?;
-                conn.rcv_nxt.advance_by(payload_len);
+                conn.rcv_nxt += SeqDist::new(payload_len);
                 conn.send_buffer.extend(payload.as_bytes().iter());
 
                 Some(match conn.drain_transmittable()? {
@@ -337,11 +337,11 @@ impl TcpHandler {
                 conn.incoming_ack_update(self)?;
 
                 if let Some(payload) = maybe_payload {
-                    conn.rcv_nxt.advance_by(u32::from(payload.len().get()));
+                    conn.rcv_nxt += SeqDist::new(u32::from(payload.len().get()));
                     conn.send_buffer.extend(payload.as_bytes().iter());
                 }
 
-                conn.rcv_nxt.advance_by(1); // Peer's FIN consumes one sequence number
+                conn.rcv_nxt += SeqDist::new(1); // Peer's FIN consumes one sequence number
                 conn.tcp_state = TcpState::LastAck;
 
                 let to_send = conn.drain_transmittable()?;
@@ -356,8 +356,8 @@ impl TcpHandler {
                     payload: to_send,
                 };
 
-                conn.snd_nxt.advance_by(send_len);
-                conn.snd_nxt.advance_by(1); // Our FIN consumes one sequence number
+                conn.snd_nxt += SeqDist::new(send_len);
+                conn.snd_nxt += SeqDist::new(1); // Our FIN consumes one sequence number
 
                 conn.pending
                     .push(PendingSegment::new(send_info.clone(), Instant::now()));
@@ -393,7 +393,7 @@ impl TcpHandler {
                 TcpFlags::Ack,
                 Some(payload),
             ) if self.seq_num == conn.rcv_nxt => {
-                conn.rcv_nxt.advance_by(u32::from(payload.len().get()));
+                conn.rcv_nxt += SeqDist::new(u32::from(payload.len().get()));
 
                 let send_info = SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt);
                 conn.incoming_ack_update(self)?;
@@ -422,11 +422,11 @@ impl TcpHandler {
                 maybe_payload,
             ) if self.seq_num == conn.rcv_nxt => {
                 if let Some(payload) = maybe_payload {
-                    conn.rcv_nxt.advance_by(u32::from(payload.len().get()));
+                    conn.rcv_nxt += SeqDist::new(u32::from(payload.len().get()));
                 }
 
                 // Consume one sequence number in RCV.NXT for the peer's FIN
-                conn.rcv_nxt.advance_by(1);
+                conn.rcv_nxt += SeqDist::new(1);
 
                 let send_info = SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt);
 
@@ -454,7 +454,10 @@ impl TcpHandler {
                     .as_ref()
                     .map_or(0, |payload| u32::from(payload.len().get()));
 
-                Some(SendInfo::pure_ack(snd_nxt, rcv_nxt.wrapping_add(payload_len).wrapping_add(1)))
+                Some(SendInfo::pure_ack(
+                    snd_nxt,
+                    rcv_nxt + SeqDist::new(payload_len) + SeqDist::new(1),
+                ))
             }
 
             // CLOSING (simultaneous close), the remote peer's ACK of our FIN arrives -> fully
@@ -486,10 +489,8 @@ impl TcpHandler {
                 } else {
                     // Check whether `seq_num` falls within the receive window [RCV.NXT, RCV.NXT +
                     // RCV.WND). true -> Case 3, false -> Case 1.
-                    (rcv_nxt.seq_le(self.seq_num)
-                        && self
-                            .seq_num
-                            .seq_lt(rcv_nxt.wrapping_add(u32::from(Self::RCV_WND))))
+                    (rcv_nxt <= self.seq_num
+                        && self.seq_num < rcv_nxt + SeqDist::new(u32::from(Self::RCV_WND)))
                     .then_some(SendInfo::pure_ack(snd_nxt, rcv_nxt))
                 }
             }
@@ -503,7 +504,7 @@ impl TcpHandler {
             _ => Some(SendInfo {
                 seq_num: self.ack_num,
                 // ack_num is 0 because sending bare RST with no ACK flag leaves ack_num undefined
-                ack_num: 0,
+                ack_num: SeqPoint::new(0),
                 flags: TcpFlags::Rst,
                 payload: None,
             }),
@@ -524,7 +525,7 @@ impl TcpHandler {
             payload: Some(to_send),
         };
 
-        conn.snd_nxt.advance_by(send_len);
+        conn.snd_nxt += SeqDist::new(send_len);
         conn.pending
             .push(PendingSegment::new(send_info.clone(), Instant::now()));
 
@@ -658,7 +659,7 @@ mod tests {
         /// standard test consts.
         pub(crate) const SERVER_SYN_ACK: Self = Self {
             seq_num: SERVER_ISN,
-            ack_num: CLIENT_ISN + SYN_BYTE,
+            ack_num: CLIENT_ISN.const_add(SYN_BYTE),
             flags: TcpFlags::SynAck,
             ..SERVER_REPLY
         };
@@ -666,16 +667,16 @@ mod tests {
         /// The handshake-completing ACK matching the module's standard test consts, which should be
         /// accepted if in SYN-RECEIVED by transitioning to ESTABLISHED and replying with `None`.
         pub(crate) const CLIENT_ACK_COMPLETING_HANDSHAKE: Self = Self {
-            seq_num: CLIENT_ISN + SYN_BYTE,
-            ack_num: SERVER_ISN + SYN_BYTE,
+            seq_num: CLIENT_ISN.const_add(SYN_BYTE),
+            ack_num: SERVER_ISN.const_add(SYN_BYTE),
             ..CLIENT_PACKET
         };
 
         /// The server's FIN-ACK reply when actively initiating close right after the handshake for
         /// the standard connection using the module's test consts.
         pub(crate) const SERVER_FIN_ACK_INITIATING_CLOSE: Self = Self {
-            seq_num: SERVER_ISN + SYN_BYTE,
-            ack_num: CLIENT_ISN + SYN_BYTE,
+            seq_num: SERVER_ISN.const_add(SYN_BYTE),
+            ack_num: CLIENT_ISN.const_add(SYN_BYTE),
             flags: TcpFlags::FinAck,
             ..SERVER_REPLY
         };
@@ -683,8 +684,8 @@ mod tests {
         /// The client's FIN-ACK completing active close after our own FIN was sent (FIN-WAIT-1),
         /// which also acknowledges our FIN, so the connection should close immediately.
         pub(crate) const CLIENT_FIN_ACK_COMPLETING_CLOSE: Self = Self {
-            seq_num: CLIENT_ISN + SYN_BYTE,
-            ack_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
+            seq_num: CLIENT_ISN.const_add(SYN_BYTE),
+            ack_num: SERVER_ISN.const_add(SYN_BYTE.const_add(FIN_BYTE)),
             flags: TcpFlags::FinAck,
             ..CLIENT_PACKET
         };
@@ -693,8 +694,8 @@ mod tests {
         /// test consts for a connection closing right after the handshake, after its FIN
         /// was both acked and matched by the peer's own FIN in the same segment.
         pub(crate) const SERVER_FINAL_ACK_COMPLETING_CLOSE: Self = Self {
-            seq_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
-            ack_num: CLIENT_ISN + SYN_BYTE + FIN_BYTE,
+            seq_num: SERVER_ISN.const_add(SYN_BYTE.const_add(FIN_BYTE)),
+            ack_num: CLIENT_ISN.const_add(SYN_BYTE.const_add(FIN_BYTE)),
             ..SERVER_REPLY
         };
     }

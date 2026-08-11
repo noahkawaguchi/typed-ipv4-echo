@@ -42,8 +42,8 @@ fn pure_ack_on_established_connection_returns_none() -> Result {
     }
     .create_reply(&mut connections)?;
 
-    cloned_state.snd_nxt.advance_by(HELLO_LEN);
-    cloned_state.rcv_nxt.advance_by(HELLO_LEN);
+    cloned_state.snd_nxt += HELLO_LEN;
+    cloned_state.rcv_nxt += HELLO_LEN;
 
     // ack=SERVER_ISN + 5 bytes echoed + 1
     let pure_ack = TcpHandler {
@@ -54,7 +54,7 @@ fn pure_ack_on_established_connection_returns_none() -> Result {
 
     assert_eq!(pure_ack.create_reply(&mut connections)?, None);
 
-    cloned_state.snd_una.advance_by(HELLO_LEN);
+    cloned_state.snd_una += HELLO_LEN;
     cloned_state.window_state = Some(WindowState {
         snd_wnd: pure_ack.window,
         snd_wl1: pure_ack.seq_num,
@@ -100,8 +100,8 @@ fn consecutive_replies_use_snd_nxt_for_seq_num() -> Result {
         "Standard reply to the first data packet"
     );
 
-    cloned_state.snd_nxt.advance_by(HELLO_LEN);
-    cloned_state.rcv_nxt.advance_by(HELLO_LEN);
+    cloned_state.snd_nxt += HELLO_LEN;
+    cloned_state.rcv_nxt += HELLO_LEN;
     assert_eq!(
         connections.try_get()?,
         &cloned_state,
@@ -165,8 +165,8 @@ fn old_ack_num_does_not_regress_snd_una() -> Result {
         "Standard reply to the first data packet"
     );
 
-    cloned_state.snd_nxt.advance_by(HELLO_LEN);
-    cloned_state.rcv_nxt.advance_by(HELLO_LEN);
+    cloned_state.snd_nxt += HELLO_LEN;
+    cloned_state.rcv_nxt += HELLO_LEN;
     assert_eq!(
         connections.try_get()?,
         &cloned_state,
@@ -195,9 +195,9 @@ fn old_ack_num_does_not_regress_snd_una() -> Result {
         "Standard reply to the second data packet"
     );
 
-    cloned_state.snd_nxt.advance_by(HI_LEN);
-    cloned_state.rcv_nxt.advance_by(HI_LEN);
-    cloned_state.snd_una.advance_by(HELLO_LEN);
+    cloned_state.snd_nxt += HI_LEN;
+    cloned_state.rcv_nxt += HI_LEN;
+    cloned_state.snd_una += HELLO_LEN;
     cloned_state.window_state = Some(WindowState {
         snd_wnd: hi_packet.window,
         snd_wl1: hi_packet.seq_num,
@@ -232,8 +232,8 @@ fn old_ack_num_does_not_regress_snd_una() -> Result {
         "Stale ack_num shouldn't prevent normal processing"
     );
 
-    cloned_state.snd_nxt.advance_by(HEY_LEN);
-    cloned_state.rcv_nxt.advance_by(HEY_LEN);
+    cloned_state.snd_nxt += HEY_LEN;
+    cloned_state.rcv_nxt += HEY_LEN;
     assert_eq!(
         connections.try_get()?,
         &cloned_state,
@@ -325,7 +325,7 @@ fn ack_for_unsent_data_is_dropped_and_gets_current_state_reply() -> Result {
     // seq_num == RCV.NXT, but ack_num=SERVER_ISN+20 is past SND.NXT=SERVER_ISN+1
     let reply = TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE,
-        ack_num: SERVER_ISN + 20,
+        ack_num: SERVER_ISN + SeqDist::new(20),
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     }
@@ -354,12 +354,12 @@ fn wraparound_ack_for_unsent_data_is_still_rejected() -> Result {
 
     let mut connections = TcpConnections::default();
     let initial_state = ConnState {
-        snd_nxt: u32::MAX,
-        snd_una: u32::MAX,
+        snd_nxt: SeqPoint::new(u32::MAX),
+        snd_una: SeqPoint::new(u32::MAX),
         window_state: Some(WindowState {
             snd_wnd: u16::MAX,
             snd_wl1: CLIENT_ISN + SYN_BYTE,
-            snd_wl2: u32::MAX,
+            snd_wl2: SeqPoint::new(u32::MAX),
         }),
         ..AFTER_HANDSHAKE
     };
@@ -371,7 +371,11 @@ fn wraparound_ack_for_unsent_data_is_still_rejected() -> Result {
 
     assert_eq!(
         reply,
-        Some(TcpHandler { seq_num: u32::MAX, ack_num: CLIENT_ISN + SYN_BYTE, ..SERVER_REPLY })
+        Some(TcpHandler {
+            seq_num: SeqPoint::new(u32::MAX),
+            ack_num: CLIENT_ISN + SYN_BYTE,
+            ..SERVER_REPLY
+        })
     );
 
     assert_eq!(connections.try_get()?, &initial_state, "State must be untouched");

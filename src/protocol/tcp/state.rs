@@ -2,9 +2,8 @@ use {
     crate::{
         Result,
         protocol::tcp::{
-            SendInfo, TcpFlags, TcpHandler, TcpPayload,
+            SendInfo, SeqDist, SeqPoint, TcpFlags, TcpHandler, TcpPayload,
             pending_segment::PendingSegment,
-            seq_space::{SeqLe as _, SeqLt as _},
         },
     },
     std::{collections::VecDeque, time::Instant},
@@ -17,13 +16,13 @@ pub(super) struct ConnState {
     pub(super) tcp_state: TcpState,
 
     /// "SND.NXT = next sequence number to be sent" (RFC 9293, Section 3.4).
-    pub(super) snd_nxt: u32,
+    pub(super) snd_nxt: SeqPoint,
 
     /// "RCV.NXT = next sequence number expected on an incoming segment" (RFC 9293, Section 3.4).
-    pub(super) rcv_nxt: u32,
+    pub(super) rcv_nxt: SeqPoint,
 
     /// "SND.UNA = oldest unacknowledged sequence number" (RFC 9293, Section 3.4).
-    pub(super) snd_una: u32,
+    pub(super) snd_una: SeqPoint,
 
     /// SND.WND, SND.WL1, and SND.WL2. Should be `None` until establishment, then always `Some`.
     pub(super) window_state: Option<WindowState>,
@@ -47,7 +46,7 @@ impl ConnState {
                 // State after the initial two-way exchange
                 tcp_state: TcpState::SynReceived,
                 // SYN-ACK consumes one sequence number
-                snd_nxt: send_info.seq_num.wrapping_add(1),
+                snd_nxt: send_info.seq_num + SeqDist::new(1),
                 // Our SYN-ACK's `ack_num` is the client's ISN + 1
                 rcv_nxt: send_info.ack_num,
                 // Our SYN-ACK is unacknowledged (this is our ISN)
@@ -75,13 +74,13 @@ impl ConnState {
             return Err("`incoming_ack_update` called with uninitialized window state");
         };
 
-        if self.snd_una.seq_le(seg.ack_num) && seg.ack_num.seq_le(self.snd_nxt) {
+        if self.snd_una <= seg.ack_num && seg.ack_num <= self.snd_nxt {
             // Include duplicate ACKs: SND.UNA <= SEG.ACK <= SND.NXT
             //     and
             // Guard against an old/reordered segment clobbering the window with stale data:
             //     SND.WL1 < SEG.SEQ or (SND.WL1 == SEG.SEQ and SND.WL2 <= SEG.ACK)
-            if window_state.snd_wl1.seq_lt(seg.seq_num)
-                || (window_state.snd_wl1 == seg.seq_num && window_state.snd_wl2.seq_le(seg.ack_num))
+            if window_state.snd_wl1 < seg.seq_num
+                || (window_state.snd_wl1 == seg.seq_num && window_state.snd_wl2 <= seg.ack_num)
             {
                 self.window_state = Some(WindowState {
                     snd_wnd: seg.window,
@@ -91,7 +90,7 @@ impl ConnState {
             }
 
             // Exclude duplicate ACKs: SND.UNA < SEG.ACK <= SND.NXT
-            if self.snd_una.seq_lt(seg.ack_num) {
+            if self.snd_una < seg.ack_num {
                 self.snd_una = seg.ack_num;
 
                 // ACKs are cumulative, so only keep pending segments not fully covered by SEG.ACK
@@ -111,8 +110,9 @@ impl ConnState {
             return Err("`drain_transmittable` called with uninitialized window state".into());
         };
 
-        let sent_but_not_acked = self.snd_nxt.wrapping_sub(self.snd_una);
-        let space_in_window = u32::from(window_state.snd_wnd).saturating_sub(sent_but_not_acked);
+        let sent_but_not_acked = self.snd_nxt - self.snd_una;
+        let space_in_window =
+            SeqDist::new(u32::from(window_state.snd_wnd)).saturating_sub(sent_but_not_acked);
         let bytes_to_send = usize::try_from(space_in_window)?.min(self.send_buffer.len());
 
         TcpPayload::try_from_iter(self.send_buffer.drain(..bytes_to_send)).map_err(Into::into)
@@ -200,12 +200,12 @@ pub(super) struct WindowState {
     ///
     /// Purely used for internal bookkeeping alongside `snd_wl2` to determine whether a window
     /// value is fresh or stale/reordered.
-    pub(super) snd_wl1: u32,
+    pub(super) snd_wl1: SeqPoint,
 
     /// SND.WL2. "segment acknowledgment number used for last window update" (RFC 9293, Section
     /// 3.3.1).
     ///
     /// Purely used for internal bookkeeping alongside `snd_wl1` to determine whether a window
     /// value is fresh or stale/reordered.
-    pub(super) snd_wl2: u32,
+    pub(super) snd_wl2: SeqPoint,
 }

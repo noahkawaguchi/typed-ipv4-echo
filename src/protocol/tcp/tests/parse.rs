@@ -18,8 +18,8 @@ fn correctly_parses_valid_packet() -> Result {
     let handler = TcpHandler::parse(&DATA, IP_PAIR)?;
 
     assert_eq!(handler.ports, PortPair { src: 1234, dst: 80 });
-    assert_eq!(handler.seq_num, 1);
-    assert_eq!(handler.ack_num, 2);
+    assert_eq!(handler.seq_num, SeqPoint::new(1));
+    assert_eq!(handler.ack_num, SeqPoint::new(2));
     assert_eq!(handler.offset_bytes, 20);
     assert_eq!(handler.flags, TcpFlags::SynAck);
     assert_eq!(handler.window, 29_200);
@@ -75,8 +75,8 @@ fn parsing_handles_large_sequence_numbers() -> Result {
 
     let handler = TcpHandler::parse(&DATA, IP_PAIR)?;
 
-    assert_eq!(handler.seq_num, u32::MAX);
-    assert_eq!(handler.ack_num, 0xFEDC_BA98);
+    assert_eq!(handler.seq_num, SeqPoint::new(u32::MAX));
+    assert_eq!(handler.ack_num, SeqPoint::new(0xFEDC_BA98));
 
     Ok(())
 }

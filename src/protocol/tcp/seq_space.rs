@@ -1,65 +1,160 @@
-pub(super) trait SeqLt {
-    /// Returns whether `self` precedes `rhs` in TCP sequence-number space, accounting for
-    /// wraparound (RFC 9293, Section 3.4).
-    fn seq_lt(self, rhs: Self) -> bool;
+use {
+    crate::protocol::display::ThousandsSeparated,
+    std::{
+        cmp::Ordering,
+        fmt,
+        num::{TryFromIntError, Wrapping},
+        ops::{Add, AddAssign, Sub},
+    },
+};
+
+/// A distance between two points in TCP sequence number space.
+#[derive(Clone, Copy)]
+pub(super) struct SeqDist(Wrapping<u32>);
+
+impl SeqDist {
+    pub(super) const fn new(primitive: u32) -> Self { Self(Wrapping(primitive)) }
+
+    pub(super) const fn saturating_sub(self, rhs: Self) -> Self {
+        Self(Wrapping(self.0.0.saturating_sub(rhs.0.0)))
+    }
 }
 
-impl SeqLt for u32 {
-    fn seq_lt(self, rhs: Self) -> bool { self.wrapping_sub(rhs) >= 1 << 31 }
+impl TryFrom<SeqDist> for usize {
+    type Error = TryFromIntError;
+
+    fn try_from(value: SeqDist) -> Result<Self, Self::Error> { Self::try_from(value.0.0) }
 }
 
-pub(super) trait SeqLe {
-    /// Returns whether `self` precedes or equals `rhs` in TCP sequence-number space, accounting for
-    /// wraparound (RFC 9293, Section 3.4).
-    fn seq_le(self, rhs: Self) -> bool;
+/// A specific point in TCP sequence number space.
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(test, derive(Debug))]
+pub(super) struct SeqPoint(Wrapping<u32>);
+
+impl SeqPoint {
+    pub(super) const fn new(primitive: u32) -> Self { Self(Wrapping(primitive)) }
+
+    pub(super) const fn to_be_bytes(self) -> [u8; 4] { self.0.0.to_be_bytes() }
 }
 
-impl SeqLe for u32 {
-    fn seq_le(self, rhs: Self) -> bool { self == rhs || self.seq_lt(rhs) }
+impl Add<SeqDist> for SeqPoint {
+    type Output = Self;
+
+    fn add(self, rhs: SeqDist) -> Self::Output { Self(self.0 + rhs.0) }
 }
 
-pub(super) trait AdvanceBy {
-    /// Like `wrapping_add`, but mutates `self` in place to avoid potentially verbose and
-    /// error-prone reassignments. In other words, advances `self` by `rhs` in TCP sequence-number
-    /// space.
-    fn advance_by(&mut self, rhs: Self);
+impl AddAssign<SeqDist> for SeqPoint {
+    fn add_assign(&mut self, rhs: SeqDist) { *self = *self + rhs; }
 }
 
-impl AdvanceBy for u32 {
-    fn advance_by(&mut self, rhs: Self) { *self = self.wrapping_add(rhs) }
+impl Sub for SeqPoint {
+    type Output = SeqDist;
+
+    fn sub(self, rhs: Self) -> Self::Output { SeqDist(self.0 - rhs.0) }
+}
+
+impl PartialOrd for SeqPoint {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        /// Exactly halfway around 32-bit sequence number space.
+        const SEMICIRCUMFERENCE: u32 = 1 << 31;
+
+        /// One more than halfway around 32-bit sequence number space.
+        const SEMICIRCUMFERENCE_PLUS_1: u32 = SEMICIRCUMFERENCE + 1;
+
+        match (self.0 - other.0).0 {
+            0 => Some(Ordering::Equal),
+            1..SEMICIRCUMFERENCE => Some(Ordering::Greater),
+            SEMICIRCUMFERENCE => None,
+            SEMICIRCUMFERENCE_PLUS_1.. => Some(Ordering::Less),
+        }
+    }
+}
+
+impl fmt::Display for ThousandsSeparated<SeqPoint> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", ThousandsSeparated(self.0.0.0))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    impl SeqDist {
+        pub(in super::super) const fn const_add(self, rhs: Self) -> Self {
+            Self(Wrapping(self.0.0.wrapping_add(rhs.0.0)))
+        }
+    }
+
+    impl Add for SeqDist {
+        type Output = Self;
+
+        fn add(self, rhs: Self) -> Self::Output { Self(self.0 + rhs.0) }
+    }
+
+    impl SeqPoint {
+        pub(in super::super) const fn const_add(self, rhs: SeqDist) -> Self {
+            Self(Wrapping(self.0.0.wrapping_add(rhs.0.0)))
+        }
+
+        pub(in super::super) const fn const_sub(self, rhs: SeqDist) -> Self {
+            Self(Wrapping(self.0.0.wrapping_sub(rhs.0.0)))
+        }
+
+        /// Leaks the inner primitive type for use in test constants. This should be removed once
+        /// const traits are stabilized.
+        pub(in super::super) const fn leak_primitive(self) -> u32 { self.0.0 }
+    }
+
+    impl Sub<SeqDist> for SeqPoint {
+        type Output = Self;
+
+        fn sub(self, rhs: SeqDist) -> Self::Output { Self(self.0 - rhs.0) }
+    }
+
     #[test]
-    fn equalities() {
-        for num in [0, 1, 42, 1 << 31, u32::MAX] {
-            assert!(!num.seq_lt(num));
-            assert!(num.seq_le(num));
+    fn equality() {
+        for num in [0, 1, 42, 1 << 31, u32::MAX].map(SeqPoint::new) {
+            assert_eq!(num, num);
         }
     }
 
     #[test]
-    #[expect(clippy::nonminimal_bool, reason = "Keep linear and circular comparisons parallel")]
+    fn inequality() {
+        for [left, right] in [0, 1, 42, 1 << 31, u32::MAX]
+            .map(SeqPoint::new)
+            .array_windows::<2>()
+        {
+            assert_ne!(left, right);
+            assert_ne!(right, left);
+        }
+    }
+
+    #[test]
     fn agrees_with_linear_comparison_over_half_the_space() {
         for [left, right] in [[0, 1], [42, 1 << 31], [0xBEEF_CAFE, 0xCAFE_BEEF]] {
-            assert!(left.seq_lt(right) && left < right);
-            assert!(left.seq_le(right) && left <= right);
-            assert!(!right.seq_lt(left) && !(right < left));
-            assert!(!right.seq_le(left) && !(right <= left));
+            assert_eq!(
+                SeqPoint::new(left).partial_cmp(&SeqPoint::new(right)),
+                left.partial_cmp(&right)
+            );
+            assert_eq!(
+                SeqPoint::new(right).partial_cmp(&SeqPoint::new(left)),
+                right.partial_cmp(&left)
+            );
         }
     }
 
     #[test]
-    #[expect(clippy::nonminimal_bool, reason = "Keep linear and circular comparisons parallel")]
     fn differs_from_linear_comparison_over_half_the_space() {
         for [left, right] in [[u32::MAX, 0], [(1 << 31) + 42, 1], [0xBAAD_D00D, 0xD00D]] {
-            assert!(left.seq_lt(right) && !(left < right));
-            assert!(left.seq_le(right) && !(left <= right));
-            assert!(!right.seq_lt(left) && right < left);
-            assert!(!right.seq_le(left) && right <= left);
+            assert_ne!(
+                SeqPoint::new(left).partial_cmp(&SeqPoint::new(right)),
+                left.partial_cmp(&right)
+            );
+            assert_ne!(
+                SeqPoint::new(right).partial_cmp(&SeqPoint::new(left)),
+                right.partial_cmp(&left)
+            );
         }
     }
 
@@ -71,25 +166,18 @@ mod tests {
         // In TCP, sequence numbers of actual segments should never be this far away from each other
         // due to window sizes. Tested here for correctness and to avoid off-by-one errors.
 
-        const NUM: u32 = 42;
-        const ANTIPODE: u32 = NUM.wrapping_add(1 << 31);
-        const FARTHEST_GREATER: u32 = ANTIPODE.wrapping_sub(1);
-        const FARTHEST_LESS: u32 = ANTIPODE.wrapping_add(1);
+        const NUM: SeqPoint = SeqPoint::new(42);
+        const ANTIPODE: SeqPoint = NUM.const_add(SeqDist::new(1 << 31));
+        const FARTHEST_GREATER: SeqPoint = ANTIPODE.const_sub(SeqDist::new(1));
+        const FARTHEST_LESS: SeqPoint = ANTIPODE.const_add(SeqDist::new(1));
+
+        assert!(FARTHEST_GREATER > NUM, "The first defined comparison one below the antipode");
+        assert!(FARTHEST_LESS < NUM, "The first defined comparison one above the antipode");
 
         assert!(
-            NUM.seq_lt(FARTHEST_GREATER) && !FARTHEST_GREATER.seq_lt(NUM),
-            "The first defined comparison one below the antipode"
-        );
-
-        assert!(
-            FARTHEST_LESS.seq_lt(NUM) && !NUM.seq_lt(FARTHEST_LESS),
-            "The first defined comparison one above the antipode"
-        );
-
-        assert!(
-            NUM.seq_lt(ANTIPODE) && ANTIPODE.seq_lt(NUM),
+            !(NUM < ANTIPODE || ANTIPODE < NUM || NUM == ANTIPODE),
             "The undefined outcome where a number and its antipode are both strictly less than \
-             the other depends on the implementation and should result in true here"
+             the other depends on the implementation and should result in false here"
         );
     }
 }

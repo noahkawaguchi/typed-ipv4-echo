@@ -38,8 +38,8 @@ fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result {
         "Only the first 3 bytes fit in the advertised window of 3"
     );
 
-    expected_state.snd_nxt.advance_by(3);
-    expected_state.rcv_nxt.advance_by(HELLO_LEN);
+    expected_state.snd_nxt += SeqDist::new(3);
+    expected_state.rcv_nxt += HELLO_LEN;
     expected_state.send_buffer.extend(b"lo");
 
     assert_eq!(
@@ -53,6 +53,8 @@ fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result {
 
 #[test]
 fn window_opening_via_ack_drains_buffered_remainder() -> Result {
+    const HEL_LEN: SeqDist = SeqDist::new(3);
+
     let mut connections = TcpConnections::default();
     let mut expected_state = after_handshake_with_snd_wnd(3);
     connections.insert(expected_state.clone());
@@ -67,8 +69,8 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
     }
     .create_reply(&mut connections)?;
 
-    expected_state.snd_nxt.advance_by(3);
-    expected_state.rcv_nxt.advance_by(HELLO_LEN);
+    expected_state.snd_nxt += HEL_LEN;
+    expected_state.rcv_nxt += HELLO_LEN;
     expected_state.send_buffer.extend(b"lo");
 
     assert_eq!(connections.try_get()?, &expected_state, "State confirmation before window update");
@@ -76,7 +78,7 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
     // Client acks the 3 sent bytes and advertises a bigger window -> should drain "lo"
     let window_update = TcpHandler {
         seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-        ack_num: SERVER_ISN + SYN_BYTE + 3,
+        ack_num: SERVER_ISN + SYN_BYTE + HEL_LEN,
         window: 10,
         ..CLIENT_PACKET
     };
@@ -86,7 +88,7 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
     assert_eq!(
         reply,
         Some(TcpHandler {
-            seq_num: SERVER_ISN + SYN_BYTE + 3,
+            seq_num: SERVER_ISN + SYN_BYTE + HEL_LEN,
             ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
             payload: payload_from("lo")?,
             ..SERVER_REPLY
@@ -94,8 +96,8 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
         "The buffered remainder should drain once the window opens, piggybacked on the next ACK"
     );
 
-    expected_state.snd_una.advance_by(3);
-    expected_state.snd_nxt.advance_by(2);
+    expected_state.snd_una += HEL_LEN;
+    expected_state.snd_nxt += SeqDist::new(2);
     expected_state.window_state = Some(WindowState {
         snd_wnd: 10,
         snd_wl1: window_update.seq_num,
@@ -137,7 +139,7 @@ fn zero_window_buffers_entire_payload_and_gets_bare_ack() -> Result {
         "A closed window still gets a bare ACK for the receipt, just no echoed payload"
     );
 
-    expected_state.rcv_nxt.advance_by(HELLO_LEN);
+    expected_state.rcv_nxt += HELLO_LEN;
     expected_state.send_buffer.extend(b"Hello");
 
     assert_eq!(

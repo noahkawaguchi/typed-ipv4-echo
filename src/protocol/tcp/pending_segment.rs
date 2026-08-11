@@ -1,5 +1,5 @@
 use {
-    crate::protocol::tcp::{SendInfo, TcpFlags, seq_space::SeqLe as _},
+    crate::protocol::tcp::{SendInfo, SeqDist, SeqPoint, TcpFlags},
     std::time::{Duration, Instant},
 };
 
@@ -12,7 +12,7 @@ pub(super) struct PendingSegment {
     /// The sequence number one past the last byte/flag consumed by the segment (`seq_num +
     /// consumed`, e.g. `seq_num + 1` for a SYN/FIN, `seq_num + payload.len()` for data). Compared
     /// against an incoming `ack_num` to tell whether the segment has been fully acknowledged.
-    end_seq: u32,
+    end_seq: SeqPoint,
 
     /// The last time at which the segment was sent.
     last_sent_at: Instant,
@@ -28,12 +28,12 @@ impl PendingSegment {
         let end_seq = send_info
             .seq_num
             // Any SYN/FIN consumes a single phantom byte
-            .wrapping_add(u32::from(matches!(
+            + SeqDist::new(u32::from(matches!(
                 send_info.flags,
                 TcpFlags::Syn | TcpFlags::SynAck | TcpFlags::FinAck
             )))
             // A payload consumes the number of bytes in the payload
-            .wrapping_add(u32::from(send_info.payload.as_ref().map_or(0, |p| p.len().get())));
+            + SeqDist::new(u32::from(send_info.payload.as_ref().map_or(0, |p| p.len().get())));
 
         Self { send_info, end_seq, last_sent_at: sent_at, retries: 0 }
     }
@@ -55,7 +55,7 @@ impl PendingSegment {
     }
 
     /// Returns whether the segment is fully covered by `ack_num`.
-    pub(super) fn is_covered_by(&self, ack_num: u32) -> bool { self.end_seq.seq_le(ack_num) }
+    pub(super) fn is_covered_by(&self, ack_num: SeqPoint) -> bool { self.end_seq <= ack_num }
 
     /// Returns whether the segment has been retried at least `max_retries` times.
     pub(super) const fn exhausted_retries(&self, max_retries: u8) -> bool {
@@ -87,8 +87,8 @@ mod tests {
         assert!(
             PendingSegment::new(
                 SendInfo {
-                    seq_num: 42,
-                    ack_num: 24,
+                    seq_num: SeqPoint::new(42),
+                    ack_num: SeqPoint::new(24),
                     flags: TcpFlags::Ack,
                     payload: payload_from("Hello")?
                 },

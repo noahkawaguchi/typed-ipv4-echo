@@ -12,8 +12,12 @@ fn stray_syn_out_of_window_gets_challenge_ack() -> Result {
 
     // seq=CLIENT_ISN-20 < rcv_nxt=CLIENT_ISN+1, outside the receive window, caught at "First, check
     // sequence number"
-    let reply = TcpHandler { seq_num: CLIENT_ISN - 20, flags: TcpFlags::Syn, ..CLIENT_PACKET }
-        .create_reply(&mut connections)?;
+    let reply = TcpHandler {
+        seq_num: CLIENT_ISN - SeqDist::new(20),
+        flags: TcpFlags::Syn,
+        ..CLIENT_PACKET
+    }
+    .create_reply(&mut connections)?;
 
     assert_eq!(
         reply,

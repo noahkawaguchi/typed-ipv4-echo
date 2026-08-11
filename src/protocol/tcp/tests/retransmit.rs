@@ -40,12 +40,8 @@ fn pending_segment_is_cleared_once_acked() -> Result {
     let isn = connections.try_get()?.snd_una;
 
     // Handshake ACK completes the connection and should clear the pending SYN-ACK
-    TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE,
-        ack_num: isn.wrapping_add(SYN_BYTE),
-        ..CLIENT_PACKET
-    }
-    .create_reply(&mut connections)?;
+    TcpHandler { seq_num: CLIENT_ISN + SYN_BYTE, ack_num: isn + SYN_BYTE, ..CLIENT_PACKET }
+        .create_reply(&mut connections)?;
 
     assert!(
         connections.make_retransmissions().is_empty(),

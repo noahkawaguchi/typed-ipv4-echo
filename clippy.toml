@@ -1,0 +1,5 @@
+arithmetic-side-effects-allowed-binary = [
+    ["protocol::tcp::seq_space::SeqPoint", "protocol::tcp::seq_space::SeqDist"],
+    ["protocol::tcp::seq_space::SeqPoint", "protocol::tcp::seq_space::SeqPoint"],
+    ["protocol::tcp::seq_space::SeqDist", "protocol::tcp::seq_space::SeqDist"],
+]

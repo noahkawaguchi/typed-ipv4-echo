@@ -3,8 +3,7 @@ use {
         Result,
         addr_pairs::{Ipv4AddrPair, PortPair},
         protocol::tcp::{
-            PendingSegment, SendInfo, TcpFlags, TcpHandler,
-            seq_space::AdvanceBy as _,
+            PendingSegment, SendInfo, SeqDist, TcpFlags, TcpHandler,
             state::{ConnState, TcpState},
         },
     },
@@ -154,7 +153,7 @@ impl TcpConnections {
                 conn.tcp_state = TcpState::FinWait1;
 
                 // Consume one sequence number in SND.NXT for the FIN about to be sent
-                conn.snd_nxt.advance_by(1);
+                conn.snd_nxt += SeqDist::new(1);
 
                 conn.pending
                     .push(PendingSegment::new(send_info.clone(), now));

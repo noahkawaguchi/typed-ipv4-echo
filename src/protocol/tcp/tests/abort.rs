@@ -1,6 +1,6 @@
 use super::*;
 
-fn client_rst(seq_num: u32) -> TcpHandler {
+fn client_rst(seq_num: SeqPoint) -> TcpHandler {
     TcpHandler { seq_num, flags: TcpFlags::Rst, ..CLIENT_PACKET }
 }
 
@@ -26,7 +26,7 @@ fn rst_in_established_within_window_but_not_at_rcv_nxt_gets_challenge_ack() -> R
 
     // seq_num=CLIENT_ISN+4 is inside the receive window [CLIENT_ISN+1, CLIENT_ISN+1+RCV.WND), but
     // seq_num=CLIENT_ISN+4 != rcv_nxt=CLIENT_ISN+1
-    let reply = client_rst(CLIENT_ISN + 4).create_reply(&mut connections)?;
+    let reply = client_rst(CLIENT_ISN + SeqDist::new(4)).create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
@@ -59,7 +59,7 @@ fn rst_in_established_with_out_of_window_seq_is_silently_dropped() -> Result {
     // seq_num=CLIENT_ISN-10 is just below rcv_nxt=CLIENT_ISN+1, so this RST is outside the receive
     // window
     assert_eq!(
-        client_rst(CLIENT_ISN - 10).create_reply(&mut connections)?,
+        client_rst(CLIENT_ISN - SeqDist::new(10)).create_reply(&mut connections)?,
         None,
         "Out-of-window RST should be silently dropped"
     );
@@ -95,7 +95,7 @@ fn rst_in_syn_received_with_out_of_window_seq_is_silently_dropped() -> Result {
     // seq_num=CLIENT_ISN-10 is just below rcv_nxt=CLIENT_ISN+1, so this RST is outside the receive
     // window
     assert_eq!(
-        client_rst(CLIENT_ISN - 10).create_reply(&mut connections)?,
+        client_rst(CLIENT_ISN - SeqDist::new(10)).create_reply(&mut connections)?,
         None,
         "Out-of-window RST should be silently dropped"
     );
@@ -121,7 +121,7 @@ fn rst_in_syn_received_within_window_but_not_at_rcv_nxt_gets_challenge_ack() -> 
 
     // seq_num=CLIENT_ISN+4 is inside the receive window [CLIENT_ISN+1, CLIENT_ISN+1+RCV.WND), but
     // seq_num=CLIENT_ISN+4 != rcv_nxt=CLIENT_ISN+1
-    let reply = client_rst(CLIENT_ISN + 4).create_reply(&mut connections)?;
+    let reply = client_rst(CLIENT_ISN + SeqDist::new(4)).create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
