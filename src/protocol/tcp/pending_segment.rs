@@ -1,5 +1,5 @@
 use {
-    crate::protocol::tcp::{SendInfo, SeqDist, SeqPoint, TcpFlags},
+    crate::protocol::tcp::{SendInfo, SeqDist, SeqPoint, TcpFlags, payload::LenOrDefault as _},
     std::time::{Duration, Instant},
 };
 
@@ -33,7 +33,7 @@ impl PendingSegment {
                 TcpFlags::Syn | TcpFlags::SynAck | TcpFlags::FinAck
             )))
             // A payload consumes the number of bytes in the payload
-            + send_info.payload.as_ref().map_or_else(|| SeqDist::new(0), |p| p.len().into());
+            + send_info.payload.len_or_default();
 
         Self { send_info, end_seq, last_sent_at: sent_at, retries: 0 }
     }

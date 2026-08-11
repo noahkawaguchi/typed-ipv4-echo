@@ -9,7 +9,7 @@ use {
 };
 
 /// A distance between two points in TCP sequence number space.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 pub(super) struct SeqDist<T>(Wrapping<T>);
 

@@ -3,6 +3,19 @@ use {
     std::{iter, num::NonZeroU16, rc::Rc},
 };
 
+pub(super) trait LenOrDefault<T: Default> {
+    /// Returns the length of `self` as a `T` if defined, otherwise returns the default value of
+    /// `T`.
+    fn len_or_default(&self) -> T;
+}
+
+impl<T: Default + From<NonZeroU16>> LenOrDefault<T> for Option<TcpPayload> {
+    fn len_or_default(&self) -> T {
+        self.as_ref()
+            .map_or_else(Default::default, |p| p.len().into())
+    }
+}
+
 /// A payload of bytes guaranteed to have a length in the range of `NonZeroU16`.
 #[derive(Clone)]
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]

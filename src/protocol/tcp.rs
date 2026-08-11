@@ -19,7 +19,7 @@ use {
             tcp::{
                 connections::ConnKey,
                 flags::TcpFlags,
-                payload::TcpPayload,
+                payload::{LenOrDefault as _, TcpPayload},
                 pending_segment::PendingSegment,
                 seq_space::{SeqDist, SeqPoint},
                 state::{ConnState, TcpState, WindowState},
@@ -349,9 +349,7 @@ impl TcpHandler {
                 conn.tcp_state = TcpState::LastAck;
 
                 let to_send = conn.drain_transmittable()?;
-                let send_len = to_send
-                    .as_ref()
-                    .map_or_else(|| SeqDist::new(0), |payload| payload.len().into());
+                let send_len = to_send.len_or_default();
 
                 let send_info = SendInfo {
                     seq_num: conn.snd_nxt,
@@ -425,9 +423,7 @@ impl TcpHandler {
                 TcpFlags::FinAck,
                 maybe_payload,
             ) if self.seq_num == conn.rcv_nxt => {
-                if let Some(payload) = maybe_payload {
-                    conn.rcv_nxt += payload.len().into();
-                }
+                conn.rcv_nxt += maybe_payload.len_or_default();
 
                 // Consume one sequence number in RCV.NXT for the peer's FIN
                 conn.rcv_nxt += FIN_BYTE;
@@ -454,11 +450,10 @@ impl TcpHandler {
             ) if self.seq_num == rcv_nxt => {
                 connections.remove(&key);
 
-                let payload_len = maybe_payload
-                    .as_ref()
-                    .map_or_else(|| SeqDist::new(0), |payload| payload.len().into());
-
-                Some(SendInfo::pure_ack(snd_nxt, rcv_nxt + payload_len + FIN_BYTE))
+                Some(SendInfo::pure_ack(
+                    snd_nxt,
+                    rcv_nxt + maybe_payload.len_or_default() + FIN_BYTE,
+                ))
             }
 
             // CLOSING (simultaneous close), the remote peer's ACK of our FIN arrives -> fully
