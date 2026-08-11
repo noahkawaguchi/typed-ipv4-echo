@@ -3,7 +3,7 @@ use {
     std::{
         cmp::Ordering,
         fmt,
-        num::Wrapping,
+        num::{NonZeroU16, Wrapping},
         ops::{Add, AddAssign, Sub},
     },
 };
@@ -19,6 +19,10 @@ impl<T> SeqDist<T> {
 
 impl From<SeqDist<u16>> for SeqDist<u32> {
     fn from(value: SeqDist<u16>) -> Self { Self(Wrapping(value.0.0.into())) }
+}
+
+impl<T: From<u16>> From<NonZeroU16> for SeqDist<T> {
+    fn from(value: NonZeroU16) -> Self { Self(Wrapping(value.get().into())) }
 }
 
 impl SeqDist<u16> {

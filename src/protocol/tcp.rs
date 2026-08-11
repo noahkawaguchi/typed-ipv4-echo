@@ -264,7 +264,7 @@ impl TcpHandler {
                 maybe_payload
                     .as_ref()
                     .map(|payload| {
-                        conn.rcv_nxt += SeqDist::new(u32::from(payload.len().get()));
+                        conn.rcv_nxt += payload.len().into();
                         conn.send_buffer.extend(payload.as_bytes().iter());
 
                         conn.drain_transmittable()
@@ -306,10 +306,8 @@ impl TcpHandler {
                 TcpFlags::Ack,
                 Some(payload),
             ) if self.seq_num == conn.rcv_nxt => {
-                let payload_len = u32::from(payload.len().get());
-
                 conn.incoming_ack_update(self)?;
-                conn.rcv_nxt += SeqDist::new(payload_len);
+                conn.rcv_nxt += payload.len().into();
                 conn.send_buffer.extend(payload.as_bytes().iter());
 
                 Some(match conn.drain_transmittable()? {
@@ -343,7 +341,7 @@ impl TcpHandler {
                 conn.incoming_ack_update(self)?;
 
                 if let Some(payload) = maybe_payload {
-                    conn.rcv_nxt += SeqDist::new(u32::from(payload.len().get()));
+                    conn.rcv_nxt += payload.len().into();
                     conn.send_buffer.extend(payload.as_bytes().iter());
                 }
 
@@ -353,7 +351,7 @@ impl TcpHandler {
                 let to_send = conn.drain_transmittable()?;
                 let send_len = to_send
                     .as_ref()
-                    .map_or(0, |payload| u32::from(payload.len().get()));
+                    .map_or_else(|| SeqDist::new(0), |payload| payload.len().into());
 
                 let send_info = SendInfo {
                     seq_num: conn.snd_nxt,
@@ -362,7 +360,7 @@ impl TcpHandler {
                     payload: to_send,
                 };
 
-                conn.snd_nxt += SeqDist::new(send_len);
+                conn.snd_nxt += send_len;
                 conn.snd_nxt += FIN_BYTE; // Our FIN consumes one sequence number
 
                 conn.pending
@@ -399,7 +397,7 @@ impl TcpHandler {
                 TcpFlags::Ack,
                 Some(payload),
             ) if self.seq_num == conn.rcv_nxt => {
-                conn.rcv_nxt += SeqDist::new(u32::from(payload.len().get()));
+                conn.rcv_nxt += payload.len().into();
 
                 let send_info = SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt);
                 conn.incoming_ack_update(self)?;
@@ -428,7 +426,7 @@ impl TcpHandler {
                 maybe_payload,
             ) if self.seq_num == conn.rcv_nxt => {
                 if let Some(payload) = maybe_payload {
-                    conn.rcv_nxt += SeqDist::new(u32::from(payload.len().get()));
+                    conn.rcv_nxt += payload.len().into();
                 }
 
                 // Consume one sequence number in RCV.NXT for the peer's FIN
@@ -458,9 +456,9 @@ impl TcpHandler {
 
                 let payload_len = maybe_payload
                     .as_ref()
-                    .map_or(0, |payload| u32::from(payload.len().get()));
+                    .map_or_else(|| SeqDist::new(0), |payload| payload.len().into());
 
-                Some(SendInfo::pure_ack(snd_nxt, rcv_nxt + SeqDist::new(payload_len) + FIN_BYTE))
+                Some(SendInfo::pure_ack(snd_nxt, rcv_nxt + payload_len + FIN_BYTE))
             }
 
             // CLOSING (simultaneous close), the remote peer's ACK of our FIN arrives -> fully
@@ -518,7 +516,7 @@ impl TcpHandler {
 
     /// Creates a `SendInfo` for the payload `to_send`, using and then updating the state of `conn`.
     fn data_payload(conn: &mut ConnState, to_send: TcpPayload) -> SendInfo {
-        let send_len = u32::from(to_send.len().get());
+        let send_len = to_send.len().into();
 
         let send_info = SendInfo {
             seq_num: conn.snd_nxt,
@@ -527,7 +525,7 @@ impl TcpHandler {
             payload: Some(to_send),
         };
 
-        conn.snd_nxt += SeqDist::new(send_len);
+        conn.snd_nxt += send_len;
         conn.pending
             .push(PendingSegment::new(send_info.clone(), Instant::now()));
 

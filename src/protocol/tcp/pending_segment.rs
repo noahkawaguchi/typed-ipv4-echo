@@ -33,7 +33,7 @@ impl PendingSegment {
                 TcpFlags::Syn | TcpFlags::SynAck | TcpFlags::FinAck
             )))
             // A payload consumes the number of bytes in the payload
-            + SeqDist::new(u32::from(send_info.payload.as_ref().map_or(0, |p| p.len().get())));
+            + send_info.payload.as_ref().map_or_else(|| SeqDist::new(0), |p| p.len().into());
 
         Self { send_info, end_seq, last_sent_at: sent_at, retries: 0 }
     }
