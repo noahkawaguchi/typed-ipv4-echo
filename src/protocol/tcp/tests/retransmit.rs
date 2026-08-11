@@ -20,7 +20,7 @@ fn syn_ack_is_resent_while_due() -> Result {
         reply,
         TcpHandler {
             seq_num: isn,
-            ack_num: CLIENT_ISN + SYN_BYTE,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
             flags: TcpFlags::SynAck,
             ..SERVER_REPLY
         }
@@ -40,8 +40,12 @@ fn pending_segment_is_cleared_once_acked() -> Result {
     let isn = connections.try_get()?.snd_una;
 
     // Handshake ACK completes the connection and should clear the pending SYN-ACK
-    TcpHandler { seq_num: CLIENT_ISN + SYN_BYTE, ack_num: isn + SYN_BYTE, ..CLIENT_PACKET }
-        .create_reply(&mut connections)?;
+    TcpHandler {
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
+        ack_num: isn + LOCAL_SYN_BYTE,
+        ..CLIENT_PACKET
+    }
+    .create_reply(&mut connections)?;
 
     assert!(
         connections.make_retransmissions().is_empty(),
@@ -56,8 +60,8 @@ fn data_echo_is_resent_unchanged() -> Result {
     let mut connections = TcpConnections::new(Duration::ZERO, 5).after_handshake();
 
     TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE,
-        ack_num: SERVER_ISN + SYN_BYTE,
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     }
@@ -70,8 +74,8 @@ fn data_echo_is_resent_unchanged() -> Result {
     assert_eq!(
         reply,
         TcpHandler {
-            seq_num: SERVER_ISN + SYN_BYTE,
-            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
             payload: payload_from("Hello")?,
             ..SERVER_REPLY
         }
@@ -92,8 +96,8 @@ fn fin_ack_is_resent_unchanged() -> Result {
     assert_eq!(
         reply,
         TcpHandler {
-            seq_num: SERVER_ISN + SYN_BYTE,
-            ack_num: CLIENT_ISN + SYN_BYTE,
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
             flags: TcpFlags::FinAck,
             ..SERVER_REPLY
         }
@@ -112,8 +116,8 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result {
     // First data packet: "Hello" (5 bytes), ack=SERVER_ISN+1 -> echoed, pending segment
     // seq=SERVER_ISN+1..SERVER_ISN+6
     TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE,
-        ack_num: SERVER_ISN + SYN_BYTE,
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     }
@@ -122,8 +126,8 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result {
     // Second data packet: "Hi" (2 bytes), still ack=SERVER_ISN+1 (hasn't acked the first echo yet)
     // -> echoed, pending segment seq=SERVER_ISN+6..SERVER_ISN+8
     TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-        ack_num: SERVER_ISN + SYN_BYTE,
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: payload_from("Hi")?,
         ..CLIENT_PACKET
     }
@@ -137,8 +141,8 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result {
     assert_eq!(
         hello,
         TcpHandler {
-            seq_num: SERVER_ISN + SYN_BYTE,
-            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
             payload: payload_from("Hello")?,
             ..SERVER_REPLY
         }
@@ -147,8 +151,8 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result {
     assert_eq!(
         hi,
         TcpHandler {
-            seq_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
-            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_HI_LEN,
             payload: payload_from("Hi")?,
             ..SERVER_REPLY
         }
@@ -187,8 +191,8 @@ fn retransmissions_back_off_exponentially() -> Result {
     let mut connections = TcpConnections::new(Duration::from_millis(10), 3).after_handshake();
 
     TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE,
-        ack_num: SERVER_ISN + SYN_BYTE,
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     }

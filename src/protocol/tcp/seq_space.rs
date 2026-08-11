@@ -9,45 +9,63 @@ use {
     },
 };
 
-/// A distance between two points in TCP sequence number space.
-#[derive(Clone, Copy, Default)]
+/// A distance between two points in TCP sequence number space that are both in direction `D`.
+#[derive(Default)]
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
-pub(super) struct SeqDist<T> {
+pub(super) struct SeqDist<T, D> {
     wrapping: Wrapping<T>,
+    phantom: PhantomData<D>,
 }
 
-impl<T> SeqDist<T> {
-    pub(super) const fn new(primitive: T) -> Self { Self { wrapping: Wrapping(primitive) } }
+impl<T: Copy, D> Clone for SeqDist<T, D> {
+    fn clone(&self) -> Self { *self }
 }
 
-impl From<SeqDist<u16>> for SeqDist<u32> {
-    fn from(value: SeqDist<u16>) -> Self { Self { wrapping: Wrapping(value.wrapping.0.into()) } }
-}
+impl<T: Copy, D> Copy for SeqDist<T, D> {}
 
-impl<T: From<u16>> From<NonZeroU16> for SeqDist<T> {
-    fn from(value: NonZeroU16) -> Self { Self { wrapping: Wrapping(value.get().into()) } }
-}
-
-impl SeqDist<u16> {
-    pub(super) const fn to_be_bytes(self) -> [u8; 2] { self.wrapping.0.to_be_bytes() }
-}
-
-impl SeqDist<u32> {
-    pub(super) const fn saturating_sub(self, rhs: Self) -> Self {
-        Self { wrapping: Wrapping(self.wrapping.0.saturating_sub(rhs.wrapping.0)) }
+impl<T, D> SeqDist<T, D> {
+    pub(super) const fn new(primitive: T) -> Self {
+        Self { wrapping: Wrapping(primitive), phantom: PhantomData }
     }
 }
 
-impl<T> TryFrom<SeqDist<T>> for usize
+impl<D> From<SeqDist<u16, D>> for SeqDist<u32, D> {
+    fn from(value: SeqDist<u16, D>) -> Self {
+        Self { wrapping: Wrapping(value.wrapping.0.into()), phantom: PhantomData }
+    }
+}
+
+impl<T: From<u16>, D> From<NonZeroU16> for SeqDist<T, D> {
+    fn from(value: NonZeroU16) -> Self {
+        Self { wrapping: Wrapping(value.get().into()), phantom: PhantomData }
+    }
+}
+
+impl<D> SeqDist<u16, D> {
+    pub(super) const fn to_be_bytes(self) -> [u8; 2] { self.wrapping.0.to_be_bytes() }
+}
+
+impl<D> SeqDist<u32, D> {
+    pub(super) const fn saturating_sub(self, rhs: Self) -> Self {
+        Self {
+            wrapping: Wrapping(self.wrapping.0.saturating_sub(rhs.wrapping.0)),
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<T, D> TryFrom<SeqDist<T, D>> for usize
 where
     Self: TryFrom<T>,
 {
     type Error = <Self as TryFrom<T>>::Error;
 
-    fn try_from(value: SeqDist<T>) -> Result<Self, Self::Error> { Self::try_from(value.wrapping.0) }
+    fn try_from(value: SeqDist<T, D>) -> Result<Self, Self::Error> {
+        Self::try_from(value.wrapping.0)
+    }
 }
 
-impl<T> fmt::Display for ThousandsSeparated<SeqDist<T>>
+impl<T, D> fmt::Display for ThousandsSeparated<SeqDist<T, D>>
 where
     T: Copy,
     ThousandsSeparated<T>: fmt::Display,
@@ -83,22 +101,24 @@ impl<D> SeqPoint<D> {
     pub(super) const fn to_be_bytes(self) -> [u8; 4] { self.wrapping.0.to_be_bytes() }
 }
 
-impl<D> Add<SeqDist<u32>> for SeqPoint<D> {
+impl<D> Add<SeqDist<u32, D>> for SeqPoint<D> {
     type Output = Self;
 
-    fn add(self, rhs: SeqDist<u32>) -> Self::Output {
+    fn add(self, rhs: SeqDist<u32, D>) -> Self::Output {
         Self { wrapping: self.wrapping + rhs.wrapping, phantom: PhantomData }
     }
 }
 
-impl<D> AddAssign<SeqDist<u32>> for SeqPoint<D> {
-    fn add_assign(&mut self, rhs: SeqDist<u32>) { *self = *self + rhs; }
+impl<D> AddAssign<SeqDist<u32, D>> for SeqPoint<D> {
+    fn add_assign(&mut self, rhs: SeqDist<u32, D>) { *self = *self + rhs; }
 }
 
 impl<D> Sub for SeqPoint<D> {
-    type Output = SeqDist<u32>;
+    type Output = SeqDist<u32, D>;
 
-    fn sub(self, rhs: Self) -> Self::Output { SeqDist { wrapping: self.wrapping - rhs.wrapping } }
+    fn sub(self, rhs: Self) -> Self::Output {
+        SeqDist { wrapping: self.wrapping - rhs.wrapping, phantom: PhantomData }
+    }
 }
 
 impl<D> PartialOrd for SeqPoint<D> {
@@ -128,30 +148,37 @@ impl<D> fmt::Display for ThousandsSeparated<SeqPoint<D>> {
 mod tests {
     use {super::*, crate::protocol::Local};
 
-    impl SeqDist<u32> {
+    impl<D> SeqDist<u32, D> {
         pub(in super::super) const fn const_add(self, rhs: Self) -> Self {
-            Self { wrapping: Wrapping(self.wrapping.0.wrapping_add(rhs.wrapping.0)) }
+            Self {
+                wrapping: Wrapping(self.wrapping.0.wrapping_add(rhs.wrapping.0)),
+                phantom: PhantomData,
+            }
         }
     }
 
-    impl Add for SeqDist<u32> {
+    impl<D> Add for SeqDist<u32, D> {
         type Output = Self;
 
-        fn add(self, rhs: Self) -> Self::Output { Self { wrapping: self.wrapping + rhs.wrapping } }
+        fn add(self, rhs: Self) -> Self::Output {
+            Self { wrapping: self.wrapping + rhs.wrapping, phantom: PhantomData }
+        }
     }
 
-    impl Sub for SeqDist<u32> {
+    impl<D> Sub for SeqDist<u32, D> {
         type Output = Self;
 
-        fn sub(self, rhs: Self) -> Self::Output { Self { wrapping: self.wrapping - rhs.wrapping } }
+        fn sub(self, rhs: Self) -> Self::Output {
+            Self { wrapping: self.wrapping - rhs.wrapping, phantom: PhantomData }
+        }
     }
 
     impl<D> SeqPoint<D> {
-        pub(in super::super) const fn const_add(self, rhs: SeqDist<u32>) -> Self {
+        pub(in super::super) const fn const_add(self, rhs: SeqDist<u32, D>) -> Self {
             Self::new(self.wrapping.0.wrapping_add(rhs.wrapping.0))
         }
 
-        pub(in super::super) const fn const_sub(self, rhs: SeqDist<u32>) -> Self {
+        pub(in super::super) const fn const_sub(self, rhs: SeqDist<u32, D>) -> Self {
             Self::new(self.wrapping.0.wrapping_sub(rhs.wrapping.0))
         }
 
@@ -160,10 +187,10 @@ mod tests {
         pub(in super::super) const fn leak_primitive(self) -> u32 { self.wrapping.0 }
     }
 
-    impl<D> Sub<SeqDist<u32>> for SeqPoint<D> {
+    impl<D> Sub<SeqDist<u32, D>> for SeqPoint<D> {
         type Output = Self;
 
-        fn sub(self, rhs: SeqDist<u32>) -> Self::Output {
+        fn sub(self, rhs: SeqDist<u32, D>) -> Self::Output {
             Self { wrapping: self.wrapping - rhs.wrapping, phantom: PhantomData }
         }
     }

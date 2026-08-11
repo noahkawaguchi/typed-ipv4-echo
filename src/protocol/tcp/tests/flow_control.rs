@@ -1,12 +1,12 @@
 use super::*;
 
 /// Creates a `ConnState` that is the same as `AFTER_HANDSHAKE` except for a custom `snd_wnd`.
-fn after_handshake_with_snd_wnd(snd_wnd: SeqDist<u16>) -> ConnState {
+fn after_handshake_with_snd_wnd(snd_wnd: SeqDist<u16, Local>) -> ConnState {
     ConnState {
         window_state: Some(WindowState {
             snd_wnd,
-            snd_wl1: CLIENT_ISN + SYN_BYTE,
-            snd_wl2: SERVER_ISN + SYN_BYTE,
+            snd_wl1: CLIENT_ISN + REMOTE_SYN_BYTE,
+            snd_wl2: SERVER_ISN + LOCAL_SYN_BYTE,
         }),
         ..AFTER_HANDSHAKE
     }
@@ -14,15 +14,15 @@ fn after_handshake_with_snd_wnd(snd_wnd: SeqDist<u16>) -> ConnState {
 
 #[test]
 fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result {
-    const WINDOW: SeqDist<u16> = SeqDist::new(3);
+    const WINDOW: SeqDist<u16, Local> = SeqDist::new(3);
 
     let mut connections = TcpConnections::default();
     let mut expected_state = after_handshake_with_snd_wnd(WINDOW);
     connections.insert(expected_state.clone());
 
     let reply = TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE,
-        ack_num: SERVER_ISN + SYN_BYTE,
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         window: WINDOW,
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET
@@ -32,8 +32,8 @@ fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result {
     assert_eq!(
         reply,
         Some(TcpHandler {
-            seq_num: SERVER_ISN + SYN_BYTE,
-            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
             payload: payload_from("Hel")?,
             ..SERVER_REPLY
         }),
@@ -41,7 +41,7 @@ fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result {
     );
 
     expected_state.snd_nxt += WINDOW.into();
-    expected_state.rcv_nxt += HELLO_LEN;
+    expected_state.rcv_nxt += REMOTE_HELLO_LEN;
     expected_state.send_buffer.extend(b"lo");
 
     assert_eq!(
@@ -55,9 +55,9 @@ fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result {
 
 #[test]
 fn window_opening_via_ack_drains_buffered_remainder() -> Result {
-    const HEL_LEN: SeqDist<u32> = SeqDist::new(3);
-    const INITIAL_WINDOW: SeqDist<u16> = SeqDist::new(3);
-    const LARGER_WINDOW: SeqDist<u16> = SeqDist::new(10);
+    const HEL_LEN: SeqDist<u32, Local> = SeqDist::new(3);
+    const INITIAL_WINDOW: SeqDist<u16, Local> = SeqDist::new(3);
+    const LARGER_WINDOW: SeqDist<u16, Local> = SeqDist::new(10);
 
     let mut connections = TcpConnections::default();
     let mut expected_state = after_handshake_with_snd_wnd(INITIAL_WINDOW);
@@ -65,8 +65,8 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
 
     // "Hello" (5 bytes), window only allows 3 -> "Hel" sent, "lo" buffered
     TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE,
-        ack_num: SERVER_ISN + SYN_BYTE,
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         window: INITIAL_WINDOW,
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET
@@ -74,15 +74,15 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
     .create_reply(&mut connections)?;
 
     expected_state.snd_nxt += HEL_LEN;
-    expected_state.rcv_nxt += HELLO_LEN;
+    expected_state.rcv_nxt += REMOTE_HELLO_LEN;
     expected_state.send_buffer.extend(b"lo");
 
     assert_eq!(connections.try_get()?, &expected_state, "State confirmation before window update");
 
     // Client acks the 3 sent bytes and advertises a bigger window -> should drain "lo"
     let window_update = TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-        ack_num: SERVER_ISN + SYN_BYTE + HEL_LEN,
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE + HEL_LEN,
         window: LARGER_WINDOW,
         ..CLIENT_PACKET
     };
@@ -92,8 +92,8 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
     assert_eq!(
         reply,
         Some(TcpHandler {
-            seq_num: SERVER_ISN + SYN_BYTE + HEL_LEN,
-            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE + HEL_LEN,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
             payload: payload_from("lo")?,
             ..SERVER_REPLY
         }),
@@ -101,7 +101,7 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
     );
 
     expected_state.snd_una += HEL_LEN;
-    expected_state.snd_nxt += HELLO_LEN - HEL_LEN;
+    expected_state.snd_nxt += LOCAL_HELLO_LEN - HEL_LEN;
     expected_state.window_state = Some(WindowState {
         snd_wnd: LARGER_WINDOW,
         snd_wl1: window_update.seq_num,
@@ -120,15 +120,15 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
 
 #[test]
 fn zero_window_buffers_entire_payload_and_gets_bare_ack() -> Result {
-    const ZERO_WINDOW: SeqDist<u16> = SeqDist::new(0);
+    const ZERO_WINDOW: SeqDist<u16, Local> = SeqDist::new(0);
 
     let mut connections = TcpConnections::default();
     let mut expected_state = after_handshake_with_snd_wnd(ZERO_WINDOW);
     connections.insert(expected_state.clone());
 
     let reply = TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE,
-        ack_num: SERVER_ISN + SYN_BYTE,
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         window: ZERO_WINDOW,
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET
@@ -138,14 +138,14 @@ fn zero_window_buffers_entire_payload_and_gets_bare_ack() -> Result {
     assert_eq!(
         reply,
         Some(TcpHandler {
-            seq_num: SERVER_ISN + SYN_BYTE,
-            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
             ..SERVER_REPLY
         }),
         "A closed window still gets a bare ACK for the receipt, just no echoed payload"
     );
 
-    expected_state.rcv_nxt += HELLO_LEN;
+    expected_state.rcv_nxt += REMOTE_HELLO_LEN;
     expected_state.send_buffer.extend(b"Hello");
 
     assert_eq!(

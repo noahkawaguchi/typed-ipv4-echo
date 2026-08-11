@@ -15,14 +15,23 @@ const _: () = assert!(
         >= 100
 );
 
-/// The number of bytes in the payload `"Hello"`.
-pub const HELLO_LEN: SeqDist<u32> = SeqDist::new(5);
+/// The number of bytes in the payload `"Hello"`, going in the local to remote direction.
+pub const LOCAL_HELLO_LEN: SeqDist<u32, Local> = SeqDist::new(5);
 
-/// The number of bytes in the payload `"Hi"`.
-pub const HI_LEN: SeqDist<u32> = SeqDist::new(2);
+/// The number of bytes in the payload `"Hi"`, going in the local to remote direction.
+pub const LOCAL_HI_LEN: SeqDist<u32, Local> = SeqDist::new(2);
 
-/// The number of bytes in the payload `"Hey"`.
-pub const HEY_LEN: SeqDist<u32> = SeqDist::new(3);
+/// The number of bytes in the payload `"Hey"`, going in the local to remote direction.
+pub const LOCAL_HEY_LEN: SeqDist<u32, Local> = SeqDist::new(3);
+
+/// The number of bytes in the payload `"Hello"`, going in the remote to local direction.
+pub const REMOTE_HELLO_LEN: SeqDist<u32, Remote> = SeqDist::new(5);
+
+/// The number of bytes in the payload `"Hi"`, going in the remote to local direction.
+pub const REMOTE_HI_LEN: SeqDist<u32, Remote> = SeqDist::new(2);
+
+/// The number of bytes in the payload `"Hey"`, going in the remote to local direction.
+pub const REMOTE_HEY_LEN: SeqDist<u32, Remote> = SeqDist::new(3);
 
 /// Connection key shared by test modules.
 pub const KEY: ConnKey =
@@ -33,13 +42,13 @@ pub const KEY: ConnKey =
 /// `pending`/`send_buffer`.
 pub const AFTER_HANDSHAKE: ConnState = ConnState {
     tcp_state: TcpState::Established,
-    snd_nxt: SERVER_ISN.const_add(SYN_BYTE),
-    rcv_nxt: CLIENT_ISN.const_add(SYN_BYTE),
-    snd_una: SERVER_ISN.const_add(SYN_BYTE),
+    snd_nxt: SERVER_ISN.const_add(LOCAL_SYN_BYTE),
+    rcv_nxt: CLIENT_ISN.const_add(REMOTE_SYN_BYTE),
+    snd_una: SERVER_ISN.const_add(LOCAL_SYN_BYTE),
     window_state: Some(WindowState {
         snd_wnd: SeqDist::new(u16::MAX),
-        snd_wl1: CLIENT_ISN.const_add(SYN_BYTE),
-        snd_wl2: SERVER_ISN.const_add(SYN_BYTE),
+        snd_wl1: CLIENT_ISN.const_add(REMOTE_SYN_BYTE),
+        snd_wl2: SERVER_ISN.const_add(LOCAL_SYN_BYTE),
     }),
     pending: Vec::new(),
     send_buffer: VecDeque::new(),

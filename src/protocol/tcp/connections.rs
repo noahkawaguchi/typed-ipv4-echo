@@ -5,7 +5,7 @@ use {
         protocol::{
             Local, Remote,
             tcp::{
-                FIN_BYTE, PendingSegment, SendInfo, TcpFlags, TcpHandler,
+                LOCAL_FIN_BYTE, PendingSegment, SendInfo, TcpFlags, TcpHandler,
                 state::{ConnState, TcpState},
             },
         },
@@ -156,7 +156,7 @@ impl TcpConnections {
                 conn.tcp_state = TcpState::FinWait1;
 
                 // Consume one sequence number in SND.NXT for the FIN about to be sent
-                conn.snd_nxt += FIN_BYTE;
+                conn.snd_nxt += LOCAL_FIN_BYTE;
 
                 conn.pending
                     .push(PendingSegment::new(send_info.clone(), now));
@@ -200,7 +200,7 @@ impl TcpConnections {
     pub(crate) fn with_syn_rcv_and_packet_last_sent(mut self, sent_at: Instant) -> Self {
         use {
             crate::protocol::tcp::{
-                SYN_BYTE,
+                LOCAL_SYN_BYTE, REMOTE_SYN_BYTE,
                 tests::{CLIENT_ISN, KEY, SERVER_ISN},
             },
             std::collections::VecDeque,
@@ -210,14 +210,14 @@ impl TcpConnections {
             KEY,
             ConnState {
                 tcp_state: TcpState::SynReceived,
-                snd_nxt: SERVER_ISN + SYN_BYTE,
-                rcv_nxt: CLIENT_ISN + SYN_BYTE,
+                snd_nxt: SERVER_ISN + LOCAL_SYN_BYTE,
+                rcv_nxt: CLIENT_ISN + REMOTE_SYN_BYTE,
                 snd_una: SERVER_ISN,
                 window_state: None,
                 pending: vec![PendingSegment::new(
                     SendInfo {
                         seq_num: SERVER_ISN,
-                        ack_num: CLIENT_ISN + SYN_BYTE,
+                        ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
                         flags: TcpFlags::SynAck,
                         payload: None,
                     },

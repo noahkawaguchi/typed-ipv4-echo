@@ -34,11 +34,17 @@ use {
 /// The minimum number of bytes in a TCP header (no options).
 const TCP_HDR_MIN_LEN: u8 = 20;
 
-/// The single phantom byte consumed by SYN.
-const SYN_BYTE: SeqDist<u32> = SeqDist::new(1);
+/// The single phantom byte consumed by SYN in the stream going in the local to remote direction.
+const LOCAL_SYN_BYTE: SeqDist<u32, Local> = SeqDist::new(1);
 
-/// The single phantom byte consumed by FIN.
-const FIN_BYTE: SeqDist<u32> = SeqDist::new(1);
+/// The single phantom byte consumed by FIN in the stream going in the local to remote direction.
+const LOCAL_FIN_BYTE: SeqDist<u32, Local> = SeqDist::new(1);
+
+/// The single phantom byte consumed by SYN in the stream going in the remote to local direction.
+const REMOTE_SYN_BYTE: SeqDist<u32, Remote> = SeqDist::new(1);
+
+/// The single phantom byte consumed by FIN in the stream going in the remote to local direction.
+const REMOTE_FIN_BYTE: SeqDist<u32, Remote> = SeqDist::new(1);
 
 /// Fields that differ when determining a segment to send.
 #[derive(Clone)]
@@ -87,7 +93,7 @@ pub struct TcpHandler<S, R> {
 
     /// "The number of data octets beginning with the one indicated in the acknowledgment field
     /// that the sender of this segment is willing to accept."
-    window: SeqDist<u16>,
+    window: SeqDist<u16, R>,
 
     payload: Option<TcpPayload>,
 }
@@ -168,7 +174,7 @@ impl TcpHandler<Remote, Local> {
                 // seq num = random ISN, local ack num = remote seq num + 1
                 let send_info = SendInfo {
                     seq_num: SeqPoint::new(sys::random_u32()?),
-                    ack_num: self.seq_num + SYN_BYTE,
+                    ack_num: self.seq_num + REMOTE_SYN_BYTE,
                     flags: TcpFlags::SynAck,
                     payload: None,
                 };
@@ -188,7 +194,7 @@ impl TcpHandler<Remote, Local> {
             ) => {
                 let send_info = SendInfo {
                     seq_num: *snd_una, // ISN
-                    ack_num: self.seq_num + SYN_BYTE,
+                    ack_num: self.seq_num + REMOTE_SYN_BYTE,
                     flags: TcpFlags::SynAck,
                     payload: None,
                 };
@@ -331,7 +337,7 @@ impl TcpHandler<Remote, Local> {
                     conn.send_buffer.extend(payload.as_bytes());
                 }
 
-                conn.rcv_nxt += FIN_BYTE; // Peer's FIN consumes one sequence number
+                conn.rcv_nxt += REMOTE_FIN_BYTE; // Peer's FIN consumes one sequence number
                 conn.tcp_state = TcpState::LastAck;
 
                 let to_send = conn.drain_transmittable()?;
@@ -345,7 +351,7 @@ impl TcpHandler<Remote, Local> {
                 };
 
                 conn.snd_nxt += send_len;
-                conn.snd_nxt += FIN_BYTE; // Our FIN consumes one sequence number
+                conn.snd_nxt += LOCAL_FIN_BYTE; // Our FIN consumes one sequence number
 
                 conn.pending
                     .push(PendingSegment::new(send_info.clone(), Instant::now()));
@@ -412,7 +418,7 @@ impl TcpHandler<Remote, Local> {
                 conn.rcv_nxt += maybe_payload.len_or_default();
 
                 // Consume one sequence number in RCV.NXT for the peer's FIN
-                conn.rcv_nxt += FIN_BYTE;
+                conn.rcv_nxt += REMOTE_FIN_BYTE;
 
                 let send_info = SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt);
 
@@ -438,7 +444,7 @@ impl TcpHandler<Remote, Local> {
 
                 Some(SendInfo::pure_ack(
                     snd_nxt,
-                    rcv_nxt + maybe_payload.len_or_default() + FIN_BYTE,
+                    rcv_nxt + maybe_payload.len_or_default() + REMOTE_FIN_BYTE,
                 ))
             }
 
@@ -530,7 +536,7 @@ impl TcpHandler<Local, Remote> {
     /// However, a dynamic RCV.WND could be used in the future to bound the send buffer's growth,
     /// throttling the peer's sending rate if they keep sending more data than they are willing to
     /// receive.
-    const RCV_WND: SeqDist<u16> = SeqDist::new(u16::MAX);
+    const RCV_WND: SeqDist<u16, Remote> = SeqDist::new(u16::MAX);
 
     fn from_pairs_and_info(
         ip_pair: Ipv4AddrPair,
@@ -675,16 +681,16 @@ mod tests {
         /// The handshake-completing ACK matching the module's standard test consts, which should be
         /// accepted if in SYN-RECEIVED by transitioning to ESTABLISHED and replying with `None`.
         pub(crate) const CLIENT_ACK_COMPLETING_HANDSHAKE: Self = Self {
-            seq_num: CLIENT_ISN.const_add(SYN_BYTE),
-            ack_num: SERVER_ISN.const_add(SYN_BYTE),
+            seq_num: CLIENT_ISN.const_add(REMOTE_SYN_BYTE),
+            ack_num: SERVER_ISN.const_add(LOCAL_SYN_BYTE),
             ..CLIENT_PACKET
         };
 
         /// The client's FIN-ACK completing active close after our own FIN was sent (FIN-WAIT-1),
         /// which also acknowledges our FIN, so the connection should close immediately.
         pub(crate) const CLIENT_FIN_ACK_COMPLETING_CLOSE: Self = Self {
-            seq_num: CLIENT_ISN.const_add(SYN_BYTE),
-            ack_num: SERVER_ISN.const_add(SYN_BYTE.const_add(FIN_BYTE)),
+            seq_num: CLIENT_ISN.const_add(REMOTE_SYN_BYTE),
+            ack_num: SERVER_ISN.const_add(LOCAL_SYN_BYTE.const_add(LOCAL_FIN_BYTE)),
             flags: TcpFlags::FinAck,
             ..CLIENT_PACKET
         };
@@ -695,7 +701,7 @@ mod tests {
         /// standard test consts.
         pub(crate) const SERVER_SYN_ACK: Self = Self {
             seq_num: SERVER_ISN,
-            ack_num: CLIENT_ISN.const_add(SYN_BYTE),
+            ack_num: CLIENT_ISN.const_add(REMOTE_SYN_BYTE),
             flags: TcpFlags::SynAck,
             ..SERVER_REPLY
         };
@@ -703,8 +709,8 @@ mod tests {
         /// The server's FIN-ACK reply when actively initiating close right after the handshake for
         /// the standard connection using the module's test consts.
         pub(crate) const SERVER_FIN_ACK_INITIATING_CLOSE: Self = Self {
-            seq_num: SERVER_ISN.const_add(SYN_BYTE),
-            ack_num: CLIENT_ISN.const_add(SYN_BYTE),
+            seq_num: SERVER_ISN.const_add(LOCAL_SYN_BYTE),
+            ack_num: CLIENT_ISN.const_add(REMOTE_SYN_BYTE),
             flags: TcpFlags::FinAck,
             ..SERVER_REPLY
         };
@@ -713,8 +719,8 @@ mod tests {
         /// test consts for a connection closing right after the handshake, after its FIN
         /// was both acked and matched by the peer's own FIN in the same segment.
         pub(crate) const SERVER_FINAL_ACK_COMPLETING_CLOSE: Self = Self {
-            seq_num: SERVER_ISN.const_add(SYN_BYTE.const_add(FIN_BYTE)),
-            ack_num: CLIENT_ISN.const_add(SYN_BYTE.const_add(FIN_BYTE)),
+            seq_num: SERVER_ISN.const_add(LOCAL_SYN_BYTE.const_add(LOCAL_FIN_BYTE)),
+            ack_num: CLIENT_ISN.const_add(REMOTE_SYN_BYTE.const_add(REMOTE_FIN_BYTE)),
             ..SERVER_REPLY
         };
 

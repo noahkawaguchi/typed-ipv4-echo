@@ -17,13 +17,13 @@ use {
     std::fmt,
 };
 
-/// Marker type representing a local source or destination.
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// Marker type representing a local sender or receiver.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(test, derive(Debug))]
 pub struct Local;
 
-/// Marker type representing a remote source or destination.
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// Marker type representing a remote sender or receiver.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(test, derive(Debug))]
 pub struct Remote;
 
