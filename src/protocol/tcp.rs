@@ -34,6 +34,12 @@ use {
 /// The minimum number of bytes in a TCP header (no options).
 const TCP_HDR_MIN_LEN: u8 = 20;
 
+/// The single phantom byte consumed by SYN.
+const SYN_BYTE: SeqDist = SeqDist::new(1);
+
+/// The single phantom byte consumed by FIN.
+const FIN_BYTE: SeqDist = SeqDist::new(1);
+
 /// Manages TCP headers, data, and reply logic. Field definitions below from RFC 9293, Section 3.1.
 #[cfg_attr(test, derive(Debug, PartialEq, Eq, Clone))]
 pub struct TcpHandler {
@@ -176,7 +182,7 @@ impl TcpHandler {
                 // seq num = random ISN, local ack num = remote seq num + 1
                 let send_info = SendInfo {
                     seq_num: SeqPoint::new(sys::random_u32()?),
-                    ack_num: self.seq_num + SeqDist::new(1),
+                    ack_num: self.seq_num + SYN_BYTE,
                     flags: TcpFlags::SynAck,
                     payload: None,
                 };
@@ -196,7 +202,7 @@ impl TcpHandler {
             ) => {
                 let send_info = SendInfo {
                     seq_num: *snd_una, // ISN
-                    ack_num: self.seq_num + SeqDist::new(1),
+                    ack_num: self.seq_num + SYN_BYTE,
                     flags: TcpFlags::SynAck,
                     payload: None,
                 };
@@ -341,7 +347,7 @@ impl TcpHandler {
                     conn.send_buffer.extend(payload.as_bytes().iter());
                 }
 
-                conn.rcv_nxt += SeqDist::new(1); // Peer's FIN consumes one sequence number
+                conn.rcv_nxt += FIN_BYTE; // Peer's FIN consumes one sequence number
                 conn.tcp_state = TcpState::LastAck;
 
                 let to_send = conn.drain_transmittable()?;
@@ -357,7 +363,7 @@ impl TcpHandler {
                 };
 
                 conn.snd_nxt += SeqDist::new(send_len);
-                conn.snd_nxt += SeqDist::new(1); // Our FIN consumes one sequence number
+                conn.snd_nxt += FIN_BYTE; // Our FIN consumes one sequence number
 
                 conn.pending
                     .push(PendingSegment::new(send_info.clone(), Instant::now()));
@@ -426,7 +432,7 @@ impl TcpHandler {
                 }
 
                 // Consume one sequence number in RCV.NXT for the peer's FIN
-                conn.rcv_nxt += SeqDist::new(1);
+                conn.rcv_nxt += FIN_BYTE;
 
                 let send_info = SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt);
 
@@ -454,10 +460,7 @@ impl TcpHandler {
                     .as_ref()
                     .map_or(0, |payload| u32::from(payload.len().get()));
 
-                Some(SendInfo::pure_ack(
-                    snd_nxt,
-                    rcv_nxt + SeqDist::new(payload_len) + SeqDist::new(1),
-                ))
+                Some(SendInfo::pure_ack(snd_nxt, rcv_nxt + SeqDist::new(payload_len) + FIN_BYTE))
             }
 
             // CLOSING (simultaneous close), the remote peer's ACK of our FIN arrives -> fully

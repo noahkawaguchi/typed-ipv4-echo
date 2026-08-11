@@ -2,7 +2,7 @@ use {
     crate::{
         Result,
         protocol::tcp::{
-            SendInfo, SeqDist, SeqPoint, TcpFlags, TcpHandler, TcpPayload,
+            SYN_BYTE, SendInfo, SeqDist, SeqPoint, TcpFlags, TcpHandler, TcpPayload,
             pending_segment::PendingSegment,
         },
     },
@@ -46,7 +46,7 @@ impl ConnState {
                 // State after the initial two-way exchange
                 tcp_state: TcpState::SynReceived,
                 // SYN-ACK consumes one sequence number
-                snd_nxt: send_info.seq_num + SeqDist::new(1),
+                snd_nxt: send_info.seq_num + SYN_BYTE,
                 // Our SYN-ACK's `ack_num` is the client's ISN + 1
                 rcv_nxt: send_info.ack_num,
                 // Our SYN-ACK is unacknowledged (this is our ISN)

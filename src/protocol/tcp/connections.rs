@@ -3,7 +3,7 @@ use {
         Result,
         addr_pairs::{Ipv4AddrPair, PortPair},
         protocol::tcp::{
-            PendingSegment, SendInfo, SeqDist, TcpFlags, TcpHandler,
+            FIN_BYTE, PendingSegment, SendInfo, TcpFlags, TcpHandler,
             state::{ConnState, TcpState},
         },
     },
@@ -153,7 +153,7 @@ impl TcpConnections {
                 conn.tcp_state = TcpState::FinWait1;
 
                 // Consume one sequence number in SND.NXT for the FIN about to be sent
-                conn.snd_nxt += SeqDist::new(1);
+                conn.snd_nxt += FIN_BYTE;
 
                 conn.pending
                     .push(PendingSegment::new(send_info.clone(), now));
@@ -196,7 +196,10 @@ impl TcpConnections {
     #[cfg(test)]
     pub(crate) fn with_syn_rcv_and_packet_last_sent(mut self, sent_at: Instant) -> Self {
         use {
-            crate::protocol::tcp::tests::{CLIENT_ISN, KEY, SERVER_ISN, SYN_BYTE},
+            crate::protocol::tcp::{
+                SYN_BYTE,
+                tests::{CLIENT_ISN, KEY, SERVER_ISN},
+            },
             std::collections::VecDeque,
         };
 

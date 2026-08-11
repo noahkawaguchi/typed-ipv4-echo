@@ -15,12 +15,6 @@ const _: () = assert!(
         >= 100
 );
 
-/// The single phantom byte consumed by SYN.
-pub const SYN_BYTE: SeqDist = SeqDist::new(1);
-
-/// The single phantom byte consumed by FIN.
-pub const FIN_BYTE: SeqDist = SeqDist::new(1);
-
 /// The number of bytes in the payload `"Hello"`.
 pub const HELLO_LEN: SeqDist = SeqDist::new(5);
 
