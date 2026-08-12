@@ -98,7 +98,7 @@ impl Logger {
     /// Logs receipt or transmission of a packet to stdout if and how the log level allows.
     pub(crate) fn pkt_io<S: Endpoint>(
         &self,
-        ipv4_header: &Ipv4Header,
+        ipv4_header: &Ipv4Header<S>,
         proto_handler: &impl Encode<S>,
     ) -> io::Result<()> {
         match self.level {

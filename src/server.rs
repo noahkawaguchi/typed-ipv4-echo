@@ -36,7 +36,7 @@ enum ShutdownDecision {
 /// necessary.
 #[cfg_attr(test, derive(Debug))]
 struct ParsedExchange<'a> {
-    ipv4_header: Ipv4Header,
+    ipv4_header: Ipv4Header<Remote>,
     incoming_handler: ProtocolHandler<'a, Remote, Local>,
     reply_handler: Option<ProtocolHandler<'a, Local, Remote>>,
 }
