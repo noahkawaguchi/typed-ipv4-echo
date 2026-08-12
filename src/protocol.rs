@@ -9,9 +9,10 @@ mod udp;
 
 use {
     crate::{
-        ETHERNET_MTU, Endpoint, Result,
+        ETHERNET_MTU, Result,
         addr_pairs::Ipv4AddrPair,
         checksum,
+        endpoint::Endpoint,
         try_ops::{TryGet as _, TryGetMut as _},
     },
     std::fmt,
@@ -88,7 +89,10 @@ impl fmt::Display for Protocol {
 #[cfg(test)]
 mod test_consts {
     use {
-        crate::{Local, Remote, addr_pairs::Ipv4AddrPair},
+        crate::{
+            addr_pairs::Ipv4AddrPair,
+            endpoint::{Local, Remote},
+        },
         std::net::Ipv4Addr,
     };
 

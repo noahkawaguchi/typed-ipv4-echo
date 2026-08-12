@@ -1,7 +1,11 @@
 use {
     crate::{
-        ETHERNET_MTU, Endpoint, Local, Remote, addr_pairs::Ipv4AddrPair, checksum,
-        protocol::Protocol, try_ops::TryAdd as _,
+        ETHERNET_MTU,
+        addr_pairs::Ipv4AddrPair,
+        checksum,
+        endpoint::{Endpoint, Local, Remote},
+        protocol::Protocol,
+        try_ops::TryAdd as _,
     },
     std::{fmt, net::Ipv4Addr},
 };

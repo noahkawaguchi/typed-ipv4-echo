@@ -1,7 +1,8 @@
 use {
     crate::{
-        Endpoint, Local, Remote, Result,
+        Result,
         addr_pairs::{Ipv4AddrPair, PortPair},
+        endpoint::{Endpoint, Local, Remote},
         protocol::{
             Protocol,
             display::PrettyPayload,

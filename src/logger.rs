@@ -1,5 +1,5 @@
 use {
-    crate::{Endpoint, ipv4_header::Ipv4Header, protocol::handler::PrettyProtocol},
+    crate::{endpoint::Endpoint, ipv4_header::Ipv4Header, protocol::handler::PrettyProtocol},
     std::{
         fmt,
         io::{self, Write as _},

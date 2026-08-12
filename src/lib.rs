@@ -9,6 +9,7 @@ pub use config::Config;
 mod addr_pairs;
 mod checksum;
 mod config;
+mod endpoint;
 mod ipv4_header;
 mod logger;
 mod protocol;
@@ -18,32 +19,3 @@ pub type Result<T = (), E = Box<dyn std::error::Error>> = std::result::Result<T,
 
 /// The Maximum Transmission Unit of standard Ethernet (frames up to 1500 bytes of IP packet data).
 const ETHERNET_MTU: usize = 1500;
-
-/// One of the communicating parties.
-trait Endpoint {
-    /// The party that this endpoint is communicating with.
-    type Peer: Endpoint + std::fmt::Debug;
-
-    /// Character representing the direction of traffic from this endpoint.
-    const INDICATOR: char;
-}
-
-/// Marker type representing a local sender or receiver.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-struct Local;
-
-impl Endpoint for Local {
-    type Peer = Remote;
-
-    const INDICATOR: char = '↑';
-}
-
-/// Marker type representing a remote sender or receiver.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-struct Remote;
-
-impl Endpoint for Remote {
-    type Peer = Local;
-
-    const INDICATOR: char = '↓';
-}

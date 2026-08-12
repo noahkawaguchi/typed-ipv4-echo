@@ -1,6 +1,7 @@
 use {
     crate::{
-        Local, Remote, Result,
+        Result,
+        endpoint::{Local, Remote},
         protocol::tcp::{
             LOCAL_SYN_BYTE, SendInfo, SeqDist, SeqPoint, TcpFlags, TcpHandler, TcpPayload,
             pending_segment::PendingSegment,

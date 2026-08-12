@@ -1,6 +1,6 @@
 use {
     crate::{
-        Local,
+        endpoint::Local,
         protocol::tcp::{SendInfo, SeqDist, SeqPoint, TcpFlags, payload::LenOrDefault as _},
     },
     std::time::{Duration, Instant},
