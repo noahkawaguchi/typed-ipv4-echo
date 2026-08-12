@@ -134,7 +134,7 @@ mod tests {
             0x04, 0xD2,              // Source port: 1234
             0x00, 0x35,              // Dest port: 53 (DNS)
             0x00, 0x10,              // Length: 16 (8 byte header + 8 byte payload)
-            0xA1, 0xB0,              // Checksum (valid for this datagram and `IP_PAIR`)
+            0xA1, 0xB0,              // Checksum (valid for this datagram and IP pair)
             0x48, 0x65, 0x6C, 0x6C,  // Payload: "Hell"
             0x6F, 0x21, 0x21, 0x21,  // Payload: "o!!!"
         ];
@@ -202,7 +202,7 @@ mod tests {
             0x1F, 0x90,              // Source port: 8080
             0x00, 0x50,              // Dest port: 80
             0x00, 0x08,              // Length: 8 (header only, no payload)
-            0xCB, 0xFB,              // Checksum (valid for this datagram and `IP_PAIR`)
+            0xCB, 0xFB,              // Checksum (valid for this datagram and IP pair)
         ];
 
         let handler = UdpHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
@@ -220,7 +220,7 @@ mod tests {
             0xFF, 0xFF,              // Source port: 65535 (max)
             0x00, 0x01,              // Dest port: 1 (min non-zero)
             0x00, 0x0C,              // Length: 12
-            0x03, 0xF9,              // Checksum (valid for this datagram and `IP_PAIR`)
+            0x03, 0xF9,              // Checksum (valid for this datagram and IP pair)
             0x74, 0x65, 0x73, 0x74,  // Payload: "test"
         ];
 
@@ -233,8 +233,9 @@ mod tests {
 
     #[test]
     fn transmits_all_ones_when_computed_checksum_is_zero() -> Result {
-        // Payload [0xE6, 0xB5] results in a pseudo-header checksum of 0x0000 for ports 1234 -> 80
-        // over `IP_PAIR`. However, 0xFFFF must be transmitted instead of 0x0000.
+        // Payload `[0xE6, 0xB5]` results in a pseudo-header checksum of 0x0000 for IP addresses
+        // 10.0.0.1 and 10.0.0.2 (in either order) and ports 1234 and 80 (in either order).
+        // However, 0xFFFF must be transmitted instead of 0x0000.
 
         const HANDLER: UdpHandler<Local> = UdpHandler {
             ip_pair: LOCAL_TO_REMOTE_IP_PAIR,
@@ -257,7 +258,7 @@ mod tests {
             0x04, 0xD2,              // Source port: 1234
             0x00, 0x35,              // Dest port: 53
             0x00, 0x10,              // Length: 16
-            0xA1, 0xB0,              // Checksum (valid for this datagram and `IP_PAIR`)
+            0xA1, 0xB0,              // Checksum (valid for this datagram and IP pair)
             0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x21, 0x21, 0x21,  // Payload: "Hello!!!"
         ];
 

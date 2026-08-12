@@ -10,7 +10,7 @@ fn correctly_parses_valid_packet() -> Result {
             0x00, 0x00, 0x00, 0x02,              // Ack number: 2
             0x50, 0x12,                          // Data offset: 5 (20 bytes), Flags: SYN|ACK
             0x72, 0x10,                          // Window size: 29,200
-            0x00, 0xC4,                          // Checksum (valid for this segment and `IP_PAIR`)
+            0x00, 0xC4,                          // Checksum (valid for this segment and IP pair)
             0x00, 0x00,                          // Urgent pointer
             0x48, 0x65, 0x6C, 0x6C, 0x6F,        // Payload: "Hello"
         ];
@@ -69,7 +69,7 @@ fn parsing_handles_large_sequence_numbers() -> Result {
             0xFE, 0xDC, 0xBA, 0x98,              // Ack number: 4_275_878_552
             0x50, 0x10,                          // Data offset: 5, Flags: ACK
             0xFF, 0xFF,                          // Window size
-            0xDD, 0x3A,                          // Checksum (valid for this segment and `IP_PAIR`)
+            0xDD, 0x3A,                          // Checksum (valid for this segment and IP pair)
             0x00, 0x00,                          // Urgent pointer
         ];
 
