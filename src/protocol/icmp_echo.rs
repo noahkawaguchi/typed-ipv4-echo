@@ -4,7 +4,7 @@ use {
         addr_pairs::Ipv4AddrPair,
         checksum,
         protocol::{
-            Protocol,
+            Local, Protocol,
             display::{PrettyPayload, WithThousandsSeparators as _},
             handler::Encode,
         },
@@ -78,7 +78,7 @@ impl<'a> IcmpEchoHandler<'a> {
     }
 }
 
-impl Encode for IcmpEchoHandler<'_> {
+impl Encode<Local> for IcmpEchoHandler<'_> {
     fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
         // Copy echo payload
         buf.try_get_mut(

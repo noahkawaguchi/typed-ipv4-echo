@@ -556,7 +556,7 @@ impl TcpHandler<Local, Remote> {
     }
 }
 
-impl<S, R> Encode for TcpHandler<S, R> {
+impl<S, R> Encode<S> for TcpHandler<S, R> {
     fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
         // Source and destination ports
         buf.try_get_mut(..2)?

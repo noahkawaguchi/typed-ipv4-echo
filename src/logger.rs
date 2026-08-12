@@ -114,17 +114,17 @@ impl Logger {
     pub(crate) fn pkt_out(
         &self,
         ipv4_header: &Ipv4Header,
-        proto_handler: &impl Encode,
+        proto_handler: &impl Encode<Local>,
     ) -> io::Result<()> {
         self.pkt_in_or_out(false, ipv4_header, proto_handler)
     }
 
     /// Logs receipt or transmission of a packet to stdout if and how the log level allows.
-    fn pkt_in_or_out(
+    fn pkt_in_or_out<S>(
         &self,
         is_in: bool,
         ipv4_header: &Ipv4Header,
-        proto_handler: &impl Encode,
+        proto_handler: &impl Encode<S>,
     ) -> io::Result<()> {
         match self.level {
             LogLevel::Silent | LogLevel::ServerInfo => {}

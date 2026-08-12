@@ -13,9 +13,9 @@ use {
     std::fmt,
 };
 
-/// Trait for protocol-handling types that can be encoded into a byte buffer and displayed as a
-/// string.
-pub trait Encode: fmt::Display {
+/// Trait for protocol-handling types sent from `S` that can be encoded into a byte buffer and
+/// displayed as a string.
+pub trait Encode<S>: fmt::Display {
     /// Copies data from `self` to write the protocol-specific header and payload into `buf`,
     /// returning the number of bytes written.
     fn write_into(&self, buf: &mut [u8]) -> Result<u16>;
@@ -75,7 +75,7 @@ impl<'a> ProtocolHandler<'a, Remote, Local> {
     }
 }
 
-impl<S, R> Encode for ProtocolHandler<'_, S, R> {
+impl<S, R> Encode<S> for ProtocolHandler<'_, S, R> {
     fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
         match self {
             Self::Icmp(handler) => handler.write_into(buf),
