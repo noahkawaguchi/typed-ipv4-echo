@@ -80,8 +80,8 @@ fn exits_once_connections_finish_closing() -> Result {
         );
     };
 
-    assert_eq!(decode_mock_tcp_packet(fin_ack)?, TcpHandler::SERVER_FIN_ACK_INITIATING_CLOSE);
-    assert_eq!(decode_mock_tcp_packet(final_ack)?, TcpHandler::SERVER_FINAL_ACK_COMPLETING_CLOSE);
+    assert_eq!(decode_mock_packet(fin_ack)?, TcpHandler::SERVER_FIN_ACK_INITIATING_CLOSE);
+    assert_eq!(decode_mock_packet(final_ack)?, TcpHandler::SERVER_FINAL_ACK_COMPLETING_CLOSE);
 
     Ok(())
 }

@@ -78,7 +78,7 @@ fn first_interrupt_with_established_connection_sends_fin_ack_and_continues() -> 
 
     let [write] = device.write_history() else { return Err("Expected exactly one write".into()) };
 
-    assert_eq!(decode_mock_tcp_packet(write)?, TcpHandler::SERVER_FIN_ACK_INITIATING_CLOSE);
+    assert_eq!(decode_mock_packet(write)?, TcpHandler::SERVER_FIN_ACK_INITIATING_CLOSE);
 
     Ok(())
 }
@@ -120,7 +120,7 @@ fn second_interrupt_while_draining_does_not_resend_or_exit() -> Result {
     let [write] = device.write_history() else { return Err("Expected exactly one write".into()) };
 
     assert_eq!(
-        decode_mock_tcp_packet(write)?,
+        decode_mock_packet(write)?,
         TcpHandler::SERVER_FIN_ACK_INITIATING_CLOSE,
         "Should be the original FIN-ACK, not a resend of a different segment"
     );

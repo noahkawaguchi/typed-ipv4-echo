@@ -102,7 +102,7 @@ pub fn encode_mock_packet(handler: &TcpHandler<Remote, Local>) -> Result<Vec<u8>
 
 /// Decodes a full IPv4 packet in the local to remote direction into a `TcpHandler` so tests can
 /// assert on structs instead of raw bytes.
-pub fn decode_mock_tcp_packet(bytes: &[u8]) -> Result<TcpHandler<Local, Remote>> {
+pub fn decode_mock_packet(bytes: &[u8]) -> Result<TcpHandler<Local, Remote>> {
     let (ipv4_header, payload) = Ipv4Header::parse(bytes)?;
     TcpHandler::test_parse(payload, ipv4_header.ip_pair)
 }
