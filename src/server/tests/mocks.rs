@@ -91,7 +91,7 @@ impl MockPoll {
 }
 
 /// Encodes `handler` into a full IPv4 packet so it can be used as a scripted mock to be read.
-pub fn encode_mock_packet(handler: &impl Encode<Remote>) -> Result<Vec<u8>> {
+pub fn encode_mock_packet(handler: &TcpHandler<Remote, Local>) -> Result<Vec<u8>> {
     let mut buf = [0u8; ETHERNET_MTU];
     let proto_len = handler.write_into(&mut buf[Ipv4Header::REPLY_HDR_LEN..])?;
     let ipv4_header = Ipv4Header::try_new(handler.proto(), handler.get_ip_pair(), proto_len)?;

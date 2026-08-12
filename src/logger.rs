@@ -1,5 +1,5 @@
 use {
-    crate::{Endpoint, ipv4_header::Ipv4Header, protocol::handler::Encode},
+    crate::{Endpoint, ipv4_header::Ipv4Header, protocol::handler::PrettyProtocol},
     std::{
         fmt,
         io::{self, Write as _},
@@ -99,7 +99,7 @@ impl Logger {
     pub(crate) fn pkt_io<S: Endpoint>(
         &self,
         ipv4_header: &Ipv4Header<S>,
-        proto_handler: &impl Encode<S>,
+        proto_handler: &impl PrettyProtocol,
     ) -> io::Result<()> {
         match self.level {
             LogLevel::Silent | LogLevel::ServerInfo => {}

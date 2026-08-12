@@ -1,12 +1,12 @@
 use {
     crate::{
-        Local, Result,
+        Result,
         addr_pairs::Ipv4AddrPair,
         checksum,
         protocol::{
             Protocol,
             display::{PrettyPayload, WithThousandsSeparators as _},
-            handler::Encode,
+            handler::{Encode, PrettyProtocol},
         },
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
@@ -78,7 +78,7 @@ impl<'a> IcmpEchoHandler<'a> {
     }
 }
 
-impl Encode<Local> for IcmpEchoHandler<'_> {
+impl Encode for IcmpEchoHandler<'_> {
     fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
         // Copy echo payload
         buf.try_get_mut(
@@ -113,7 +113,9 @@ impl Encode<Local> for IcmpEchoHandler<'_> {
     fn proto(&self) -> Protocol { Protocol::Icmp }
 
     fn get_ip_pair(&self) -> Ipv4AddrPair { self.ip_pair }
+}
 
+impl PrettyProtocol for IcmpEchoHandler<'_> {
     fn pretty_payload(&self, include_content: bool) -> PrettyPayload<'_> {
         PrettyPayload { data: self.payload, include_content }
     }

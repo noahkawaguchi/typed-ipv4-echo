@@ -9,12 +9,12 @@ mod state;
 
 use {
     crate::{
-        Endpoint, Local, Remote, Result,
+        Local, Remote, Result,
         addr_pairs::{Ipv4AddrPair, PortPair},
         protocol::{
             Protocol,
             display::{PrettyPayload, WithThousandsSeparators as _},
-            handler::Encode,
+            handler::{Encode, PrettyProtocol},
             pseudo_header_checksum,
             tcp::{
                 connections::ConnKey,
@@ -142,6 +142,76 @@ impl<S, R> TcpHandler<S, R> {
                     .copied(),
             )?,
         })
+    }
+
+    /// Copies data from `self` to write the protocol-specific header and payload into `buf`, which
+    /// could be local to remote or remote to local, returning the number of bytes written.
+    ///
+    /// The remote to local direction is for tests only. Only the local to remote direction
+    /// should be exposed in production code.
+    fn inner_write_into(&self, buf: &mut [u8]) -> Result<u16> {
+        // Source and destination ports
+        buf.try_get_mut(..2)?
+            .copy_from_slice(&self.ports.src.to_be_bytes());
+        buf.try_get_mut(2..4)?
+            .copy_from_slice(&self.ports.dst.to_be_bytes());
+
+        // Sequence number
+        buf.try_get_mut(4..8)?
+            .copy_from_slice(&self.seq_num.to_be_bytes());
+
+        // Acknowledgment number
+        buf.try_get_mut(8..12)?
+            .copy_from_slice(&self.ack_num.to_be_bytes());
+
+        // Data offset in upper 4 bits (bytes / 4 = 32-bit words), reserved zeros in lower 4 bits
+        *buf.try_get_mut(12)? = (self.offset_bytes / 4) << 4;
+
+        // Flags
+        *buf.try_get_mut(13)? = self.flags.into();
+
+        // Window size for flow control
+        buf.try_get_mut(14..16)?
+            .copy_from_slice(&self.window.to_be_bytes());
+
+        // Checksum at bytes 16-17 calculated later with pseudo-header
+
+        // Urgent pointer
+        buf.try_get_mut(18..20)?.copy_from_slice(&[0x00, 0x00]);
+
+        // Copy payload into reply if echoing and determine segment length
+        // TCP segment length = minimum TCP header length (20 bytes) + payload length (0+ bytes)
+        let tcp_seg_len = u16::from(TCP_HDR_MIN_LEN).try_add(
+            self.payload
+                .as_ref()
+                .map(|payload| -> Result<u16, String> {
+                    let payload_len = payload.len().get();
+
+                    buf.try_get_mut(
+                        usize::from(TCP_HDR_MIN_LEN)
+                            ..usize::from(TCP_HDR_MIN_LEN).try_add(usize::from(payload_len))?,
+                    )?
+                    .copy_from_slice(payload.as_bytes());
+
+                    Ok(payload_len)
+                })
+                .transpose()?
+                .unwrap_or_default(),
+        )?;
+
+        // Zero out checksum field before calculating checksum
+        buf.try_get_mut(16..18)?.copy_from_slice(&[0x00, 0x00]);
+
+        let tcp_checksum = pseudo_header_checksum(
+            buf.try_get(..usize::from(tcp_seg_len))?,
+            self.ip_pair,
+            Protocol::Tcp,
+        )?;
+
+        buf.try_get_mut(16..18)?
+            .copy_from_slice(&tcp_checksum.to_be_bytes());
+
+        Ok(tcp_seg_len)
     }
 }
 
@@ -556,76 +626,13 @@ impl TcpHandler<Local, Remote> {
     }
 }
 
-impl<S: Endpoint, R: Endpoint> Encode<S> for TcpHandler<S, R> {
-    fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
-        // Source and destination ports
-        buf.try_get_mut(..2)?
-            .copy_from_slice(&self.ports.src.to_be_bytes());
-        buf.try_get_mut(2..4)?
-            .copy_from_slice(&self.ports.dst.to_be_bytes());
-
-        // Sequence number
-        buf.try_get_mut(4..8)?
-            .copy_from_slice(&self.seq_num.to_be_bytes());
-
-        // Acknowledgment number
-        buf.try_get_mut(8..12)?
-            .copy_from_slice(&self.ack_num.to_be_bytes());
-
-        // Data offset in upper 4 bits (bytes / 4 = 32-bit words), reserved zeros in lower 4 bits
-        *buf.try_get_mut(12)? = (self.offset_bytes / 4) << 4;
-
-        // Flags
-        *buf.try_get_mut(13)? = self.flags.into();
-
-        // Window size for flow control
-        buf.try_get_mut(14..16)?
-            .copy_from_slice(&self.window.to_be_bytes());
-
-        // Checksum at bytes 16-17 calculated later with pseudo-header
-
-        // Urgent pointer
-        buf.try_get_mut(18..20)?.copy_from_slice(&[0x00, 0x00]);
-
-        // Copy payload into reply if echoing and determine segment length
-        // TCP segment length = minimum TCP header length (20 bytes) + payload length (0+ bytes)
-        let tcp_seg_len = u16::from(TCP_HDR_MIN_LEN).try_add(
-            self.payload
-                .as_ref()
-                .map(|payload| -> Result<u16, String> {
-                    let payload_len = payload.len().get();
-
-                    buf.try_get_mut(
-                        usize::from(TCP_HDR_MIN_LEN)
-                            ..usize::from(TCP_HDR_MIN_LEN).try_add(usize::from(payload_len))?,
-                    )?
-                    .copy_from_slice(payload.as_bytes());
-
-                    Ok(payload_len)
-                })
-                .transpose()?
-                .unwrap_or_default(),
-        )?;
-
-        // Zero out checksum field before calculating checksum
-        buf.try_get_mut(16..18)?.copy_from_slice(&[0x00, 0x00]);
-
-        let tcp_checksum = pseudo_header_checksum(
-            buf.try_get(..usize::from(tcp_seg_len))?,
-            self.ip_pair,
-            self.proto(),
-        )?;
-
-        buf.try_get_mut(16..18)?
-            .copy_from_slice(&tcp_checksum.to_be_bytes());
-
-        Ok(tcp_seg_len)
-    }
-
+impl Encode for TcpHandler<Local, Remote> {
+    fn write_into(&self, buf: &mut [u8]) -> Result<u16> { self.inner_write_into(buf) }
     fn proto(&self) -> Protocol { Protocol::Tcp }
-
     fn get_ip_pair(&self) -> Ipv4AddrPair { self.ip_pair }
+}
 
+impl<S, R> PrettyProtocol for TcpHandler<S, R> {
     fn pretty_payload(&self, include_content: bool) -> PrettyPayload<'_> {
         PrettyPayload {
             data: self
@@ -694,6 +701,12 @@ mod tests {
             flags: TcpFlags::FinAck,
             ..CLIENT_PACKET
         };
+    }
+
+    impl Encode for TcpHandler<Remote, Local> {
+        fn write_into(&self, buf: &mut [u8]) -> Result<u16> { self.inner_write_into(buf) }
+        fn proto(&self) -> Protocol { Protocol::Tcp }
+        fn get_ip_pair(&self) -> Ipv4AddrPair { self.ip_pair }
     }
 
     impl TcpHandler<Local, Remote> {

@@ -1,8 +1,13 @@
 use {
     crate::{
-        Local, Result,
+        Result,
         addr_pairs::{Ipv4AddrPair, PortPair},
-        protocol::{Protocol, display::PrettyPayload, handler::Encode, pseudo_header_checksum},
+        protocol::{
+            Protocol,
+            display::PrettyPayload,
+            handler::{Encode, PrettyProtocol},
+            pseudo_header_checksum,
+        },
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
     std::fmt,
@@ -53,7 +58,7 @@ impl<'a> UdpHandler<'a> {
     }
 }
 
-impl Encode<Local> for UdpHandler<'_> {
+impl Encode for UdpHandler<'_> {
     fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
         // Source and destination ports
         buf.try_get_mut(..2)?
@@ -94,7 +99,9 @@ impl Encode<Local> for UdpHandler<'_> {
     fn proto(&self) -> Protocol { Protocol::Udp }
 
     fn get_ip_pair(&self) -> Ipv4AddrPair { self.ip_pair }
+}
 
+impl PrettyProtocol for UdpHandler<'_> {
     fn pretty_payload(&self, include_content: bool) -> PrettyPayload<'_> {
         PrettyPayload { data: self.payload, include_content }
     }
