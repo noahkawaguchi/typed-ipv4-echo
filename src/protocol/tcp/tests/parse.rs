@@ -15,9 +15,9 @@ fn correctly_parses_valid_packet() -> Result {
             0x48, 0x65, 0x6C, 0x6C, 0x6F,        // Payload: "Hello"
         ];
 
-    let handler = TcpHandler::parse(&DATA, IP_PAIR)?;
+    let handler = TcpHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
 
-    assert_eq!(handler.ports, PortPair { src: 1234, dst: 80 });
+    assert_eq!(handler.ports, PortPair::new(1234, 80));
     assert_eq!(handler.seq_num, SeqPoint::new(1));
     assert_eq!(handler.ack_num, SeqPoint::new(2));
     assert_eq!(handler.offset_bytes, 20);
@@ -33,7 +33,7 @@ fn parsing_fails_when_too_short() {
     const DATA: [u8; 4] = [0x04, 0xD2, 0x00, 0x50]; // Only 4 bytes
 
     assert_matches!(
-        TcpHandler::parse(&DATA, IP_PAIR),
+        TcpHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR),
         Err(e) if e.to_string().contains("Too short")
     );
 }
@@ -54,7 +54,7 @@ fn parsing_fails_on_invalid_checksum() {
         ];
 
     assert_matches!(
-        TcpHandler::parse(&DATA, IP_PAIR),
+        TcpHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR),
         Err(e) if e.to_string().contains("checksum")
     );
 }
@@ -73,7 +73,7 @@ fn parsing_handles_large_sequence_numbers() -> Result {
             0x00, 0x00,                          // Urgent pointer
         ];
 
-    let handler = TcpHandler::parse(&DATA, IP_PAIR)?;
+    let handler = TcpHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
 
     assert_eq!(handler.seq_num, SeqPoint::new(u32::MAX));
     assert_eq!(handler.ack_num, SeqPoint::new(0xFEDC_BA98));

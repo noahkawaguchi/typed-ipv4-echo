@@ -1,34 +1,58 @@
-use std::{fmt, net::Ipv4Addr};
+use {
+    crate::Endpoint,
+    std::{fmt, marker::PhantomData, net::Ipv4Addr},
+};
 
-#[derive(Clone, Copy)]
+/// A pair of IPv4 addresses where `src` is the address of endpoint `S` and `dst` is the address of
+/// endpoint `S::Peer`.
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
-pub struct Ipv4AddrPair {
+pub struct Ipv4AddrPair<S: Endpoint> {
     pub src: Ipv4Addr,
     pub dst: Ipv4Addr,
+    phantom: PhantomData<S>,
 }
 
-impl Ipv4AddrPair {
-    pub const fn swapped(self) -> Self { Self { src: self.dst, dst: self.src } }
+impl<S: Endpoint> Clone for Ipv4AddrPair<S> {
+    fn clone(&self) -> Self { *self }
 }
 
-impl fmt::Display for Ipv4AddrPair {
+impl<S: Endpoint> Copy for Ipv4AddrPair<S> {}
+
+impl<S: Endpoint> Ipv4AddrPair<S> {
+    pub const fn new(src: Ipv4Addr, dst: Ipv4Addr) -> Self {
+        Self { src, dst, phantom: PhantomData }
+    }
+
+    pub const fn swapped(self) -> Ipv4AddrPair<S::Peer> {
+        Ipv4AddrPair::<S::Peer> { src: self.dst, dst: self.src, phantom: PhantomData }
+    }
+}
+
+impl<S: Endpoint> fmt::Display for Ipv4AddrPair<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} -> {}", self.src, self.dst)
     }
 }
 
+/// A pair of ports where `src` is the port of endpoint `S` and `dst` is the port of endpoint
+/// `S::Peer`.
 #[derive(Clone, Copy)]
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
-pub struct PortPair {
+pub struct PortPair<S: Endpoint> {
     pub src: u16,
     pub dst: u16,
+    phantom: PhantomData<S>,
 }
 
-impl PortPair {
-    pub const fn swapped(self) -> Self { Self { src: self.dst, dst: self.src } }
+impl<S: Endpoint> PortPair<S> {
+    pub const fn new(src: u16, dst: u16) -> Self { Self { src, dst, phantom: PhantomData } }
+
+    pub const fn swapped(self) -> PortPair<S::Peer> {
+        PortPair::<S::Peer> { src: self.dst, dst: self.src, phantom: PhantomData }
+    }
 }
 
-impl fmt::Display for PortPair {
+impl<S: Endpoint> fmt::Display for PortPair<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} -> {}", self.src, self.dst)
     }

@@ -69,9 +69,9 @@ impl SendInfo {
 #[cfg_attr(test, derive(Debug, PartialEq, Eq, Clone))]
 pub struct TcpHandler<S: Endpoint> {
     /// Not a part of the TCP header, but required for connection state and checksum calculation.
-    ip_pair: Ipv4AddrPair,
+    ip_pair: Ipv4AddrPair<S>,
 
-    ports: PortPair,
+    ports: PortPair<S>,
 
     /// "The sequence number of the first data octet in this segment (except when the SYN flag is
     /// set). If SYN is set, the sequence number is the initial sequence number (ISN) and the first
@@ -100,7 +100,7 @@ pub struct TcpHandler<S: Endpoint> {
 
 impl TcpHandler<Remote> {
     /// Parses `data` as a TCP header and payload in the remote to local direction.
-    pub(super) fn parse(data: &[u8], ip_pair: Ipv4AddrPair) -> Result<Self> {
+    pub(super) fn parse(data: &[u8], ip_pair: Ipv4AddrPair<Remote>) -> Result<Self> {
         Self::inner_parse(data, ip_pair)
     }
 
@@ -492,8 +492,8 @@ impl TcpHandler<Local> {
     const RCV_WND: SeqDist<u16, Remote> = SeqDist::new(u16::MAX);
 
     fn from_pairs_and_info(
-        ip_pair: Ipv4AddrPair,
-        ports: PortPair,
+        ip_pair: Ipv4AddrPair<Local>,
+        ports: PortPair<Local>,
         SendInfo { seq_num, ack_num, flags, payload }: SendInfo,
     ) -> Self {
         Self {
@@ -509,17 +509,17 @@ impl TcpHandler<Local> {
     }
 }
 
-impl Encode for TcpHandler<Local> {
+impl Encode<Local> for TcpHandler<Local> {
     fn write_into(&self, buf: &mut [u8]) -> Result<u16> { self.inner_write_into(buf) }
     fn proto(&self) -> Protocol { Protocol::Tcp }
-    fn get_ip_pair(&self) -> Ipv4AddrPair { self.ip_pair }
+    fn get_ip_pair(&self) -> Ipv4AddrPair<Local> { self.ip_pair }
 }
 
 impl<S: Endpoint> TcpHandler<S> {
     /// Parses `data` as a TCP header and payload, which could be local to remote or remote to
     /// local. The local to remote direction is for tests only. Only the remote to local direction
     /// should be exposed in production code.
-    fn inner_parse(data: &[u8], ip_pair: Ipv4AddrPair) -> Result<Self> {
+    fn inner_parse(data: &[u8], ip_pair: Ipv4AddrPair<S>) -> Result<Self> {
         let Some(tcp_header) = data.first_chunk::<{ TCP_HDR_MIN_LEN as usize }>() else {
             return Err(format!("Too short for TCP header ({} bytes)", data.len()).into());
         };
@@ -533,10 +533,10 @@ impl<S: Endpoint> TcpHandler<S> {
 
         Ok(Self {
             ip_pair,
-            ports: PortPair {
-                src: u16::from_be_bytes([tcp_header[0], tcp_header[1]]),
-                dst: u16::from_be_bytes([tcp_header[2], tcp_header[3]]),
-            },
+            ports: PortPair::new(
+                u16::from_be_bytes([tcp_header[0], tcp_header[1]]),
+                u16::from_be_bytes([tcp_header[2], tcp_header[3]]),
+            ),
             seq_num: SeqPoint::new(u32::from_be_bytes([
                 tcp_header[4],
                 tcp_header[5],
@@ -676,7 +676,10 @@ mod tests {
     pub(super) use utils::*;
     use {
         super::*,
-        crate::protocol::test_consts::{DST_IP, IP_PAIR, SRC_IP},
+        crate::{
+            ETHERNET_MTU,
+            protocol::test_consts::{LOCAL_TO_REMOTE_IP_PAIR, REMOTE_TO_LOCAL_IP_PAIR},
+        },
         std::{assert_matches, collections::VecDeque},
     };
 
@@ -703,10 +706,10 @@ mod tests {
         };
     }
 
-    impl Encode for TcpHandler<Remote> {
+    impl Encode<Remote> for TcpHandler<Remote> {
         fn write_into(&self, buf: &mut [u8]) -> Result<u16> { self.inner_write_into(buf) }
         fn proto(&self) -> Protocol { Protocol::Tcp }
-        fn get_ip_pair(&self) -> Ipv4AddrPair { self.ip_pair }
+        fn get_ip_pair(&self) -> Ipv4AddrPair<Remote> { self.ip_pair }
     }
 
     impl TcpHandler<Local> {
@@ -739,7 +742,10 @@ mod tests {
 
         /// Parses `data` as a TCP header and payload in the local to remote direction for testing
         /// purposes only.
-        pub(crate) fn test_parse(data: &[u8], ip_pair: Ipv4AddrPair) -> Result<Self> {
+        ///
+        /// This is a test-only version because a segment created locally would never be parsed from
+        /// bytes in production.
+        pub(crate) fn test_parse_local(data: &[u8], ip_pair: Ipv4AddrPair<Local>) -> Result<Self> {
             Self::inner_parse(data, ip_pair)
         }
     }

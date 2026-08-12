@@ -16,8 +16,8 @@ fn ipv4_ok_but_tcp_parse_error_is_skipped() -> Result {
     let fixture = TcpHandler::CLIENT_SYN;
     let mut buf = [0u8; ETHERNET_MTU];
 
-    let ipv4_header = Ipv4Header::try_new(fixture.proto(), fixture.get_ip_pair(), 4)?;
-    ipv4_header.write_into(&mut buf);
+    let ipv4_header = Ipv4Header::test_try_new_remote(fixture.proto(), fixture.get_ip_pair(), 4)?;
+    ipv4_header.test_write_into_remote(&mut buf);
 
     assert_matches!(
         decision_test_server().parse_incoming(buf.try_get(..ipv4_header.total_len.into())?),

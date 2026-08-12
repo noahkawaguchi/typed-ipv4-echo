@@ -267,7 +267,7 @@ fn close_established_sends_fin_ack_and_transitions_to_fin_wait_1() -> Result {
     );
 
     // IP addresses are swapped: server -> client
-    assert_eq!(reply.get_ip_pair(), IP_PAIR.swapped());
+    assert_eq!(reply.get_ip_pair(), REMOTE_TO_LOCAL_IP_PAIR.swapped());
 
     cloned_state.tcp_state = TcpState::FinWait1;
     cloned_state.snd_nxt += LOCAL_FIN_BYTE;

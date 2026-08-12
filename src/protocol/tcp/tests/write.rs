@@ -1,10 +1,10 @@
-use {super::*, crate::ETHERNET_MTU};
+use super::*;
 
 #[test]
 fn write_into_produces_correct_bytes_with_no_payload() -> Result {
     let handler = TcpHandler::<Local> {
-        ip_pair: IP_PAIR,
-        ports: PortPair { src: 80, dst: 1234 },
+        ip_pair: LOCAL_TO_REMOTE_IP_PAIR,
+        ports: PortPair::new(80, 1234),
         seq_num: SeqPoint::new(0x1000_0000),
         ack_num: SeqPoint::new(0x0000_1001),
         offset_bytes: 20,
@@ -27,7 +27,7 @@ fn write_into_produces_correct_bytes_with_no_payload() -> Result {
     assert_eq!(&reply[34..36], &[0x72, 0x10]); // Window size: 29,200
     assert_eq!(&reply[38..40], &[0x00, 0x00]); // Urgent pointer
 
-    assert_eq!(pseudo_header_checksum(&reply[20..40], IP_PAIR, Protocol::Tcp)?, 0x0000);
+    assert_eq!(pseudo_header_checksum(&reply[20..40], REMOTE_TO_LOCAL_IP_PAIR, Protocol::Tcp)?, 0);
 
     Ok(())
 }
@@ -35,8 +35,8 @@ fn write_into_produces_correct_bytes_with_no_payload() -> Result {
 #[test]
 fn write_into_produces_correct_bytes_with_payload() -> Result {
     let handler = TcpHandler::<Local> {
-        ip_pair: IP_PAIR,
-        ports: PortPair { src: 80, dst: 1234 },
+        ip_pair: LOCAL_TO_REMOTE_IP_PAIR,
+        ports: PortPair::new(80, 1234),
         seq_num: SeqPoint::new(1),
         ack_num: SeqPoint::new(4102),
         offset_bytes: 20,
@@ -53,7 +53,7 @@ fn write_into_produces_correct_bytes_with_payload() -> Result {
     // Payload copied immediately after the 20-byte header
     assert_eq!(&reply[40..45], b"Hello");
 
-    assert_eq!(pseudo_header_checksum(&reply[20..45], IP_PAIR, Protocol::Tcp)?, 0x0000);
+    assert_eq!(pseudo_header_checksum(&reply[20..45], REMOTE_TO_LOCAL_IP_PAIR, Protocol::Tcp)?, 0);
 
     Ok(())
 }

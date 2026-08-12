@@ -25,7 +25,7 @@ fn syn_ack_is_resent_while_due() -> Result {
             ..SERVER_REPLY
         }
     );
-    assert_eq!(reply.get_ip_pair(), IP_PAIR.swapped());
+    assert_eq!(reply.get_ip_pair(), REMOTE_TO_LOCAL_IP_PAIR.swapped());
 
     Ok(())
 }

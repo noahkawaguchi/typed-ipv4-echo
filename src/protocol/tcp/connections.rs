@@ -120,8 +120,8 @@ impl TcpConnections {
             retransmissions.extend(conn.pending.iter_mut().filter_map(|seg| {
                 (seg.time_due(self.initial_rto) <= now).then(|| {
                     TcpHandler::from_pairs_and_info(
-                        Ipv4AddrPair { src: key.server_ip, dst: key.client_ip },
-                        PortPair { src: key.server_port, dst: key.client_port },
+                        Ipv4AddrPair::new(key.server_ip, key.client_ip),
+                        PortPair::new(key.server_port, key.client_port),
                         seg.retransmit_info(now),
                     )
                 })
@@ -159,8 +159,8 @@ impl TcpConnections {
                     .push(PendingSegment::new(send_info.clone(), now));
 
                 Some(TcpHandler::from_pairs_and_info(
-                    Ipv4AddrPair { src: key.server_ip, dst: key.client_ip },
-                    PortPair { src: key.server_port, dst: key.client_port },
+                    Ipv4AddrPair::new(key.server_ip, key.client_ip),
+                    PortPair::new(key.server_port, key.client_port),
                     send_info,
                 ))
             })

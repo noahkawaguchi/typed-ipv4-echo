@@ -1,6 +1,6 @@
 use {
     crate::{
-        Local, Remote, Result,
+        Endpoint, Local, Remote, Result,
         addr_pairs::Ipv4AddrPair,
         checksum,
         protocol::{
@@ -10,7 +10,7 @@ use {
         },
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
-    std::{fmt, marker::PhantomData},
+    std::fmt,
 };
 
 /// The number of bytes in an ICMP header.
@@ -18,20 +18,19 @@ const ICMP_HDR_LEN: u16 = 8;
 
 /// Manages ICMP Echo Request/Reply headers, data, and reply logic. Sent from `S`.
 #[cfg_attr(test, derive(Debug))]
-pub struct IcmpEchoHandler<'a, S> {
+pub struct IcmpEchoHandler<'a, S: Endpoint> {
     /// Not a part of the ICMP header or checksum, but used for addressing replies and to stay
     /// parallel to TCP and UDP.
-    ip_pair: Ipv4AddrPair,
+    ip_pair: Ipv4AddrPair<S>,
 
     icmp_type: u8,
     // The code field is omitted because it is constant 0 for Echo Request/Reply
     identifier: u16,
     sequence: u16,
     payload: &'a [u8],
-    phantom: PhantomData<S>,
 }
 
-impl<S> IcmpEchoHandler<'_, S> {
+impl<S: Endpoint> IcmpEchoHandler<'_, S> {
     const ICMP_TYPE_ECHO_REQUEST: u8 = 8;
     const ICMP_TYPE_ECHO_REPLY: u8 = 0;
     const ICMP_CODE_ECHO: u8 = 0;
@@ -39,7 +38,7 @@ impl<S> IcmpEchoHandler<'_, S> {
 
 impl<'a> IcmpEchoHandler<'a, Remote> {
     /// Parses `data` as an ICMP Echo Request header and payload.
-    pub(super) fn parse(data: &'a [u8], ip_pair: Ipv4AddrPair) -> Result<Self, String> {
+    pub(super) fn parse(data: &'a [u8], ip_pair: Ipv4AddrPair<Remote>) -> Result<Self, String> {
         let Some((icmp_header, payload)) = data.split_first_chunk::<{ ICMP_HDR_LEN as usize }>()
         else {
             return Err(format!("Too short for ICMP header ({} bytes)", data.len()));
@@ -63,7 +62,6 @@ impl<'a> IcmpEchoHandler<'a, Remote> {
             identifier: u16::from_be_bytes([icmp_header[4], icmp_header[5]]),
             sequence: u16::from_be_bytes([icmp_header[6], icmp_header[7]]),
             payload,
-            phantom: PhantomData,
         })
     }
 
@@ -78,12 +76,11 @@ impl<'a> IcmpEchoHandler<'a, Remote> {
             identifier: self.identifier,
             sequence: self.sequence,
             payload: self.payload,
-            phantom: PhantomData,
         }
     }
 }
 
-impl Encode for IcmpEchoHandler<'_, Local> {
+impl Encode<Local> for IcmpEchoHandler<'_, Local> {
     fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
         // Copy echo payload
         buf.try_get_mut(
@@ -117,16 +114,16 @@ impl Encode for IcmpEchoHandler<'_, Local> {
 
     fn proto(&self) -> Protocol { Protocol::Icmp }
 
-    fn get_ip_pair(&self) -> Ipv4AddrPair { self.ip_pair }
+    fn get_ip_pair(&self) -> Ipv4AddrPair<Local> { self.ip_pair }
 }
 
-impl<S> PrettyProtocol for IcmpEchoHandler<'_, S> {
+impl<S: Endpoint> PrettyProtocol for IcmpEchoHandler<'_, S> {
     fn pretty_payload(&self, include_content: bool) -> PrettyPayload<'_> {
         PrettyPayload { data: self.payload, include_content }
     }
 }
 
-impl<S> fmt::Display for IcmpEchoHandler<'_, S> {
+impl<S: Endpoint> fmt::Display for IcmpEchoHandler<'_, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -148,7 +145,7 @@ impl<S> fmt::Display for IcmpEchoHandler<'_, S> {
 mod tests {
     use {
         super::*,
-        crate::{ETHERNET_MTU, protocol::test_consts::IP_PAIR},
+        crate::{ETHERNET_MTU, protocol::test_consts::REMOTE_TO_LOCAL_IP_PAIR},
         std::assert_matches,
     };
 
@@ -163,7 +160,7 @@ mod tests {
             0x41, 0x42, 0x43,  // Payload: "ABC"
         ];
 
-        let handler = IcmpEchoHandler::parse(&DATA, IP_PAIR)?;
+        let handler = IcmpEchoHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
 
         assert_eq!(handler.identifier, 0x1234);
         assert_eq!(handler.sequence, 0x5678);
@@ -175,7 +172,11 @@ mod tests {
     #[test]
     fn parsing_fails_when_too_short() {
         const DATA: [u8; 5] = [8, 0, 0x3A, 0x4B, 0x12]; // Only 5 bytes
-        assert_matches!(IcmpEchoHandler::parse(&DATA, IP_PAIR), Err(e) if e.contains("Too short"));
+
+        assert_matches!(
+            IcmpEchoHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR),
+            Err(e) if e.contains("Too short")
+        );
     }
 
     #[test]
@@ -189,7 +190,7 @@ mod tests {
         ];
 
         assert_matches!(
-            IcmpEchoHandler::parse(&DATA, IP_PAIR),
+            IcmpEchoHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR),
             Err(e) if e.contains("Not an Echo Request")
         );
     }
@@ -205,7 +206,7 @@ mod tests {
         ];
 
         assert_matches!(
-            IcmpEchoHandler::parse(&DATA, IP_PAIR),
+            IcmpEchoHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR),
             Err(e) if e.contains("Not an Echo Request")
         );
     }
@@ -221,7 +222,10 @@ mod tests {
             0x41, 0x42, 0x43,  // Payload: "ABC"
         ];
 
-        assert_matches!(IcmpEchoHandler::parse(&DATA, IP_PAIR), Err(e) if e.contains("checksum"));
+        assert_matches!(
+            IcmpEchoHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR),
+            Err(e) if e.contains("checksum")
+        );
     }
 
     #[test]
@@ -234,7 +238,7 @@ mod tests {
             0x00, 0x01,        // Sequence: 1
         ];
 
-        let handler = IcmpEchoHandler::parse(&DATA, IP_PAIR)?;
+        let handler = IcmpEchoHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
 
         assert_eq!(handler.identifier, 0);
         assert_eq!(handler.sequence, 1);
@@ -254,13 +258,13 @@ mod tests {
             0x48, 0x65, 0x6C, 0x6C, 0x6F,  // Payload: "Hello"
         ];
 
-        let handler = IcmpEchoHandler::parse(&REQUEST, IP_PAIR)?;
+        let handler = IcmpEchoHandler::parse(&REQUEST, REMOTE_TO_LOCAL_IP_PAIR)?;
         let mut reply_buf = [0u8; ETHERNET_MTU];
         let reply = handler.create_reply();
         let icmp_len = reply.write_into(&mut reply_buf[20..])?;
 
         // IPs should be swapped
-        assert_eq!(reply.get_ip_pair(), IP_PAIR.swapped());
+        assert_eq!(reply.get_ip_pair(), REMOTE_TO_LOCAL_IP_PAIR.swapped());
 
         // Verify ICMP header at offset 20
         assert_eq!(reply_buf[20], 0); // Type 0 (Echo Reply)

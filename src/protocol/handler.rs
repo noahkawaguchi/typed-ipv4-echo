@@ -22,7 +22,7 @@ pub trait PrettyProtocol: fmt::Display {
 }
 
 /// Pretty protocol-handling types that can also be encoded into a byte buffer.
-pub trait Encode: PrettyProtocol {
+pub trait Encode<S: Endpoint>: PrettyProtocol {
     /// Copies data from `self` to write the protocol-specific header and payload into `buf`,
     /// returning the number of bytes written.
     fn write_into(&self, buf: &mut [u8]) -> Result<u16>;
@@ -31,7 +31,7 @@ pub trait Encode: PrettyProtocol {
     fn proto(&self) -> Protocol;
 
     /// Returns the pair of IPv4 addresses of `self`.
-    fn get_ip_pair(&self) -> Ipv4AddrPair;
+    fn get_ip_pair(&self) -> Ipv4AddrPair<S>;
 }
 
 /// Enum for static dispatch over the supported protocol-specific handlers. Sent from `S`.
@@ -44,7 +44,11 @@ pub enum ProtocolHandler<'a, S: Endpoint> {
 
 impl<'a> ProtocolHandler<'a, Remote> {
     /// Parses `data` as the header and payload of a packet of protocol type `protocol`.
-    pub fn parse(data: &'a [u8], protocol: Protocol, ip_pair: Ipv4AddrPair) -> Result<Self> {
+    pub fn parse(
+        data: &'a [u8],
+        protocol: Protocol,
+        ip_pair: Ipv4AddrPair<Remote>,
+    ) -> Result<Self> {
         match protocol {
             Protocol::Icmp => IcmpEchoHandler::parse(data, ip_pair)
                 .map(Self::Icmp)
@@ -73,7 +77,7 @@ impl<'a> ProtocolHandler<'a, Remote> {
     }
 }
 
-impl Encode for ProtocolHandler<'_, Local> {
+impl Encode<Local> for ProtocolHandler<'_, Local> {
     fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
         match self {
             Self::Icmp(handler) => handler.write_into(buf),
@@ -90,7 +94,7 @@ impl Encode for ProtocolHandler<'_, Local> {
         }
     }
 
-    fn get_ip_pair(&self) -> Ipv4AddrPair {
+    fn get_ip_pair(&self) -> Ipv4AddrPair<Local> {
         match self {
             Self::Icmp(handler) => handler.get_ip_pair(),
             Self::Tcp(handler) => handler.get_ip_pair(),
