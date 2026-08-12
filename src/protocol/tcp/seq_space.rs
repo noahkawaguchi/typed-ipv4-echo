@@ -146,7 +146,7 @@ impl<D> fmt::Display for ThousandsSeparated<SeqPoint<D>> {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, crate::protocol::Local};
+    use {super::*, crate::Local};
 
     impl<D> SeqDist<u32, D> {
         pub(in super::super) const fn const_add(self, rhs: Self) -> Self {

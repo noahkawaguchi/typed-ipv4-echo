@@ -1,13 +1,10 @@
 use {
     crate::{
-        Result,
+        Local, Remote, Result,
         addr_pairs::{Ipv4AddrPair, PortPair},
-        protocol::{
-            Local, Remote,
-            tcp::{
-                LOCAL_FIN_BYTE, PendingSegment, SendInfo, TcpFlags, TcpHandler,
-                state::{ConnState, TcpState},
-            },
+        protocol::tcp::{
+            LOCAL_FIN_BYTE, PendingSegment, SendInfo, TcpFlags, TcpHandler,
+            state::{ConnState, TcpState},
         },
     },
     std::{

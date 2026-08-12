@@ -1,10 +1,10 @@
 use {
     crate::{
-        Result,
+        Local, Result,
         addr_pairs::Ipv4AddrPair,
         checksum,
         protocol::{
-            Local, Protocol,
+            Protocol,
             display::{PrettyPayload, WithThousandsSeparators as _},
             handler::Encode,
         },

@@ -1,12 +1,9 @@
 use {
     crate::{
-        Result,
-        protocol::{
-            Local, Remote,
-            tcp::{
-                LOCAL_SYN_BYTE, SendInfo, SeqDist, SeqPoint, TcpFlags, TcpHandler, TcpPayload,
-                pending_segment::PendingSegment,
-            },
+        Local, Remote, Result,
+        protocol::tcp::{
+            LOCAL_SYN_BYTE, SendInfo, SeqDist, SeqPoint, TcpFlags, TcpHandler, TcpPayload,
+            pending_segment::PendingSegment,
         },
     },
     std::{collections::VecDeque, time::Instant},

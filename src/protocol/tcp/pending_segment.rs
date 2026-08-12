@@ -1,7 +1,7 @@
 use {
-    crate::protocol::{
+    crate::{
         Local,
-        tcp::{SendInfo, SeqDist, SeqPoint, TcpFlags, payload::LenOrDefault as _},
+        protocol::tcp::{SendInfo, SeqDist, SeqPoint, TcpFlags, payload::LenOrDefault as _},
     },
     std::time::{Duration, Instant},
 };

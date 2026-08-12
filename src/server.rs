@@ -1,11 +1,11 @@
 use {
     crate::{
-        ETHERNET_MTU, Result,
+        ETHERNET_MTU, Local, Remote, Result,
         config::Config,
         ipv4_header::Ipv4Header,
         logger::Logger,
         protocol::{
-            Local, Remote, TcpConnections, TcpHandler,
+            TcpConnections, TcpHandler,
             handler::{Encode, ProtocolHandler},
         },
         try_ops::{TryAdd as _, TryGet as _},

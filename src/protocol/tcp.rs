@@ -9,10 +9,10 @@ mod state;
 
 use {
     crate::{
-        Result,
+        Local, Remote, Result,
         addr_pairs::{Ipv4AddrPair, PortPair},
         protocol::{
-            Local, Protocol, Remote,
+            Protocol,
             display::{PrettyPayload, WithThousandsSeparators as _},
             handler::Encode,
             pseudo_header_checksum,

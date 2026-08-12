@@ -1,9 +1,9 @@
 use {
     crate::{
-        Result,
+        Local, Remote, Result,
         addr_pairs::Ipv4AddrPair,
         protocol::{
-            Local, Protocol, Remote,
+            Protocol,
             display::PrettyPayload,
             icmp_echo::IcmpEchoHandler,
             tcp::{TcpConnections, TcpHandler},

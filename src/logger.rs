@@ -1,10 +1,8 @@
 use {
     crate::{
+        Local, Remote,
         ipv4_header::Ipv4Header,
-        protocol::{
-            Local, Remote,
-            handler::{Encode, ProtocolHandler},
-        },
+        protocol::handler::{Encode, ProtocolHandler},
     },
     std::{
         fmt,

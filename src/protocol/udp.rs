@@ -1,10 +1,8 @@
 use {
     crate::{
-        Result,
+        Local, Result,
         addr_pairs::{Ipv4AddrPair, PortPair},
-        protocol::{
-            Local, Protocol, display::PrettyPayload, handler::Encode, pseudo_header_checksum,
-        },
+        protocol::{Protocol, display::PrettyPayload, handler::Encode, pseudo_header_checksum},
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
     std::fmt,
