@@ -19,12 +19,26 @@ pub type Result<T = (), E = Box<dyn std::error::Error>> = std::result::Result<T,
 /// The Maximum Transmission Unit of standard Ethernet (frames up to 1500 bytes of IP packet data).
 const ETHERNET_MTU: usize = 1500;
 
+/// One of the communicating parties.
+trait Endpoint {
+    /// Character representing the direction of traffic from this endpoint.
+    const INDICATOR: char;
+}
+
 /// Marker type representing a local sender or receiver.
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(test, derive(Debug))]
 struct Local;
 
+impl Endpoint for Local {
+    const INDICATOR: char = '↑';
+}
+
 /// Marker type representing a remote sender or receiver.
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(test, derive(Debug))]
 struct Remote;
+
+impl Endpoint for Remote {
+    const INDICATOR: char = '↓';
+}

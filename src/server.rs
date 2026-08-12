@@ -163,7 +163,7 @@ where
                         Ok(exchange) => {
                             self.logger.pkt_extra(" ==== Packet received ====");
                             self.logger
-                                .pkt_in(&exchange.ipv4_header, &exchange.incoming_handler)?;
+                                .pkt_io(&exchange.ipv4_header, &exchange.incoming_handler)?;
 
                             match exchange.reply_handler {
                                 None => self.logger.pkt_extra("\n<no reply>"),
@@ -244,7 +244,7 @@ where
         self.device
             .write_all(self.write_buf.try_get(..ipv4_header.total_len.into())?)?;
 
-        self.logger.pkt_out(&ipv4_header, handler)?;
+        self.logger.pkt_io(&ipv4_header, handler)?;
 
         Ok(())
     }

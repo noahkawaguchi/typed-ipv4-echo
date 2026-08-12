@@ -9,7 +9,7 @@ mod state;
 
 use {
     crate::{
-        Local, Remote, Result,
+        Endpoint, Local, Remote, Result,
         addr_pairs::{Ipv4AddrPair, PortPair},
         protocol::{
             Protocol,
@@ -556,7 +556,7 @@ impl TcpHandler<Local, Remote> {
     }
 }
 
-impl<S, R> Encode<S> for TcpHandler<S, R> {
+impl<S: Endpoint, R: Endpoint> Encode<S> for TcpHandler<S, R> {
     fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
         // Source and destination ports
         buf.try_get_mut(..2)?

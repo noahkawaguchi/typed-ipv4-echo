@@ -1,6 +1,6 @@
 use {
     crate::{
-        Local, Remote, Result,
+        Endpoint, Local, Remote, Result,
         addr_pairs::Ipv4AddrPair,
         protocol::{
             Protocol,
@@ -15,7 +15,7 @@ use {
 
 /// Trait for protocol-handling types sent from `S` that can be encoded into a byte buffer and
 /// displayed as a string.
-pub trait Encode<S>: fmt::Display {
+pub trait Encode<S: Endpoint>: fmt::Display {
     /// Copies data from `self` to write the protocol-specific header and payload into `buf`,
     /// returning the number of bytes written.
     fn write_into(&self, buf: &mut [u8]) -> Result<u16>;
@@ -34,7 +34,7 @@ pub trait Encode<S>: fmt::Display {
 /// Enum for static dispatch over the supported protocol-specific handlers. Sent from `S` to be
 /// received by `R`.
 #[cfg_attr(test, derive(Debug))]
-pub enum ProtocolHandler<'a, S, R> {
+pub enum ProtocolHandler<'a, S: Endpoint, R: Endpoint> {
     Icmp(IcmpEchoHandler<'a>),
     Tcp(TcpHandler<S, R>),
     Udp(UdpHandler<'a>),
@@ -75,7 +75,7 @@ impl<'a> ProtocolHandler<'a, Remote, Local> {
     }
 }
 
-impl<S, R> Encode<S> for ProtocolHandler<'_, S, R> {
+impl<S: Endpoint, R: Endpoint> Encode<S> for ProtocolHandler<'_, S, R> {
     fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
         match self {
             Self::Icmp(handler) => handler.write_into(buf),
@@ -109,7 +109,7 @@ impl<S, R> Encode<S> for ProtocolHandler<'_, S, R> {
     }
 }
 
-impl<S, R> fmt::Display for ProtocolHandler<'_, S, R> {
+impl<S: Endpoint, R: Endpoint> fmt::Display for ProtocolHandler<'_, S, R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Icmp(handler) => write!(f, "{handler}"),
