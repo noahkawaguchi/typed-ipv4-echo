@@ -1,6 +1,6 @@
 use super::*;
 
-fn client_rst(seq_num: SeqPoint<Remote>) -> TcpHandler<Remote, Local> {
+fn client_rst(seq_num: SeqPoint<Remote>) -> TcpHandler<Remote> {
     TcpHandler { seq_num, flags: TcpFlags::Rst, ..CLIENT_PACKET }
 }
 

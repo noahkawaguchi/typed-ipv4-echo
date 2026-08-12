@@ -25,7 +25,7 @@ enum ShutdownDecision {
 
     /// This was the first interrupt, active close began, and at least one connection is still
     /// closing.
-    BeganDraining { to_send: Vec<TcpHandler<Local, Remote>>, deadline: Instant },
+    BeganDraining { to_send: Vec<TcpHandler<Local>>, deadline: Instant },
 
     /// This was the first interrupt, and no connection needs to finish closing, so shutdown can
     /// happen immediately.
@@ -37,8 +37,8 @@ enum ShutdownDecision {
 #[cfg_attr(test, derive(Debug))]
 struct ParsedExchange<'a> {
     ipv4_header: Ipv4Header<Remote>,
-    incoming_handler: ProtocolHandler<'a, Remote, Local>,
-    reply_handler: Option<ProtocolHandler<'a, Local, Remote>>,
+    incoming_handler: ProtocolHandler<'a, Remote>,
+    reply_handler: Option<ProtocolHandler<'a, Local>>,
 }
 
 /// Reads and writes IPv4 packets to and from `device`, maintaining TCP connection state and echoing

@@ -56,7 +56,7 @@ pub const AFTER_HANDSHAKE: ConnState = ConnState {
 
 /// An incoming pure ACK packet from the client (port 1234) to the server (port 80).
 /// `seq_num` and `ack_num` will be 0 if not overridden.
-pub const CLIENT_PACKET: TcpHandler<Remote, Local> = TcpHandler {
+pub const CLIENT_PACKET: TcpHandler<Remote> = TcpHandler {
     ip_pair: Ipv4AddrPair { src: KEY.client_ip, dst: KEY.server_ip },
     ports: PortPair { src: KEY.client_port, dst: KEY.server_port },
     seq_num: SeqPoint::new(0),
@@ -69,7 +69,7 @@ pub const CLIENT_PACKET: TcpHandler<Remote, Local> = TcpHandler {
 
 /// An outgoing pure ACK packet from the server (port 80) to the client (port 1234).
 /// `seq_num` and `ack_num` will be 0 if not overridden.
-pub const SERVER_REPLY: TcpHandler<Local, Remote> = TcpHandler {
+pub const SERVER_REPLY: TcpHandler<Local> = TcpHandler {
     ip_pair: Ipv4AddrPair { src: KEY.server_ip, dst: KEY.client_ip },
     ports: PortPair { src: KEY.server_port, dst: KEY.client_port },
     seq_num: SeqPoint::new(0),

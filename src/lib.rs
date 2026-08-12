@@ -21,24 +21,29 @@ const ETHERNET_MTU: usize = 1500;
 
 /// One of the communicating parties.
 trait Endpoint {
+    /// The party that this endpoint is communicating with.
+    type Peer: Endpoint + std::fmt::Debug;
+
     /// Character representing the direction of traffic from this endpoint.
     const INDICATOR: char;
 }
 
 /// Marker type representing a local sender or receiver.
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 struct Local;
 
 impl Endpoint for Local {
+    type Peer = Remote;
+
     const INDICATOR: char = '↑';
 }
 
 /// Marker type representing a remote sender or receiver.
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 struct Remote;
 
 impl Endpoint for Remote {
+    type Peer = Local;
+
     const INDICATOR: char = '↓';
 }

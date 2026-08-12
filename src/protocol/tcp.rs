@@ -9,7 +9,7 @@ mod state;
 
 use {
     crate::{
-        Local, Remote, Result,
+        Endpoint, Local, Remote, Result,
         addr_pairs::{Ipv4AddrPair, PortPair},
         protocol::{
             Protocol,
@@ -63,11 +63,11 @@ impl SendInfo {
 }
 
 /// Manages TCP headers, data, and reply logic. Field definitions below from RFC 9293, Section 3.1.
-/// `S` is the send direction (originated from the sender's ISN), while `R` is the receive
+/// `S` is the send direction (originated from the sender's ISN), while `S::Peer` is the receive
 /// direction (originated from the destination's ISN). In other words, this is a segment from `S` to
-/// `R`.
+/// `S::Peer`.
 #[cfg_attr(test, derive(Debug, PartialEq, Eq, Clone))]
-pub struct TcpHandler<S, R> {
+pub struct TcpHandler<S: Endpoint> {
     /// Not a part of the TCP header, but required for connection state and checksum calculation.
     ip_pair: Ipv4AddrPair,
 
@@ -81,7 +81,7 @@ pub struct TcpHandler<S, R> {
     /// "If the ACK control bit is set, this field contains the value of the next sequence number
     /// the sender of the segment is expecting to receive. Once a connection is established, this
     /// is always sent."
-    ack_num: SeqPoint<R>,
+    ack_num: SeqPoint<S::Peer>,
 
     /// **This field is stored in units of bytes.**
     ///
@@ -93,12 +93,12 @@ pub struct TcpHandler<S, R> {
 
     /// "The number of data octets beginning with the one indicated in the acknowledgment field
     /// that the sender of this segment is willing to accept."
-    window: SeqDist<u16, R>,
+    window: SeqDist<u16, S::Peer>,
 
     payload: Option<TcpPayload>,
 }
 
-impl TcpHandler<Remote, Local> {
+impl TcpHandler<Remote> {
     /// Parses `data` as a TCP header and payload in the remote to local direction.
     pub(super) fn parse(data: &[u8], ip_pair: Ipv4AddrPair) -> Result<Self> {
         Self::inner_parse(data, ip_pair)
@@ -112,7 +112,7 @@ impl TcpHandler<Remote, Local> {
     pub(super) fn create_reply(
         &self,
         connections: &mut TcpConnections,
-    ) -> Result<Option<TcpHandler<Local, Remote>>> {
+    ) -> Result<Option<TcpHandler<Local>>> {
         let key = ConnKey {
             client_ip: self.ip_pair.src,
             client_port: self.ports.src,
@@ -431,7 +431,7 @@ impl TcpHandler<Remote, Local> {
                     // Check whether `seq_num` falls within the receive window [RCV.NXT, RCV.NXT +
                     // RCV.WND). true -> Case 3, false -> Case 1.
                     (rcv_nxt <= self.seq_num
-                        && self.seq_num < rcv_nxt + TcpHandler::<Local, Remote>::RCV_WND.into())
+                        && self.seq_num < rcv_nxt + TcpHandler::<Local>::RCV_WND.into())
                     .then_some(SendInfo::pure_ack(snd_nxt, rcv_nxt))
                 }
             }
@@ -451,7 +451,7 @@ impl TcpHandler<Remote, Local> {
             }),
         }
         .map(|send_info| {
-            TcpHandler::<Local, Remote>::from_pairs_and_info(
+            TcpHandler::<Local>::from_pairs_and_info(
                 self.ip_pair.swapped(),
                 self.ports.swapped(),
                 send_info,
@@ -478,7 +478,7 @@ impl TcpHandler<Remote, Local> {
     }
 }
 
-impl TcpHandler<Local, Remote> {
+impl TcpHandler<Local> {
     /// "This represents the sequence numbers the local (receiving) TCP endpoint is willing to
     /// receive... segments overlapping the range RCV.NXT to RCV.NXT + RCV.WND - 1 carry acceptable
     /// data or control" (RFC 9293, Section 4).
@@ -509,13 +509,13 @@ impl TcpHandler<Local, Remote> {
     }
 }
 
-impl Encode for TcpHandler<Local, Remote> {
+impl Encode for TcpHandler<Local> {
     fn write_into(&self, buf: &mut [u8]) -> Result<u16> { self.inner_write_into(buf) }
     fn proto(&self) -> Protocol { Protocol::Tcp }
     fn get_ip_pair(&self) -> Ipv4AddrPair { self.ip_pair }
 }
 
-impl<S, R> TcpHandler<S, R> {
+impl<S: Endpoint> TcpHandler<S> {
     /// Parses `data` as a TCP header and payload, which could be local to remote or remote to
     /// local. The local to remote direction is for tests only. Only the remote to local direction
     /// should be exposed in production code.
@@ -632,7 +632,7 @@ impl<S, R> TcpHandler<S, R> {
     }
 }
 
-impl<S, R> PrettyProtocol for TcpHandler<S, R> {
+impl<S: Endpoint> PrettyProtocol for TcpHandler<S> {
     fn pretty_payload(&self, include_content: bool) -> PrettyPayload<'_> {
         PrettyPayload {
             data: self
@@ -645,7 +645,7 @@ impl<S, R> PrettyProtocol for TcpHandler<S, R> {
     }
 }
 
-impl<S, R> fmt::Display for TcpHandler<S, R> {
+impl<S: Endpoint> fmt::Display for TcpHandler<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -680,7 +680,7 @@ mod tests {
         std::{assert_matches, collections::VecDeque},
     };
 
-    impl TcpHandler<Remote, Local> {
+    impl TcpHandler<Remote> {
         /// A SYN requesting a new connection using the regular `CLIENT_PACKET` consts, which should
         /// generate a SYN-ACK reply.
         pub(crate) const CLIENT_SYN: Self = Self { flags: TcpFlags::Syn, ..CLIENT_PACKET };
@@ -703,13 +703,13 @@ mod tests {
         };
     }
 
-    impl Encode for TcpHandler<Remote, Local> {
+    impl Encode for TcpHandler<Remote> {
         fn write_into(&self, buf: &mut [u8]) -> Result<u16> { self.inner_write_into(buf) }
         fn proto(&self) -> Protocol { Protocol::Tcp }
         fn get_ip_pair(&self) -> Ipv4AddrPair { self.ip_pair }
     }
 
-    impl TcpHandler<Local, Remote> {
+    impl TcpHandler<Local> {
         /// The server's SYN-ACK reply for the standard SYN-RECEIVED connection using the module's
         /// standard test consts.
         pub(crate) const SERVER_SYN_ACK: Self = Self {

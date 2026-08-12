@@ -71,7 +71,7 @@ impl ConnState {
     /// (SND.UNA == SEG.ACK).
     pub(super) fn incoming_ack_update(
         &mut self,
-        seg: &TcpHandler<Remote, Local>,
+        seg: &TcpHandler<Remote>,
     ) -> Result<(), &'static str> {
         let Some(window_state) = &self.window_state else {
             return Err("`incoming_ack_update` called with uninitialized window state");
