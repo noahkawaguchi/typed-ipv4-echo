@@ -98,123 +98,6 @@ pub struct TcpHandler<S, R> {
     payload: Option<TcpPayload>,
 }
 
-impl<S, R> TcpHandler<S, R> {
-    /// Parses `data` as a TCP header and payload, which could be local to remote or remote to
-    /// local. The local to remote direction is for tests only. Only the remote to local direction
-    /// should be exposed in production code.
-    fn inner_parse(data: &[u8], ip_pair: Ipv4AddrPair) -> Result<Self> {
-        let Some(tcp_header) = data.first_chunk::<{ TCP_HDR_MIN_LEN as usize }>() else {
-            return Err(format!("Too short for TCP header ({} bytes)", data.len()).into());
-        };
-
-        if pseudo_header_checksum(data, ip_pair, Protocol::Tcp)? != 0 {
-            return Err("Invalid TCP checksum".into());
-        }
-
-        // Convert length in 32-bit words in the upper 4 bits to length in bytes in the full 8 bits
-        let offset_bytes = tcp_header[12] >> 4 << 2;
-
-        Ok(Self {
-            ip_pair,
-            ports: PortPair {
-                src: u16::from_be_bytes([tcp_header[0], tcp_header[1]]),
-                dst: u16::from_be_bytes([tcp_header[2], tcp_header[3]]),
-            },
-            seq_num: SeqPoint::new(u32::from_be_bytes([
-                tcp_header[4],
-                tcp_header[5],
-                tcp_header[6],
-                tcp_header[7],
-            ])),
-            ack_num: SeqPoint::new(u32::from_be_bytes([
-                tcp_header[8],
-                tcp_header[9],
-                tcp_header[10],
-                tcp_header[11],
-            ])),
-            offset_bytes,
-            flags: tcp_header[13].try_into()?,
-            window: SeqDist::new(u16::from_be_bytes([tcp_header[14], tcp_header[15]])),
-            payload: TcpPayload::try_from_iter(
-                data.get(offset_bytes.into()..)
-                    .into_iter()
-                    .flatten()
-                    .copied(),
-            )?,
-        })
-    }
-
-    /// Copies data from `self` to write the protocol-specific header and payload into `buf`, which
-    /// could be local to remote or remote to local, returning the number of bytes written.
-    ///
-    /// The remote to local direction is for tests only. Only the local to remote direction
-    /// should be exposed in production code.
-    fn inner_write_into(&self, buf: &mut [u8]) -> Result<u16> {
-        // Source and destination ports
-        buf.try_get_mut(..2)?
-            .copy_from_slice(&self.ports.src.to_be_bytes());
-        buf.try_get_mut(2..4)?
-            .copy_from_slice(&self.ports.dst.to_be_bytes());
-
-        // Sequence number
-        buf.try_get_mut(4..8)?
-            .copy_from_slice(&self.seq_num.to_be_bytes());
-
-        // Acknowledgment number
-        buf.try_get_mut(8..12)?
-            .copy_from_slice(&self.ack_num.to_be_bytes());
-
-        // Data offset in upper 4 bits (bytes / 4 = 32-bit words), reserved zeros in lower 4 bits
-        *buf.try_get_mut(12)? = (self.offset_bytes / 4) << 4;
-
-        // Flags
-        *buf.try_get_mut(13)? = self.flags.into();
-
-        // Window size for flow control
-        buf.try_get_mut(14..16)?
-            .copy_from_slice(&self.window.to_be_bytes());
-
-        // Checksum at bytes 16-17 calculated later with pseudo-header
-
-        // Urgent pointer
-        buf.try_get_mut(18..20)?.copy_from_slice(&[0x00, 0x00]);
-
-        // Copy payload into reply if echoing and determine segment length
-        // TCP segment length = minimum TCP header length (20 bytes) + payload length (0+ bytes)
-        let tcp_seg_len = u16::from(TCP_HDR_MIN_LEN).try_add(
-            self.payload
-                .as_ref()
-                .map(|payload| -> Result<u16, String> {
-                    let payload_len = payload.len().get();
-
-                    buf.try_get_mut(
-                        usize::from(TCP_HDR_MIN_LEN)
-                            ..usize::from(TCP_HDR_MIN_LEN).try_add(usize::from(payload_len))?,
-                    )?
-                    .copy_from_slice(payload.as_bytes());
-
-                    Ok(payload_len)
-                })
-                .transpose()?
-                .unwrap_or_default(),
-        )?;
-
-        // Zero out checksum field before calculating checksum
-        buf.try_get_mut(16..18)?.copy_from_slice(&[0x00, 0x00]);
-
-        let tcp_checksum = pseudo_header_checksum(
-            buf.try_get(..usize::from(tcp_seg_len))?,
-            self.ip_pair,
-            Protocol::Tcp,
-        )?;
-
-        buf.try_get_mut(16..18)?
-            .copy_from_slice(&tcp_checksum.to_be_bytes());
-
-        Ok(tcp_seg_len)
-    }
-}
-
 impl TcpHandler<Remote, Local> {
     /// Parses `data` as a TCP header and payload in the remote to local direction.
     pub(super) fn parse(data: &[u8], ip_pair: Ipv4AddrPair) -> Result<Self> {
@@ -630,6 +513,123 @@ impl Encode for TcpHandler<Local, Remote> {
     fn write_into(&self, buf: &mut [u8]) -> Result<u16> { self.inner_write_into(buf) }
     fn proto(&self) -> Protocol { Protocol::Tcp }
     fn get_ip_pair(&self) -> Ipv4AddrPair { self.ip_pair }
+}
+
+impl<S, R> TcpHandler<S, R> {
+    /// Parses `data` as a TCP header and payload, which could be local to remote or remote to
+    /// local. The local to remote direction is for tests only. Only the remote to local direction
+    /// should be exposed in production code.
+    fn inner_parse(data: &[u8], ip_pair: Ipv4AddrPair) -> Result<Self> {
+        let Some(tcp_header) = data.first_chunk::<{ TCP_HDR_MIN_LEN as usize }>() else {
+            return Err(format!("Too short for TCP header ({} bytes)", data.len()).into());
+        };
+
+        if pseudo_header_checksum(data, ip_pair, Protocol::Tcp)? != 0 {
+            return Err("Invalid TCP checksum".into());
+        }
+
+        // Convert length in 32-bit words in the upper 4 bits to length in bytes in the full 8 bits
+        let offset_bytes = tcp_header[12] >> 4 << 2;
+
+        Ok(Self {
+            ip_pair,
+            ports: PortPair {
+                src: u16::from_be_bytes([tcp_header[0], tcp_header[1]]),
+                dst: u16::from_be_bytes([tcp_header[2], tcp_header[3]]),
+            },
+            seq_num: SeqPoint::new(u32::from_be_bytes([
+                tcp_header[4],
+                tcp_header[5],
+                tcp_header[6],
+                tcp_header[7],
+            ])),
+            ack_num: SeqPoint::new(u32::from_be_bytes([
+                tcp_header[8],
+                tcp_header[9],
+                tcp_header[10],
+                tcp_header[11],
+            ])),
+            offset_bytes,
+            flags: tcp_header[13].try_into()?,
+            window: SeqDist::new(u16::from_be_bytes([tcp_header[14], tcp_header[15]])),
+            payload: TcpPayload::try_from_iter(
+                data.get(offset_bytes.into()..)
+                    .into_iter()
+                    .flatten()
+                    .copied(),
+            )?,
+        })
+    }
+
+    /// Copies data from `self` to write the protocol-specific header and payload into `buf`, which
+    /// could be local to remote or remote to local, returning the number of bytes written.
+    ///
+    /// The remote to local direction is for tests only. Only the local to remote direction
+    /// should be exposed in production code.
+    fn inner_write_into(&self, buf: &mut [u8]) -> Result<u16> {
+        // Source and destination ports
+        buf.try_get_mut(..2)?
+            .copy_from_slice(&self.ports.src.to_be_bytes());
+        buf.try_get_mut(2..4)?
+            .copy_from_slice(&self.ports.dst.to_be_bytes());
+
+        // Sequence number
+        buf.try_get_mut(4..8)?
+            .copy_from_slice(&self.seq_num.to_be_bytes());
+
+        // Acknowledgment number
+        buf.try_get_mut(8..12)?
+            .copy_from_slice(&self.ack_num.to_be_bytes());
+
+        // Data offset in upper 4 bits (bytes / 4 = 32-bit words), reserved zeros in lower 4 bits
+        *buf.try_get_mut(12)? = (self.offset_bytes / 4) << 4;
+
+        // Flags
+        *buf.try_get_mut(13)? = self.flags.into();
+
+        // Window size for flow control
+        buf.try_get_mut(14..16)?
+            .copy_from_slice(&self.window.to_be_bytes());
+
+        // Checksum at bytes 16-17 calculated later with pseudo-header
+
+        // Urgent pointer
+        buf.try_get_mut(18..20)?.copy_from_slice(&[0x00, 0x00]);
+
+        // Copy payload into reply if echoing and determine segment length
+        // TCP segment length = minimum TCP header length (20 bytes) + payload length (0+ bytes)
+        let tcp_seg_len = u16::from(TCP_HDR_MIN_LEN).try_add(
+            self.payload
+                .as_ref()
+                .map(|payload| -> Result<u16, String> {
+                    let payload_len = payload.len().get();
+
+                    buf.try_get_mut(
+                        usize::from(TCP_HDR_MIN_LEN)
+                            ..usize::from(TCP_HDR_MIN_LEN).try_add(usize::from(payload_len))?,
+                    )?
+                    .copy_from_slice(payload.as_bytes());
+
+                    Ok(payload_len)
+                })
+                .transpose()?
+                .unwrap_or_default(),
+        )?;
+
+        // Zero out checksum field before calculating checksum
+        buf.try_get_mut(16..18)?.copy_from_slice(&[0x00, 0x00]);
+
+        let tcp_checksum = pseudo_header_checksum(
+            buf.try_get(..usize::from(tcp_seg_len))?,
+            self.ip_pair,
+            Protocol::Tcp,
+        )?;
+
+        buf.try_get_mut(16..18)?
+            .copy_from_slice(&tcp_checksum.to_be_bytes());
+
+        Ok(tcp_seg_len)
+    }
 }
 
 impl<S, R> PrettyProtocol for TcpHandler<S, R> {
