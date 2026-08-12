@@ -1,6 +1,6 @@
 use {
     crate::{
-        Result,
+        Local, Remote, Result,
         addr_pairs::{Ipv4AddrPair, PortPair},
         protocol::{
             Protocol,
@@ -10,23 +10,24 @@ use {
         },
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
-    std::fmt,
+    std::{fmt, marker::PhantomData},
 };
 
 /// The number of bytes in a UDP header.
 const UDP_HDR_LEN: u16 = 8;
 
-/// Manages UDP headers, data, and reply logic.
+/// Manages UDP headers, data, and reply logic. Sent from `S`.
 #[cfg_attr(test, derive(Debug))]
-pub struct UdpHandler<'a> {
+pub struct UdpHandler<'a, S> {
     /// Not a part of the UDP header, but required for checksum calculation.
     ip_pair: Ipv4AddrPair,
 
     ports: PortPair,
     payload: &'a [u8],
+    phantom: PhantomData<S>,
 }
 
-impl<'a> UdpHandler<'a> {
+impl<'a> UdpHandler<'a, Remote> {
     /// Parses `data` as a UDP header and payload.
     pub(super) fn parse(data: &'a [u8], ip_pair: Ipv4AddrPair) -> Result<Self> {
         let Some((udp_header, payload)) = data.split_first_chunk::<{ UDP_HDR_LEN as usize }>()
@@ -49,16 +50,22 @@ impl<'a> UdpHandler<'a> {
                 dst: u16::from_be_bytes([udp_header[2], udp_header[3]]),
             },
             payload,
+            phantom: PhantomData,
         })
     }
 
     /// Creates a UDP header and payload for replying to `self`.
-    pub(super) const fn create_reply(&self) -> Self {
-        Self { ip_pair: self.ip_pair.swapped(), ports: self.ports.swapped(), payload: self.payload }
+    pub(super) const fn create_reply(&self) -> UdpHandler<'a, Local> {
+        UdpHandler::<Local> {
+            ip_pair: self.ip_pair.swapped(),
+            ports: self.ports.swapped(),
+            payload: self.payload,
+            phantom: PhantomData,
+        }
     }
 }
 
-impl Encode for UdpHandler<'_> {
+impl Encode for UdpHandler<'_, Local> {
     fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
         // Source and destination ports
         buf.try_get_mut(..2)?
@@ -101,13 +108,13 @@ impl Encode for UdpHandler<'_> {
     fn get_ip_pair(&self) -> Ipv4AddrPair { self.ip_pair }
 }
 
-impl PrettyProtocol for UdpHandler<'_> {
+impl<S> PrettyProtocol for UdpHandler<'_, S> {
     fn pretty_payload(&self, include_content: bool) -> PrettyPayload<'_> {
         PrettyPayload { data: self.payload, include_content }
     }
 }
 
-impl fmt::Display for UdpHandler<'_> {
+impl<S> fmt::Display for UdpHandler<'_, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "UDP | {}", self.ports) }
 }
 
@@ -228,10 +235,11 @@ mod tests {
         // Payload [0xE6, 0xB5] results in a pseudo-header checksum of 0x0000 for ports 1234 -> 80
         // over `IP_PAIR`. However, 0xFFFF must be transmitted instead of 0x0000.
 
-        const HANDLER: UdpHandler = UdpHandler {
+        const HANDLER: UdpHandler<Local> = UdpHandler {
             ip_pair: IP_PAIR,
             ports: PortPair { src: 1234, dst: 80 },
             payload: &[0xE6, 0xB5],
+            phantom: PhantomData,
         };
 
         let mut buf = [0u8; ETHERNET_MTU];

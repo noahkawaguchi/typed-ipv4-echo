@@ -39,7 +39,7 @@ pub trait Encode: PrettyProtocol {
 pub enum ProtocolHandler<'a, S: Endpoint> {
     Icmp(IcmpEchoHandler<'a>),
     Tcp(TcpHandler<S>),
-    Udp(UdpHandler<'a>),
+    Udp(UdpHandler<'a, S>),
 }
 
 impl<'a> ProtocolHandler<'a, Remote> {
