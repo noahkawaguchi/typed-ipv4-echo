@@ -37,7 +37,7 @@ pub trait Encode: PrettyProtocol {
 /// Enum for static dispatch over the supported protocol-specific handlers. Sent from `S`.
 #[cfg_attr(test, derive(Debug))]
 pub enum ProtocolHandler<'a, S: Endpoint> {
-    Icmp(IcmpEchoHandler<'a>),
+    Icmp(IcmpEchoHandler<'a, S>),
     Tcp(TcpHandler<S>),
     Udp(UdpHandler<'a, S>),
 }

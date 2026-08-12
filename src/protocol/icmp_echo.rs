@@ -1,6 +1,6 @@
 use {
     crate::{
-        Result,
+        Local, Remote, Result,
         addr_pairs::Ipv4AddrPair,
         checksum,
         protocol::{
@@ -10,15 +10,15 @@ use {
         },
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
-    std::fmt,
+    std::{fmt, marker::PhantomData},
 };
 
 /// The number of bytes in an ICMP header.
 const ICMP_HDR_LEN: u16 = 8;
 
-/// Manages ICMP Echo Request/Reply headers, data, and reply logic.
+/// Manages ICMP Echo Request/Reply headers, data, and reply logic. Sent from `S`.
 #[cfg_attr(test, derive(Debug))]
-pub struct IcmpEchoHandler<'a> {
+pub struct IcmpEchoHandler<'a, S> {
     /// Not a part of the ICMP header or checksum, but used for addressing replies and to stay
     /// parallel to TCP and UDP.
     ip_pair: Ipv4AddrPair,
@@ -28,13 +28,16 @@ pub struct IcmpEchoHandler<'a> {
     identifier: u16,
     sequence: u16,
     payload: &'a [u8],
+    phantom: PhantomData<S>,
 }
 
-impl<'a> IcmpEchoHandler<'a> {
+impl<S> IcmpEchoHandler<'_, S> {
     const ICMP_TYPE_ECHO_REQUEST: u8 = 8;
     const ICMP_TYPE_ECHO_REPLY: u8 = 0;
     const ICMP_CODE_ECHO: u8 = 0;
+}
 
+impl<'a> IcmpEchoHandler<'a, Remote> {
     /// Parses `data` as an ICMP Echo Request header and payload.
     pub(super) fn parse(data: &'a [u8], ip_pair: Ipv4AddrPair) -> Result<Self, String> {
         let Some((icmp_header, payload)) = data.split_first_chunk::<{ ICMP_HDR_LEN as usize }>()
@@ -60,25 +63,27 @@ impl<'a> IcmpEchoHandler<'a> {
             identifier: u16::from_be_bytes([icmp_header[4], icmp_header[5]]),
             sequence: u16::from_be_bytes([icmp_header[6], icmp_header[7]]),
             payload,
+            phantom: PhantomData,
         })
     }
 
     /// Creates an ICMP header and payload for replying to `self`.
-    pub(super) const fn create_reply(&self) -> Self {
+    pub(super) const fn create_reply(&self) -> IcmpEchoHandler<'a, Local> {
         // ICMP Echo Reply:
         // - Change type from 8 to 0
         // - Keep the same identifier, sequence number, and payload data
-        Self {
+        IcmpEchoHandler::<Local> {
             ip_pair: self.ip_pair.swapped(),
             icmp_type: Self::ICMP_TYPE_ECHO_REPLY,
             identifier: self.identifier,
             sequence: self.sequence,
             payload: self.payload,
+            phantom: PhantomData,
         }
     }
 }
 
-impl Encode for IcmpEchoHandler<'_> {
+impl Encode for IcmpEchoHandler<'_, Local> {
     fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
         // Copy echo payload
         buf.try_get_mut(
@@ -115,13 +120,13 @@ impl Encode for IcmpEchoHandler<'_> {
     fn get_ip_pair(&self) -> Ipv4AddrPair { self.ip_pair }
 }
 
-impl PrettyProtocol for IcmpEchoHandler<'_> {
+impl<S> PrettyProtocol for IcmpEchoHandler<'_, S> {
     fn pretty_payload(&self, include_content: bool) -> PrettyPayload<'_> {
         PrettyPayload { data: self.payload, include_content }
     }
 }
 
-impl fmt::Display for IcmpEchoHandler<'_> {
+impl<S> fmt::Display for IcmpEchoHandler<'_, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
