@@ -4,7 +4,7 @@ use {
         fmt,
         marker::PhantomData,
         num::{NonZeroU16, Wrapping},
-        ops::{Add, AddAssign, Sub},
+        ops::{Add, AddAssign},
     },
 };
 
@@ -110,6 +110,13 @@ impl<D> SeqPoint<D> {
     pub(super) fn precedes_or_eq(self, other: Self) -> bool {
         self == other || self.precedes(other)
     }
+
+    /// Returns the distance from `rhs` to `self`, or `None` if `rhs` does not precede or equal
+    /// `self` in TCP sequence-number space (RFC 9293, Section 3.4).
+    pub(super) fn checked_sub(self, rhs: Self) -> Option<SeqDist<u32, D>> {
+        rhs.precedes_or_eq(self)
+            .then(|| SeqDist { wrapping: self.wrapping - rhs.wrapping, phantom: PhantomData })
+    }
 }
 
 impl<D> Add<SeqDist<u32, D>> for SeqPoint<D> {
@@ -124,14 +131,6 @@ impl<D> AddAssign<SeqDist<u32, D>> for SeqPoint<D> {
     fn add_assign(&mut self, rhs: SeqDist<u32, D>) { *self = *self + rhs; }
 }
 
-impl<D> Sub for SeqPoint<D> {
-    type Output = SeqDist<u32, D>;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        SeqDist { wrapping: self.wrapping - rhs.wrapping, phantom: PhantomData }
-    }
-}
-
 impl<D> fmt::Display for ThousandsSeparated<SeqPoint<D>> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         ThousandsSeparated(self.0.wrapping.0).fmt(f)
@@ -140,7 +139,7 @@ impl<D> fmt::Display for ThousandsSeparated<SeqPoint<D>> {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, crate::endpoint::Local};
+    use {super::*, crate::endpoint::Local, std::ops::Sub};
 
     impl<D> SeqDist<u32, D> {
         pub(in super::super) const fn const_add(self, rhs: Self) -> Self {
@@ -263,5 +262,20 @@ mod tests {
             "The undefined outcome where a number and its antipode are both strictly less than \
              the other depends on the implementation and should result in true here"
         );
+    }
+
+    #[test]
+    fn checked_sub_computes_distance_when_rhs_precedes_or_equals_self() {
+        for [later, earlier, expected] in [[140, 100, 40], [0, u32::MAX, 1], [42, 42, 0]] {
+            assert_eq!(
+                SeqPoint::<Local>::new(later).checked_sub(SeqPoint::new(earlier)),
+                Some(SeqDist::new(expected))
+            );
+        }
+    }
+
+    #[test]
+    fn checked_sub_returns_none_when_rhs_does_not_precede_or_equal_self() {
+        assert_eq!(SeqPoint::<Local>::new(100).checked_sub(SeqPoint::new(140)), None);
     }
 }

@@ -111,13 +111,19 @@ impl ConnState {
     /// front of the send buffer, or returns `Ok(None)` if nothing can be sent right now because the
     /// buffer is empty or the window is full. Does not mutate any other state.
     pub(super) fn drain_transmittable(&mut self) -> Result<Option<TcpPayload>> {
-        let Some(window_state) = &self.window_state else {
-            return Err("`drain_transmittable` called with uninitialized window state".into());
-        };
+        let window_state = self
+            .window_state
+            .as_ref()
+            .ok_or("`drain_transmittable` called with uninitialized window state")?;
 
-        let sent_but_not_acked = self.snd_nxt - self.snd_una;
+        let sent_but_not_acked = self
+            .snd_nxt
+            .checked_sub(self.snd_una)
+            .ok_or("`drain_transmittable` called with SND.UNA not preceding or equaling SND.NXT")?;
+
         let space_in_window =
             SeqDist::<u32, Local>::from(window_state.snd_wnd).saturating_sub(sent_but_not_acked);
+
         let bytes_to_send = usize::try_from(space_in_window)?.min(self.send_buffer.len());
 
         TcpPayload::try_from_iter(self.send_buffer.drain(..bytes_to_send)).map_err(Into::into)
