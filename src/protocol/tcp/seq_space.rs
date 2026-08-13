@@ -197,6 +197,15 @@ mod tests {
     }
 
     #[test]
+    fn not_transitive() {
+        const A: SeqPoint<Local> = SeqPoint::new(0);
+        const B: SeqPoint<Local> = SeqPoint::new(0x6000_0000);
+        const C: SeqPoint<Local> = SeqPoint::new(0xC000_0000);
+
+        assert!(A.precedes(B) && B.precedes(C) && !A.precedes(C));
+    }
+
+    #[test]
     #[expect(clippy::nonminimal_bool, reason = "Keep linear and circular comparisons parallel")]
     fn agrees_with_linear_comparison_over_half_the_space() {
         for [left, right] in [[0, 1], [42, 1 << 31], [0xBEEF_CAFE, 0xCAFE_BEEF]] {
