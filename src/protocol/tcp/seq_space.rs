@@ -142,11 +142,10 @@ mod tests {
     use {super::*, crate::endpoint::Local, std::ops::Sub};
 
     impl<D> SeqDist<u32, D> {
+        /// `self + rhs` with wrapping, but const. This should be removed once const traits are
+        /// stabilized.
         pub(in super::super) const fn const_add(self, rhs: Self) -> Self {
-            Self {
-                wrapping: Wrapping(self.wrapping.0.wrapping_add(rhs.wrapping.0)),
-                phantom: PhantomData,
-            }
+            Self::new(self.wrapping.0.wrapping_add(rhs.wrapping.0))
         }
     }
 
