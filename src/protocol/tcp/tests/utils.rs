@@ -6,15 +6,6 @@ pub const CLIENT_ISN: SeqPoint<Remote> = SeqPoint::new(100);
 /// Fixed value to use as the ISN randomly chosen by the server.
 pub const SERVER_ISN: SeqPoint<Local> = SeqPoint::new(400);
 
-/// Checks at compile time that `CLIENT_ISN` and `SERVER_ISN` are sufficiently far from each
-/// other so they cannot be mixed up in tests.
-const _: () = assert!(
-    CLIENT_ISN
-        .leak_primitive()
-        .abs_diff(SERVER_ISN.leak_primitive())
-        >= 100
-);
-
 /// The number of bytes in the payload `"Hello"`, going in the local to remote direction.
 pub const LOCAL_HELLO_LEN: SeqDist<u32, Local> = SeqDist::new(5);
 

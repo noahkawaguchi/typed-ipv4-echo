@@ -159,17 +159,17 @@ mod tests {
     }
 
     impl<D> SeqPoint<D> {
+        /// `self + rhs` with wrapping, but const. This should be removed once const traits are
+        /// stabilized.
         pub(in super::super) const fn const_add(self, rhs: SeqDist<u32, D>) -> Self {
             Self::new(self.wrapping.0.wrapping_add(rhs.wrapping.0))
         }
 
+        /// `self - rhs` with wrapping, but const. This should be removed once const traits are
+        /// stabilized.
         pub(in super::super) const fn const_sub(self, rhs: SeqDist<u32, D>) -> Self {
             Self::new(self.wrapping.0.wrapping_sub(rhs.wrapping.0))
         }
-
-        /// Leaks the inner primitive type for use in test constants. This should be removed once
-        /// const traits are stabilized.
-        pub(in super::super) const fn leak_primitive(self) -> u32 { self.wrapping.0 }
     }
 
     impl<D> Sub<SeqDist<u32, D>> for SeqPoint<D> {
