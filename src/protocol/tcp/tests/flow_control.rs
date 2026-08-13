@@ -54,6 +54,74 @@ fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result {
 }
 
 #[test]
+fn unacked_bytes_count_toward_room_left_in_send_window() -> Result {
+    // The room left in the send window must account for bytes already sent but not yet
+    // acknowledged, not just use the advertised window size as is. (In other tests where there are
+    // zero unacked bytes, using the window directly without considering SND.NXT and SND.UNA would
+    // pass.)
+
+    const WINDOW: SeqDist<u16, Local> = SeqDist::new(3);
+
+    let mut connections = TcpConnections::default();
+    let mut expected_state = after_handshake_with_snd_wnd(WINDOW);
+    connections.insert(expected_state.clone());
+
+    // "Hello" (5 bytes), window only allows 3 -> "Hel" sent (SND.NXT advances by 3, SND.UNA stays
+    // put), "lo" buffered. 3 bytes are now sent but unacked.
+    TcpHandler {
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
+        window: WINDOW,
+        payload: payload_from("Hello")?,
+        ..CLIENT_PACKET
+    }
+    .create_reply(&mut connections)?;
+
+    expected_state.snd_nxt += WINDOW.into();
+    expected_state.rcv_nxt += REMOTE_HELLO_LEN;
+    expected_state.send_buffer.extend(b"lo");
+
+    {
+        let state = connections.try_get()?;
+        assert_eq!(state, &expected_state, "State confirmation before the dup ACK");
+        assert!(
+            state.snd_una.precedes(state.snd_nxt),
+            "Bytes must be sent but unacked for this test to be meaningful"
+        );
+    }
+
+    // A duplicate ACK (SEG.ACK == SND.UNA, so nothing new is acknowledged) that only refreshes
+    // SND.WND, still at 3. With 3 bytes already sent but unacked and a window of 3, there is no
+    // room left, so the buffered "lo" must stay buffered.
+    let dup_ack_same_window = TcpHandler {
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
+        window: WINDOW,
+        ..CLIENT_PACKET
+    };
+
+    assert_eq!(
+        dup_ack_same_window.create_reply(&mut connections)?,
+        None,
+        "No room left in the window while the first 3 bytes remain unacked"
+    );
+
+    expected_state.window_state = Some(WindowState {
+        snd_wnd: dup_ack_same_window.window,
+        snd_wl1: dup_ack_same_window.seq_num,
+        snd_wl2: dup_ack_same_window.ack_num,
+    });
+
+    assert_eq!(
+        connections.try_get()?,
+        &expected_state,
+        "SND.UNA and the send buffer should be unchanged with only SND.WL1/SND.WL2 refreshed"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn window_opening_via_ack_drains_buffered_remainder() -> Result {
     const HEL_LEN: SeqDist<u32, Local> = SeqDist::new(3);
     const INITIAL_WINDOW: SeqDist<u16, Local> = SeqDist::new(3);
