@@ -158,14 +158,6 @@ mod tests {
         }
     }
 
-    impl<D> Sub for SeqDist<u32, D> {
-        type Output = Self;
-
-        fn sub(self, rhs: Self) -> Self::Output {
-            Self { wrapping: self.wrapping - rhs.wrapping, phantom: PhantomData }
-        }
-    }
-
     impl<D> SeqPoint<D> {
         pub(in super::super) const fn const_add(self, rhs: SeqDist<u32, D>) -> Self {
             Self::new(self.wrapping.0.wrapping_add(rhs.wrapping.0))

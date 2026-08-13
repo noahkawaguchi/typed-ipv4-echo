@@ -124,6 +124,8 @@ fn unacked_bytes_count_toward_room_left_in_send_window() -> Result {
 #[test]
 fn window_opening_via_ack_drains_buffered_remainder() -> Result {
     const HEL_LEN: SeqDist<u32, Local> = SeqDist::new(3);
+    const LO_LEN: SeqDist<u32, Local> = SeqDist::new(2);
+
     const INITIAL_WINDOW: SeqDist<u16, Local> = SeqDist::new(3);
     const LARGER_WINDOW: SeqDist<u16, Local> = SeqDist::new(10);
 
@@ -169,7 +171,7 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
     );
 
     expected_state.snd_una += HEL_LEN;
-    expected_state.snd_nxt += LOCAL_HELLO_LEN - HEL_LEN;
+    expected_state.snd_nxt += LO_LEN;
     expected_state.window_state = Some(WindowState {
         snd_wnd: LARGER_WINDOW,
         snd_wl1: window_update.seq_num,
