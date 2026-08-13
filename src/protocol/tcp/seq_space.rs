@@ -181,14 +181,14 @@ mod tests {
     }
 
     #[test]
-    fn equality() {
+    fn point_equality() {
         for num in [0, 1, 42, 1 << 31, u32::MAX].map(SeqPoint::<Local>::new) {
             assert_eq!(num, num);
         }
     }
 
     #[test]
-    fn not_transitive() {
+    fn point_comparison_is_not_transitive() {
         const A: SeqPoint<Local> = SeqPoint::new(0);
         const B: SeqPoint<Local> = SeqPoint::new(0x6000_0000);
         const C: SeqPoint<Local> = SeqPoint::new(0xC000_0000);
@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     #[expect(clippy::nonminimal_bool, reason = "Keep linear and circular comparisons parallel")]
-    fn agrees_with_linear_comparison_over_half_the_space() {
+    fn circular_comparison_agrees_with_linear_comparison_over_half_the_space() {
         for [prim_left, prim_right] in [[0, 1], [42, 1 << 31], [0xBEEF_CAFE, 0xCAFE_BEEF]] {
             let [seq_left, seq_right] =
                 [SeqPoint::<Local>::new(prim_left), SeqPoint::new(prim_right)];
@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     #[expect(clippy::nonminimal_bool, reason = "Keep linear and circular comparisons parallel")]
-    fn differs_from_linear_comparison_over_half_the_space() {
+    fn circular_comparison_differs_from_linear_comparison_over_half_the_space() {
         for [prim_left, prim_right] in [[u32::MAX, 0], [(1 << 31) + 42, 1], [0xBAAD_D00D, 0xD00D]] {
             let [seq_left, seq_right] =
                 [SeqPoint::<Local>::new(prim_left), SeqPoint::new(prim_right)];
@@ -227,7 +227,7 @@ mod tests {
     }
 
     #[test]
-    fn near_antipode_comparisons() {
+    fn antipode_and_near_antipode_comparisons_are_defined() {
         // As noted in RFC 1982, a pair of antipodes in serial number arithmetic may produce results
         // where both are strictly less than the other or strictly greater than the other. This
         // outcome is left undefined with the recommendation to avoid allowing such pairs to exist.
