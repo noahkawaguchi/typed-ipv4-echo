@@ -118,7 +118,7 @@ impl ConnState {
 
         let sent_but_not_acked = self
             .snd_nxt
-            .checked_sub(self.snd_una)
+            .distance_since(self.snd_una)
             .ok_or("`drain_transmittable` called with SND.UNA not preceding or equaling SND.NXT")?;
 
         let space_in_window =

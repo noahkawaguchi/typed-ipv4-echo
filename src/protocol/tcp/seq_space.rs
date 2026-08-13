@@ -113,7 +113,7 @@ impl<D> SeqPoint<D> {
 
     /// Returns the distance from `rhs` to `self`, or `None` if `rhs` does not precede or equal
     /// `self` in TCP sequence-number space (RFC 9293, Section 3.4).
-    pub(super) fn checked_sub(self, rhs: Self) -> Option<SeqDist<u32, D>> {
+    pub(super) fn distance_since(self, rhs: Self) -> Option<SeqDist<u32, D>> {
         rhs.precedes_or_eq(self)
             .then(|| SeqDist { wrapping: self.wrapping - rhs.wrapping, phantom: PhantomData })
     }
@@ -257,17 +257,17 @@ mod tests {
     }
 
     #[test]
-    fn checked_sub_computes_distance_when_rhs_precedes_or_equals_self() {
+    fn distance_since_computes_distance_when_rhs_precedes_or_equals_self() {
         for [later, earlier, expected] in [[140, 100, 40], [0, u32::MAX, 1], [42, 42, 0]] {
             assert_eq!(
-                SeqPoint::<Local>::new(later).checked_sub(SeqPoint::new(earlier)),
+                SeqPoint::<Local>::new(later).distance_since(SeqPoint::new(earlier)),
                 Some(SeqDist::new(expected))
             );
         }
     }
 
     #[test]
-    fn checked_sub_returns_none_when_rhs_does_not_precede_or_equal_self() {
-        assert_eq!(SeqPoint::<Local>::new(100).checked_sub(SeqPoint::new(140)), None);
+    fn distance_since_returns_none_when_rhs_does_not_precede_or_equal_self() {
+        assert_eq!(SeqPoint::<Local>::new(100).distance_since(SeqPoint::new(140)), None);
     }
 }
