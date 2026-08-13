@@ -1,7 +1,6 @@
 use {
     crate::protocol::display::ThousandsSeparated,
     std::{
-        cmp::Ordering,
         fmt,
         marker::PhantomData,
         num::{NonZeroU16, Wrapping},
@@ -99,6 +98,18 @@ impl<D> SeqPoint<D> {
     }
 
     pub(super) const fn to_be_bytes(self) -> [u8; 4] { self.wrapping.0.to_be_bytes() }
+
+    /// Returns whether `self` precedes `other` in TCP sequence-number space, accounting for
+    /// wraparound (RFC 9293, Section 3.4). Not transitive.
+    pub(super) fn precedes(self, other: Self) -> bool {
+        self.wrapping - other.wrapping >= Wrapping(1 << 31)
+    }
+
+    /// Returns whether `self` precedes or equals `other` in TCP sequence-number space, accounting
+    /// for wraparound (RFC 9293, Section 3.4). Not transitive.
+    pub(super) fn precedes_or_eq(self, other: Self) -> bool {
+        self == other || self.precedes(other)
+    }
 }
 
 impl<D> Add<SeqDist<u32, D>> for SeqPoint<D> {
@@ -118,23 +129,6 @@ impl<D> Sub for SeqPoint<D> {
 
     fn sub(self, rhs: Self) -> Self::Output {
         SeqDist { wrapping: self.wrapping - rhs.wrapping, phantom: PhantomData }
-    }
-}
-
-impl<D> PartialOrd for SeqPoint<D> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        /// Exactly halfway around 32-bit sequence number space.
-        const SEMICIRCUMFERENCE: u32 = 1 << 31;
-
-        /// One more than halfway around 32-bit sequence number space.
-        const SEMICIRCUMFERENCE_PLUS_1: u32 = SEMICIRCUMFERENCE + 1;
-
-        match (self.wrapping - other.wrapping).0 {
-            0 => Some(Ordering::Equal),
-            1..SEMICIRCUMFERENCE => Some(Ordering::Greater),
-            SEMICIRCUMFERENCE => None,
-            SEMICIRCUMFERENCE_PLUS_1.. => Some(Ordering::Less),
-        }
     }
 }
 
@@ -203,41 +197,22 @@ mod tests {
     }
 
     #[test]
-    fn inequality() {
-        for [left, right] in [0, 1, 42, 1 << 31, u32::MAX]
-            .map(SeqPoint::<Local>::new)
-            .array_windows::<2>()
-        {
-            assert_ne!(left, right);
-            assert_ne!(right, left);
-        }
-    }
-
-    #[test]
+    #[expect(clippy::nonminimal_bool, reason = "Keep linear and circular comparisons parallel")]
     fn agrees_with_linear_comparison_over_half_the_space() {
         for [left, right] in [[0, 1], [42, 1 << 31], [0xBEEF_CAFE, 0xCAFE_BEEF]] {
-            assert_eq!(
-                SeqPoint::<Local>::new(left).partial_cmp(&SeqPoint::new(right)),
-                left.partial_cmp(&right)
-            );
-            assert_eq!(
-                SeqPoint::<Local>::new(right).partial_cmp(&SeqPoint::new(left)),
-                right.partial_cmp(&left)
+            assert!(SeqPoint::<Local>::new(left).precedes(SeqPoint::new(right)) && left < right);
+            assert!(
+                !SeqPoint::<Local>::new(right).precedes(SeqPoint::new(left)) && !(right < left)
             );
         }
     }
 
     #[test]
+    #[expect(clippy::nonminimal_bool, reason = "Keep linear and circular comparisons parallel")]
     fn differs_from_linear_comparison_over_half_the_space() {
         for [left, right] in [[u32::MAX, 0], [(1 << 31) + 42, 1], [0xBAAD_D00D, 0xD00D]] {
-            assert_ne!(
-                SeqPoint::<Local>::new(left).partial_cmp(&SeqPoint::new(right)),
-                left.partial_cmp(&right)
-            );
-            assert_ne!(
-                SeqPoint::<Local>::new(right).partial_cmp(&SeqPoint::new(left)),
-                right.partial_cmp(&left)
-            );
+            assert!(SeqPoint::<Local>::new(left).precedes(SeqPoint::new(right)) && !(left < right));
+            assert!(!SeqPoint::<Local>::new(right).precedes(SeqPoint::new(left)) && right < left);
         }
     }
 
@@ -254,13 +229,20 @@ mod tests {
         const FARTHEST_GREATER: SeqPoint<Local> = ANTIPODE.const_sub(SeqDist::new(1));
         const FARTHEST_LESS: SeqPoint<Local> = ANTIPODE.const_add(SeqDist::new(1));
 
-        assert!(FARTHEST_GREATER > NUM, "The first defined comparison one below the antipode");
-        assert!(FARTHEST_LESS < NUM, "The first defined comparison one above the antipode");
+        assert!(
+            NUM.precedes(FARTHEST_GREATER) && !FARTHEST_GREATER.precedes(NUM),
+            "The first defined comparison one below the antipode"
+        );
 
         assert!(
-            !(NUM < ANTIPODE || ANTIPODE < NUM || NUM == ANTIPODE),
+            FARTHEST_LESS.precedes(NUM) && !NUM.precedes(FARTHEST_LESS),
+            "The first defined comparison one above the antipode"
+        );
+
+        assert!(
+            NUM.precedes(ANTIPODE) && ANTIPODE.precedes(NUM),
             "The undefined outcome where a number and its antipode are both strictly less than \
-             the other depends on the implementation and should result in false here"
+             the other depends on the implementation and should result in true here"
         );
     }
 }

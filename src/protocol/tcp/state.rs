@@ -78,13 +78,14 @@ impl ConnState {
             return Err("`incoming_ack_update` called with uninitialized window state");
         };
 
-        if self.snd_una <= seg.ack_num && seg.ack_num <= self.snd_nxt {
+        if self.snd_una.precedes_or_eq(seg.ack_num) && seg.ack_num.precedes_or_eq(self.snd_nxt) {
             // Include duplicate ACKs: SND.UNA <= SEG.ACK <= SND.NXT
             //     and
             // Guard against an old/reordered segment clobbering the window with stale data:
             //     SND.WL1 < SEG.SEQ or (SND.WL1 == SEG.SEQ and SND.WL2 <= SEG.ACK)
-            if window_state.snd_wl1 < seg.seq_num
-                || (window_state.snd_wl1 == seg.seq_num && window_state.snd_wl2 <= seg.ack_num)
+            if window_state.snd_wl1.precedes(seg.seq_num)
+                || (window_state.snd_wl1 == seg.seq_num
+                    && window_state.snd_wl2.precedes_or_eq(seg.ack_num))
             {
                 self.window_state = Some(WindowState {
                     snd_wnd: seg.window,
@@ -94,7 +95,7 @@ impl ConnState {
             }
 
             // Exclude duplicate ACKs: SND.UNA < SEG.ACK <= SND.NXT
-            if self.snd_una < seg.ack_num {
+            if self.snd_una.precedes(seg.ack_num) {
                 self.snd_una = seg.ack_num;
 
                 // ACKs are cumulative, so only keep pending segments not fully covered by SEG.ACK

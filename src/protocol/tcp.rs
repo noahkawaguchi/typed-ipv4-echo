@@ -194,8 +194,8 @@ impl TcpHandler<Remote> {
                 TcpFlags::Ack,
                 maybe_payload,
             ) if self.seq_num == conn.rcv_nxt
-                && conn.snd_una < self.ack_num
-                && self.ack_num <= conn.snd_nxt =>
+                && conn.snd_una.precedes(self.ack_num)
+                && self.ack_num.precedes_or_eq(conn.snd_nxt) =>
             {
                 conn.tcp_state = TcpState::Established;
                 conn.rcv_nxt = self.seq_num;
@@ -229,7 +229,7 @@ impl TcpHandler<Remote> {
                 Some(&mut ConnState { tcp_state: TcpState::Established, snd_nxt, rcv_nxt, .. }),
                 TcpFlags::Ack,
                 _,
-            ) if snd_nxt < self.ack_num => Some(SendInfo::pure_ack(snd_nxt, rcv_nxt)),
+            ) if snd_nxt.precedes(self.ack_num) => Some(SendInfo::pure_ack(snd_nxt, rcv_nxt)),
 
             // Pure ACK (no payload) on an established connection (acknowledgment of data sent by
             // the server) -> advance SND.UNA, then send however much the window allows from the
@@ -431,8 +431,10 @@ impl TcpHandler<Remote> {
                 } else {
                     // Check whether `seq_num` falls within the receive window [RCV.NXT, RCV.NXT +
                     // RCV.WND). true -> Case 3, false -> Case 1.
-                    (rcv_nxt <= self.seq_num
-                        && self.seq_num < rcv_nxt + TcpHandler::<Local>::RCV_WND.into())
+                    (rcv_nxt.precedes_or_eq(self.seq_num)
+                        && self
+                            .seq_num
+                            .precedes(rcv_nxt + TcpHandler::<Local>::RCV_WND.into()))
                     .then_some(SendInfo::pure_ack(snd_nxt, rcv_nxt))
                 }
             }

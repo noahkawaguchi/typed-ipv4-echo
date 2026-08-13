@@ -58,7 +58,9 @@ impl PendingSegment {
     }
 
     /// Returns whether the segment is fully covered by `ack_num`.
-    pub(super) fn is_covered_by(&self, ack_num: SeqPoint<Local>) -> bool { self.end_seq <= ack_num }
+    pub(super) fn is_covered_by(&self, ack_num: SeqPoint<Local>) -> bool {
+        self.end_seq.precedes_or_eq(ack_num)
+    }
 
     /// Returns whether the segment has been retried at least `max_retries` times.
     pub(super) const fn exhausted_retries(&self, max_retries: u8) -> bool {
