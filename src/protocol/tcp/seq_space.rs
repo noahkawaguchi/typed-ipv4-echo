@@ -202,26 +202,36 @@ mod tests {
         const B: SeqPoint<Local> = SeqPoint::new(0x6000_0000);
         const C: SeqPoint<Local> = SeqPoint::new(0xC000_0000);
 
-        assert!(A.precedes(B) && B.precedes(C) && !A.precedes(C));
+        assert!(A.precedes(B));
+        assert!(B.precedes(C));
+        assert!(!A.precedes(C));
     }
 
     #[test]
     #[expect(clippy::nonminimal_bool, reason = "Keep linear and circular comparisons parallel")]
     fn agrees_with_linear_comparison_over_half_the_space() {
-        for [left, right] in [[0, 1], [42, 1 << 31], [0xBEEF_CAFE, 0xCAFE_BEEF]] {
-            assert!(SeqPoint::<Local>::new(left).precedes(SeqPoint::new(right)) && left < right);
-            assert!(
-                !SeqPoint::<Local>::new(right).precedes(SeqPoint::new(left)) && !(right < left)
-            );
+        for [prim_left, prim_right] in [[0, 1], [42, 1 << 31], [0xBEEF_CAFE, 0xCAFE_BEEF]] {
+            let [seq_left, seq_right] =
+                [SeqPoint::<Local>::new(prim_left), SeqPoint::new(prim_right)];
+
+            assert!(seq_left.precedes(seq_right));
+            assert!(prim_left < prim_right);
+            assert!(!seq_right.precedes(seq_left));
+            assert!(!(prim_right < prim_left));
         }
     }
 
     #[test]
     #[expect(clippy::nonminimal_bool, reason = "Keep linear and circular comparisons parallel")]
     fn differs_from_linear_comparison_over_half_the_space() {
-        for [left, right] in [[u32::MAX, 0], [(1 << 31) + 42, 1], [0xBAAD_D00D, 0xD00D]] {
-            assert!(SeqPoint::<Local>::new(left).precedes(SeqPoint::new(right)) && !(left < right));
-            assert!(!SeqPoint::<Local>::new(right).precedes(SeqPoint::new(left)) && right < left);
+        for [prim_left, prim_right] in [[u32::MAX, 0], [(1 << 31) + 42, 1], [0xBAAD_D00D, 0xD00D]] {
+            let [seq_left, seq_right] =
+                [SeqPoint::<Local>::new(prim_left), SeqPoint::new(prim_right)];
+
+            assert!(seq_left.precedes(seq_right));
+            assert!(!(prim_left < prim_right));
+            assert!(!seq_right.precedes(seq_left));
+            assert!(prim_right < prim_left);
         }
     }
 
