@@ -12,6 +12,7 @@ Typenet is a userspace IPv4/ICMP/TCP/UDP implementation and echo server that ope
 6. [Connecting as a Client](#connecting-as-a-client)
 7. [Testing](#testing)
 8. [Development and CI](#development-and-ci)
+9. [Demos](#demos)
 
 ## Goals and Non-Goals
 
@@ -177,11 +178,78 @@ just udp
 just icmp
 ```
 
-<details>
-<summary><i>Example log: "hello world" exchange and server shutdown (click to expand)</i></summary>
-<br />
+### File Transfer
+
+To send a file through the echo server using TCP and diff the echoed reply against the original:
+
+```sh
+just throughput                # Defaults to README.md
+just throughput -f Cargo.toml  # Send Cargo.toml instead
+```
+
+See `just --usage throughput` for further options.
+
+### Network Emulation
+
+To emulate real-world networks with delay/loss/corruption/duplication/reordering, run the `loss` recipe and then try connecting to the server again.
+
+```sh
+just loss        # Add the emulation to the device (uses sudo)
+just loss-show   # Show current network emulation and packet counters
+just loss-clear  # Remove emulated network conditions (uses sudo)
+```
+
+See `just --usage loss` for further options.
+
+## Testing
+
+As with running the server, you will be prompted to create the TUN device if it does not already exist.
+
+```sh
+just test
+```
+
+Or with a coverage report:
+
+```sh
+just cov       # Text summary
+just cov-open  # Generate detailed HTML and open in browser
+```
+
+The project includes comprehensive unit and integration tests for:
+
+- Parsing, send/receive logic, and encoding for IPv4 headers, TCP segments, ICMP Echo Request/Reply, and UDP datagrams
+- Server loop packet I/O, timers, and connection draining
+- Low-level signal handling and syscall interrupts
+- Internet checksum calculation
+- Serial number arithmetic
+- Custom type invariants
+
+## Development and CI
+
+Tests, lints, format checking, and spell checking run in CI (as defined in [`.github/workflows/ci.yml`](.github/workflows/ci.yml)) and must all pass before merging into `main`. Tests and lints run on both `ubuntu-24.04-arm` and `ubuntu-24.04` because the results can differ between architectures, especially due to the C FFI.
+
+The project takes a strict approach to linting (as defined in [`Cargo.toml`](Cargo.toml)), completely forbidding panicking constructs like `unwrap` and `expect` and isolating limited use of `unsafe`.
+
+The [`justfile`](justfile) includes recipes for running CI checks locally. The `lint-targets` recipe cross-compiles and lints for both `aarch64-unknown-linux-gnu` and `x86_64-unknown-linux-gnu`. If not using Nix, this requires `rustup target add <TARGET>` for one or both of the targets depending on whether your host platform is already one of the two.
+
+```sh
+just lint
+just lint-targets
+just fmt-check
+just spell-check
+just all-checks  # All CI checks (including tests)
+```
+
+## Demos
+
+### "hello world" Exchange and Server Shutdown
 
 This example includes a brief exchange of "hello" and "world" before active close from the server side and draining of TCP connections.
+
+<details>
+<summary><i>Example log (click to expand)</i></summary>
+<br />
 
 ```log
 [00:00:00.000] Waiting for packets on TUN device tun0 (Ctrl+C to stop)
@@ -303,22 +371,13 @@ TCP | 8080 -> 53666 | seq=2,732,711,074 ack=1,250,353,575 win=65,535 | ACK
 
 </details>
 
-### File Transfer
-
-To send a file through the echo server using TCP and diff the echoed reply against the original:
-
-```sh
-just throughput                # Defaults to README.md
-just throughput -f Cargo.toml  # Send Cargo.toml instead
-```
-
-See `just --usage throughput` for further options.
-
-<details>
-<summary><i>Example log: echoing <code>Cargo.toml</code> (click to expand)</i></summary>
-<br />
+### Echoing `Cargo.toml`
 
 This example shows the bytes of `Cargo.toml` being echoed through the server instead of simple interactive use.
+
+<details>
+<summary><i>Example log (click to expand)</i></summary>
+<br />
 
 ```log
 [00:00:00.000] Waiting for packets on TUN device tun0 (Ctrl+C to stop)
@@ -451,27 +510,17 @@ TCP | 58716 -> 8080 | seq=2,581,557,427 ack=3,071,984,105 win=63,784 | ACK
 
 </details>
 
-### Network Emulation
-
-To emulate real-world networks with delay/loss/corruption/duplication/reordering, run the `loss` recipe and then try connecting to the server again.
-
-```sh
-just loss        # Add the emulation to the device (uses sudo)
-just loss-show   # Show current network emulation and packet counters
-just loss-clear  # Remove emulated network conditions (uses sudo)
-```
-
-See `just --usage loss` for further options.
-
-<details>
-<summary><i>Example log: degraded network conditions (click to expand)</i></summary>
-<br />
+### Degraded Network Conditions
 
 This example includes:
 
 - Not letting an out-of-order FIN prematurely close the connection
 - Dropping packets with invalid checksums
 - Retransmitting a segment with exponential backoff until it is acknowledged
+
+<details>
+<summary><i>Example log (click to expand)</i></summary>
+<br />
 
 <!--
 Commands used here for future reference:
@@ -625,43 +674,3 @@ TCP | 45952 -> 8080 | seq=3,407,601,062 ack=948,925,594 win=63,784 | ACK
 ```
 
 </details>
-
-## Testing
-
-As with running the server, you will be prompted to create the TUN device if it does not already exist.
-
-```sh
-just test
-```
-
-Or with a coverage report:
-
-```sh
-just cov       # Text summary
-just cov-open  # Generate detailed HTML and open in browser
-```
-
-The project includes comprehensive unit and integration tests for:
-
-- Parsing, send/receive logic, and encoding for IPv4 headers, TCP segments, ICMP Echo Request/Reply, and UDP datagrams
-- Server loop packet I/O, timers, and connection draining
-- Low-level signal handling and syscall interrupts
-- Internet checksum calculation
-- Serial number arithmetic
-- Custom type invariants
-
-## Development and CI
-
-Tests, lints, format checking, and spell checking run in CI (as defined in [`.github/workflows/ci.yml`](.github/workflows/ci.yml)) and must all pass before merging into `main`. Tests and lints run on both `ubuntu-24.04-arm` and `ubuntu-24.04` because the results can differ between architectures, especially due to the C FFI.
-
-The project takes a strict approach to linting (as defined in [`Cargo.toml`](Cargo.toml)), completely forbidding panicking constructs like `unwrap` and `expect` and isolating limited use of `unsafe`.
-
-The [`justfile`](justfile) includes recipes for running CI checks locally. The `lint-targets` recipe cross-compiles and lints for both `aarch64-unknown-linux-gnu` and `x86_64-unknown-linux-gnu`. If not using Nix, this requires `rustup target add <TARGET>` for one or both of the targets depending on whether your host platform is already one of the two.
-
-```sh
-just lint
-just lint-targets
-just fmt-check
-just spell-check
-just all-checks  # All CI checks (including tests)
-```
