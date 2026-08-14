@@ -7,22 +7,22 @@ pub const CLIENT_ISN: SeqPoint<Remote> = SeqPoint::new(100);
 pub const SERVER_ISN: SeqPoint<Local> = SeqPoint::new(400);
 
 /// The number of bytes in the payload `"Hello"`, going in the local to remote direction.
-pub const LOCAL_HELLO_LEN: SeqDist<u32, Local> = SeqDist::new(5);
+pub const LOCAL_HELLO_LEN: SeqOffset<u32, Local> = SeqOffset::new(5);
 
 /// The number of bytes in the payload `"Hi"`, going in the local to remote direction.
-pub const LOCAL_HI_LEN: SeqDist<u32, Local> = SeqDist::new(2);
+pub const LOCAL_HI_LEN: SeqOffset<u32, Local> = SeqOffset::new(2);
 
 /// The number of bytes in the payload `"Hey"`, going in the local to remote direction.
-pub const LOCAL_HEY_LEN: SeqDist<u32, Local> = SeqDist::new(3);
+pub const LOCAL_HEY_LEN: SeqOffset<u32, Local> = SeqOffset::new(3);
 
 /// The number of bytes in the payload `"Hello"`, going in the remote to local direction.
-pub const REMOTE_HELLO_LEN: SeqDist<u32, Remote> = SeqDist::new(5);
+pub const REMOTE_HELLO_LEN: SeqOffset<u32, Remote> = SeqOffset::new(5);
 
 /// The number of bytes in the payload `"Hi"`, going in the remote to local direction.
-pub const REMOTE_HI_LEN: SeqDist<u32, Remote> = SeqDist::new(2);
+pub const REMOTE_HI_LEN: SeqOffset<u32, Remote> = SeqOffset::new(2);
 
 /// The number of bytes in the payload `"Hey"`, going in the remote to local direction.
-pub const REMOTE_HEY_LEN: SeqDist<u32, Remote> = SeqDist::new(3);
+pub const REMOTE_HEY_LEN: SeqOffset<u32, Remote> = SeqOffset::new(3);
 
 /// Connection key shared by test modules.
 pub const KEY: ConnKey = ConnKey {
@@ -41,7 +41,7 @@ pub const AFTER_HANDSHAKE: ConnState = ConnState {
     rcv_nxt: CLIENT_ISN.const_add(REMOTE_SYN_BYTE),
     snd_una: SERVER_ISN.const_add(LOCAL_SYN_BYTE),
     window_state: Some(WindowState {
-        snd_wnd: SeqDist::new(u16::MAX),
+        snd_wnd: SeqOffset::new(u16::MAX),
         snd_wl1: CLIENT_ISN.const_add(REMOTE_SYN_BYTE),
         snd_wl2: SERVER_ISN.const_add(LOCAL_SYN_BYTE),
     }),
@@ -58,7 +58,7 @@ pub const CLIENT_PACKET: TcpHandler<Remote> = TcpHandler {
     ack_num: SeqPoint::new(0),
     offset_bytes: 20,
     flags: TcpFlags::Ack,
-    window: SeqDist::new(u16::MAX),
+    window: SeqOffset::new(u16::MAX),
     payload: None,
 };
 
@@ -71,7 +71,7 @@ pub const SERVER_REPLY: TcpHandler<Local> = TcpHandler {
     ack_num: SeqPoint::new(0),
     offset_bytes: 20,
     flags: TcpFlags::Ack,
-    window: SeqDist::new(u16::MAX),
+    window: SeqOffset::new(u16::MAX),
     payload: None,
 };
 

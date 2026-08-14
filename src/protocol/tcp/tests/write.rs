@@ -9,7 +9,7 @@ fn write_into_produces_correct_bytes_with_no_payload() -> Result {
         ack_num: SeqPoint::new(0x0000_1001),
         offset_bytes: 20,
         flags: TcpFlags::SynAck,
-        window: SeqDist::new(29_200),
+        window: SeqOffset::new(29_200),
         payload: None,
     };
 
@@ -41,7 +41,7 @@ fn write_into_produces_correct_bytes_with_payload() -> Result {
         ack_num: SeqPoint::new(4102),
         offset_bytes: 20,
         flags: TcpFlags::Ack,
-        window: SeqDist::new(u16::MAX),
+        window: SeqOffset::new(u16::MAX),
         payload: payload_from("Hello")?,
     };
 

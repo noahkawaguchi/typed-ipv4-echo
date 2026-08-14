@@ -3,7 +3,7 @@ use {
         Result,
         endpoint::{Local, Remote},
         protocol::tcp::{
-            LOCAL_SYN_BYTE, SendInfo, SeqDist, SeqPoint, TcpFlags, TcpHandler, TcpPayload,
+            LOCAL_SYN_BYTE, SendInfo, SeqOffset, SeqPoint, TcpFlags, TcpHandler, TcpPayload,
             pending_segment::PendingSegment,
         },
     },
@@ -118,11 +118,11 @@ impl ConnState {
 
         let sent_but_not_acked = self
             .snd_nxt
-            .distance_since(self.snd_una)
+            .offset_past(self.snd_una)
             .ok_or("`drain_transmittable` called with SND.UNA not preceding or equaling SND.NXT")?;
 
         let space_in_window =
-            SeqDist::<u32, Local>::from(window_state.snd_wnd).saturating_sub(sent_but_not_acked);
+            SeqOffset::<u32, Local>::from(window_state.snd_wnd).saturating_sub(sent_but_not_acked);
 
         let bytes_to_send = usize::try_from(space_in_window)?.min(self.send_buffer.len());
 
@@ -205,7 +205,7 @@ pub(super) enum TcpState {
 pub(super) struct WindowState {
     /// SND.WND or send window. "This represents the sequence numbers that the remote (receiving)
     /// TCP endpoint is willing to receive" (RFC 9293, Section 4).
-    pub(super) snd_wnd: SeqDist<u16, Local>,
+    pub(super) snd_wnd: SeqOffset<u16, Local>,
 
     /// SND.WL1. "segment sequence number used for last window update" (RFC 9293, Section 3.3.1).
     ///
