@@ -48,31 +48,31 @@ Although the TCP implementation is not complete, it covers a significant portion
 
 ## Architecture
 
-The server separates protocol-agnostic IPv4 handling from protocol-specific ICMP/TCP/UDP logic using a `ProtocolHandler` enum with variants for each supported protocol.
+The server separates IPv4 handling from ICMP/TCP/UDP-specific logic using a `ProtocolHandler` enum with variants for each supported protocol.
 
 ```
-┌────────────────────────────────────┐
-│       TUN device, main loop,       │
-│         shutdown signals           │
-└────────────────┬───────────────────┘
+╭─────────────────────────────────╮
+│      TUN device, main loop,     │
+│        shutdown signals         │
+╰────────────────┬────────────────╯
                  │
                  ▼
-┌────────────────────────────────────┐
-│            IPv4 header             │
-│          parsing/writing           │
-└────────────────┬───────────────────┘
+╭─────────────────────────────────╮
+│           IPv4 header           │
+│         parsing/writing         │
+╰────────────────┬────────────────╯
                  │
                  ▼
-┌───────────────────────────────────┐
-│       ProtocolHandler enum        │
-│         (static dispatch)         │
-└────┬───────────┬───────────┬──────┘
+╭─────────────────────────────────╮
+│      ProtocolHandler enum       │
+│        (static dispatch)        │
+╰────┬───────────┬───────────┬────╯
      │           │           │
      ▼           ▼           ▼
-┌─────────┐ ┌─────────┐ ┌─────────┐
+╭─────────╮ ╭─────────╮ ╭─────────╮
 │  ICMP   │ │   TCP   │ │   UDP   │
 │ handler │ │ handler │ │ handler │
-└─────────┘ └─────────┘ └─────────┘
+╰─────────╯ ╰─────────╯ ╰─────────╯
 ```
 
 Each variant wraps a concrete protocol handler responsible for:
