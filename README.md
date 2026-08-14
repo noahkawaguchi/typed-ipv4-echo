@@ -6,7 +6,7 @@ Typenet is a userspace IPv4/ICMP/TCP/UDP implementation and echo server that ope
 
 1. [Goals and Non-Goals](#goals-and-non-goals)
 2. [Features](#features)
-3. [Architecture](#architecture)
+3. [Design](#design)
 4. [Prerequisites](#prerequisites)
 5. [Running the Server](#running-the-server)
 6. [Connecting as a Client](#connecting-as-a-client)
@@ -46,7 +46,9 @@ Although the TCP implementation is not complete, it covers a significant portion
 - Active close, passive close, and simultaneous close
 - Handling of unknown and aborted connections
 
-## Architecture
+## Design
+
+### Static Dispatch Architecture
 
 The server separates IPv4 handling from ICMP/TCP/UDP-specific logic using a `ProtocolHandler` enum with variants for each supported protocol.
 
