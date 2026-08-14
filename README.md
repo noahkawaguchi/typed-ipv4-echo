@@ -1,20 +1,32 @@
 # Typenet
 
-Typenet is a userspace IPv4/ICMP/TCP/UDP implementation and echo server that operates over Linux TUN devices. This project demonstrates low-level networking in Rust, working with packet bytes and syscalls while focusing on type safety and manual protocol implementations.
+Typenet is a userspace IPv4/ICMP/TCP/UDP implementation and echo server that operates over Linux TUN devices. This project demonstrates low-level networking in Rust, working at the level of packet bytes and syscalls while upholding type safety.
 
 ## Table of Contents
 
-1. [Features](#features)
-2. [Architecture](#architecture)
-3. [Prerequisites](#prerequisites)
-4. [Running the Server](#running-the-server)
-5. [Connecting as a Client](#connecting-as-a-client)
-6. [Testing](#testing)
-7. [Development and CI](#development-and-ci)
+1. [Goals and Non-Goals](#goals-and-non-goals)
+2. [Features](#features)
+3. [Design](#design)
+4. [Prerequisites](#prerequisites)
+5. [Running the Server](#running-the-server)
+6. [Connecting as a Client](#connecting-as-a-client)
+7. [Testing](#testing)
+8. [Development and CI](#development-and-ci)
+9. [Demos](#demos)
+
+## Goals and Non-Goals
+
+| Goal                                             | Non-goal                                   |
+| ------------------------------------------------ | ------------------------------------------ |
+| Learning and demonstration project               | Production-ready stack                     |
+| Direct engagement with low-level Linux APIs      | Cross-platform abstraction layers          |
+| Manual parsing/encoding of a few key protocols   | Supporting as many protocols as possible   |
+| No panicking                                     | Avoiding theoretically infallible `Result` |
+| Maximal type safety at little to no cost         | Absolutely zero-cost abstractions only     |
+| Stack allocation and references where reasonable | No heap, `no_std`                          |
 
 ## Features
 
-- **Type Safety**: Leverages Rust's strong type system and zero-cost abstractions to safely create and uphold static guarantees without compromising on performance
 - **Near-Zero Dependencies**: Depends only on the Rust Standard Library and `libc` (raw FFI to access platform C APIs), implementing all other logic from scratch
 - **TUN Device Integration**: Performs low-level packet I/O using Linux TUN virtual network interfaces rather than sockets
 - **Multi-Protocol Support**: Manages TCP connections, ICMP Echo Request/Reply, and UDP datagrams
@@ -33,33 +45,39 @@ Although the TCP implementation is not complete, it covers a significant portion
 - Active close, passive close, and simultaneous close
 - Handling of unknown and aborted connections
 
-## Architecture
+## Design
 
-The server separates protocol-agnostic IPv4 handling from protocol-specific ICMP/TCP/UDP logic using a `ProtocolHandler` enum with variants for each supported protocol.
+### Encoding Domain Logic in the Type System
+
+A driving force throughout the codebase is the use of domain types to create and uphold static guarantees that make invalid operations unrepresentable. As just one example, the sealed trait `Endpoint` and its zero-sized implementers `Local` and `Remote` turn classes of logic bugs, such as arithmetic between RCV.NXT and SND.UNA or packets with the source and destination addresses flipped, into compile errors.
+
+### Static Dispatch Architecture
+
+The server separates IPv4 handling from ICMP/TCP/UDP-specific logic using a `ProtocolHandler` enum with variants for each supported protocol.
 
 ```
-┌────────────────────────────────────┐
-│       TUN device, main loop,       │
-│         shutdown signals           │
-└────────────────┬───────────────────┘
+╭─────────────────────────────────╮
+│      TUN device, main loop,     │
+│        shutdown signals         │
+╰────────────────┬────────────────╯
                  │
                  ▼
-┌────────────────────────────────────┐
-│            IPv4 header             │
-│          parsing/writing           │
-└────────────────┬───────────────────┘
+╭─────────────────────────────────╮
+│           IPv4 header           │
+│         parsing/writing         │
+╰────────────────┬────────────────╯
                  │
                  ▼
-┌───────────────────────────────────┐
-│       ProtocolHandler enum        │
-│         (static dispatch)         │
-└────┬───────────┬───────────┬──────┘
+╭─────────────────────────────────╮
+│      ProtocolHandler enum       │
+│        (static dispatch)        │
+╰────┬───────────┬───────────┬────╯
      │           │           │
      ▼           ▼           ▼
-┌─────────┐ ┌─────────┐ ┌─────────┐
+╭─────────╮ ╭─────────╮ ╭─────────╮
 │  ICMP   │ │   TCP   │ │   UDP   │
 │ handler │ │ handler │ │ handler │
-└─────────┘ └─────────┘ └─────────┘
+╰─────────╯ ╰─────────╯ ╰─────────╯
 ```
 
 Each variant wraps a concrete protocol handler responsible for:
@@ -116,7 +134,7 @@ For each of these three recipes, see `just --usage <RECIPE>` for further options
 <summary><i>Optional environment variable configuration (click to expand)</i></summary>
 <br />
 
-The following environment variables can be used to configure the TUN device and server. A `.env` file will automatically be read if present.
+The following environment variables can be used to configure the TUN device and server. When using Just, a `.env` file will automatically be read if present.
 
 | Key                     | Meaning                                                   | Default     |
 | ----------------------- | --------------------------------------------------------- | ----------- |
@@ -145,7 +163,7 @@ You will be prompted to create the TUN device on first use, once per reboot, whi
 just serve
 ```
 
-The [justfile](justfile) also includes recipes for saving logs to file.
+The [`justfile`](justfile) also includes recipes for saving logs to file.
 
 ```sh
 just serve-save  # Run and save log file to `logs` directory
@@ -165,11 +183,78 @@ just udp
 just icmp
 ```
 
-<details>
-<summary><i>Example log: "hello world" exchange and server shutdown (click to expand)</i></summary>
-<br />
+### File Transfer
+
+To send a file through the echo server using TCP and diff the echoed reply against the original:
+
+```sh
+just throughput                # Defaults to README.md
+just throughput -f Cargo.toml  # Send Cargo.toml instead
+```
+
+See `just --usage throughput` for further options.
+
+### Network Emulation
+
+To emulate real-world networks with delay/loss/corruption/duplication/reordering, run the `loss` recipe and then try connecting to the server again.
+
+```sh
+just loss        # Add the emulation to the device (uses sudo)
+just loss-show   # Show current network emulation and packet counters
+just loss-clear  # Remove emulated network conditions (uses sudo)
+```
+
+See `just --usage loss` for further options.
+
+## Testing
+
+As with running the server, you will be prompted to create the TUN device if it does not already exist.
+
+```sh
+just test
+```
+
+Or with a coverage report:
+
+```sh
+just cov       # Text summary
+just cov-open  # Generate detailed HTML and open in browser
+```
+
+The project includes unit and integration tests for:
+
+- Parsing, send/receive logic, and encoding for IPv4 headers, TCP segments, ICMP Echo Request/Reply, and UDP datagrams
+- Server loop packet I/O, timers, and connection draining
+- Low-level signal handling and syscall interrupts
+- Internet checksum calculation
+- Serial number arithmetic
+- Various custom type invariants
+
+## Development and CI
+
+Tests, lints, format checking, and spell checking run in CI (as defined in [`.github/workflows/ci.yml`](.github/workflows/ci.yml)) and must all pass before merging into `main`. Tests and lints run on both `ubuntu-24.04-arm` and `ubuntu-24.04` because the results can differ between architectures, especially due to the C FFI.
+
+The project takes a strict approach to linting (as defined in [`Cargo.toml`](Cargo.toml)), completely forbidding panicking constructs like `unwrap` and `expect` and isolating limited use of `unsafe`.
+
+The [`justfile`](justfile) includes recipes for running CI checks locally. The `lint-targets` recipe cross-compiles and lints for both `aarch64-unknown-linux-gnu` and `x86_64-unknown-linux-gnu`. If not using Nix, this requires `rustup target add <TARGET>` for one or both of the targets depending on whether your host platform is already one of the two.
+
+```sh
+just lint
+just lint-targets
+just fmt-check
+just spell-check
+just all-checks  # All CI checks (including tests)
+```
+
+## Demos
+
+### "hello world" Exchange and Server Shutdown
 
 This example includes a brief exchange of "hello" and "world" before active close from the server side and draining of TCP connections.
+
+<details>
+<summary><i>Example log (click to expand)</i></summary>
+<br />
 
 ```log
 [00:00:00.000] Waiting for packets on TUN device tun0 (Ctrl+C to stop)
@@ -291,22 +376,13 @@ TCP | 8080 -> 53666 | seq=2,732,711,074 ack=1,250,353,575 win=65,535 | ACK
 
 </details>
 
-### File Transfer
-
-To send a file through the echo server using TCP and diff the echoed reply against the original:
-
-```sh
-just throughput                # Defaults to README.md
-just throughput -f Cargo.toml  # Send Cargo.toml instead
-```
-
-See `just --usage throughput` for further options.
-
-<details>
-<summary><i>Example log: echoing <code>Cargo.toml</code> (click to expand)</i></summary>
-<br />
+### Echoing `Cargo.toml`
 
 This example shows the bytes of `Cargo.toml` being echoed through the server instead of simple interactive use.
+
+<details>
+<summary><i>Example log (click to expand)</i></summary>
+<br />
 
 ```log
 [00:00:00.000] Waiting for packets on TUN device tun0 (Ctrl+C to stop)
@@ -439,27 +515,17 @@ TCP | 58716 -> 8080 | seq=2,581,557,427 ack=3,071,984,105 win=63,784 | ACK
 
 </details>
 
-### Network Emulation
-
-To emulate real-world networks with delay/loss/corruption/duplication/reordering, run the `loss` recipe and then try connecting to the server again.
-
-```sh
-just loss        # Add the emulation to the device (uses sudo)
-just loss-show   # Show current network emulation and packet counters
-just loss-clear  # Remove emulated network conditions (uses sudo)
-```
-
-See `just --usage loss` for further options.
-
-<details>
-<summary><i>Example log: degraded network conditions (click to expand)</i></summary>
-<br />
+### Degraded Network Conditions
 
 This example includes:
 
 - Not letting an out-of-order FIN prematurely close the connection
 - Dropping packets with invalid checksums
 - Retransmitting a segment with exponential backoff until it is acknowledged
+
+<details>
+<summary><i>Example log (click to expand)</i></summary>
+<br />
 
 <!--
 Commands used here for future reference:
@@ -613,43 +679,3 @@ TCP | 45952 -> 8080 | seq=3,407,601,062 ack=948,925,594 win=63,784 | ACK
 ```
 
 </details>
-
-## Testing
-
-As with running the server, you will be prompted to create the TUN device if it does not already exist.
-
-```sh
-just test
-```
-
-Or with a coverage report:
-
-```sh
-just cov       # Text summary
-just cov-open  # Generate detailed HTML and open in browser
-```
-
-The project includes comprehensive unit and integration tests for:
-
-- Parsing, send/receive logic, and encoding for IPv4 headers, TCP segments, ICMP Echo Request/Reply, and UDP datagrams
-- Server loop packet I/O, timers, and connection draining
-- Low-level signal handling and syscall interrupts
-- Internet checksum calculation
-- Serial number arithmetic
-- Custom type invariants
-
-## Development and CI
-
-Tests, lints, format checking, and spell checking run in CI (as defined in [.github/workflows/ci.yml](.github/workflows/ci.yml)) and must all pass before merging into `main`. Tests and lints run on both `ubuntu-24.04-arm` and `ubuntu-24.04` because the results can differ between architectures, especially due to the C FFI.
-
-The project takes a strict approach to linting (as defined in [Cargo.toml](Cargo.toml)), completely forbidding panicking constructs like `unwrap` and `expect` and isolating limited use of `unsafe`.
-
-The [justfile](justfile) includes recipes for running CI checks locally. The `lint-targets` recipe cross-compiles and lints for both `aarch64-unknown-linux-gnu` and `x86_64-unknown-linux-gnu`. If not using Nix, this requires `rustup target add <TARGET>` for one or both of the targets depending on whether your host platform is already one of the two.
-
-```sh
-just lint
-just lint-targets
-just fmt-check
-just spell-check
-just all-checks  # All CI checks (including tests)
-```
