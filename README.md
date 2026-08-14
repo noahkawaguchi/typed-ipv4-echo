@@ -1,6 +1,6 @@
 # Typenet
 
-Typenet is a userspace IPv4/ICMP/TCP/UDP implementation and echo server that operates over Linux TUN devices. This project demonstrates low-level networking in Rust, working with packet bytes and syscalls while focusing on type safety and manual protocol implementations.
+Typenet is a userspace IPv4/ICMP/TCP/UDP implementation and echo server that operates over Linux TUN devices. This project demonstrates low-level networking in Rust, working at the level of packet bytes and syscalls while upholding type safety.
 
 ## Table of Contents
 
@@ -49,7 +49,7 @@ Although the TCP implementation is not complete, it covers a significant portion
 
 ### Encoding Domain Logic in the Type System
 
-A driving force throughout the codebase is the use of domain types to create and uphold static guarantees that make invalid operations unrepresentable. As just one example, the sealed trait `Endpoint` and its zero-sized implementers `Local` and `Remote` turn mistakes like sending a packet with source and destination IP addresses flipped or finding the difference between RCV.NXT and SND.UNA into compile errors.
+A driving force throughout the codebase is the use of domain types to create and uphold static guarantees that make invalid operations unrepresentable. As just one example, the sealed trait `Endpoint` and its zero-sized implementers `Local` and `Remote` turn classes of logic bugs, such as arithmetic between RCV.NXT and SND.UNA or packets with the source and destination addresses flipped, into compile errors.
 
 ### Static Dispatch Architecture
 
@@ -134,7 +134,7 @@ For each of these three recipes, see `just --usage <RECIPE>` for further options
 <summary><i>Optional environment variable configuration (click to expand)</i></summary>
 <br />
 
-The following environment variables can be used to configure the TUN device and server. A `.env` file will automatically be read if present.
+The following environment variables can be used to configure the TUN device and server. When using Just, a `.env` file will automatically be read if present.
 
 | Key                     | Meaning                                                   | Default     |
 | ----------------------- | --------------------------------------------------------- | ----------- |
@@ -221,14 +221,14 @@ just cov       # Text summary
 just cov-open  # Generate detailed HTML and open in browser
 ```
 
-The project includes comprehensive unit and integration tests for:
+The project includes unit and integration tests for:
 
 - Parsing, send/receive logic, and encoding for IPv4 headers, TCP segments, ICMP Echo Request/Reply, and UDP datagrams
 - Server loop packet I/O, timers, and connection draining
 - Low-level signal handling and syscall interrupts
 - Internet checksum calculation
 - Serial number arithmetic
-- Custom type invariants
+- Various custom type invariants
 
 ## Development and CI
 
