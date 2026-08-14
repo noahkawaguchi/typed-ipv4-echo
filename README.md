@@ -27,7 +27,6 @@ Typenet is a userspace IPv4/ICMP/TCP/UDP implementation and echo server that ope
 
 ## Features
 
-- **Type Safety**: Leverages Rust's strong type system and zero-cost abstractions to safely create and uphold static guarantees without compromising on performance
 - **Near-Zero Dependencies**: Depends only on the Rust Standard Library and `libc` (raw FFI to access platform C APIs), implementing all other logic from scratch
 - **TUN Device Integration**: Performs low-level packet I/O using Linux TUN virtual network interfaces rather than sockets
 - **Multi-Protocol Support**: Manages TCP connections, ICMP Echo Request/Reply, and UDP datagrams
@@ -47,6 +46,10 @@ Although the TCP implementation is not complete, it covers a significant portion
 - Handling of unknown and aborted connections
 
 ## Design
+
+### Encoding Domain Logic in the Type System
+
+A driving force throughout the codebase is the use of domain types to create and uphold static guarantees that make invalid operations unrepresentable. As just one example, the sealed trait `Endpoint` and its zero-sized implementers `Local` and `Remote` turn mistakes like sending a packet with source and destination IP addresses flipped or finding the difference between RCV.NXT and SND.UNA into compile errors.
 
 ### Static Dispatch Architecture
 
