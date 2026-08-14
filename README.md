@@ -145,7 +145,7 @@ You will be prompted to create the TUN device on first use, once per reboot, whi
 just serve
 ```
 
-The [justfile](justfile) also includes recipes for saving logs to file.
+The [`justfile`](justfile) also includes recipes for saving logs to file.
 
 ```sh
 just serve-save  # Run and save log file to `logs` directory
@@ -640,11 +640,11 @@ The project includes comprehensive unit and integration tests for:
 
 ## Development and CI
 
-Tests, lints, format checking, and spell checking run in CI (as defined in [.github/workflows/ci.yml](.github/workflows/ci.yml)) and must all pass before merging into `main`. Tests and lints run on both `ubuntu-24.04-arm` and `ubuntu-24.04` because the results can differ between architectures, especially due to the C FFI.
+Tests, lints, format checking, and spell checking run in CI (as defined in [`.github/workflows/ci.yml`](.github/workflows/ci.yml)) and must all pass before merging into `main`. Tests and lints run on both `ubuntu-24.04-arm` and `ubuntu-24.04` because the results can differ between architectures, especially due to the C FFI.
 
-The project takes a strict approach to linting (as defined in [Cargo.toml](Cargo.toml)), completely forbidding panicking constructs like `unwrap` and `expect` and isolating limited use of `unsafe`.
+The project takes a strict approach to linting (as defined in [`Cargo.toml`](Cargo.toml)), completely forbidding panicking constructs like `unwrap` and `expect` and isolating limited use of `unsafe`.
 
-The [justfile](justfile) includes recipes for running CI checks locally. The `lint-targets` recipe cross-compiles and lints for both `aarch64-unknown-linux-gnu` and `x86_64-unknown-linux-gnu`. If not using Nix, this requires `rustup target add <TARGET>` for one or both of the targets depending on whether your host platform is already one of the two.
+The [`justfile`](justfile) includes recipes for running CI checks locally. The `lint-targets` recipe cross-compiles and lints for both `aarch64-unknown-linux-gnu` and `x86_64-unknown-linux-gnu`. If not using Nix, this requires `rustup target add <TARGET>` for one or both of the targets depending on whether your host platform is already one of the two.
 
 ```sh
 just lint
