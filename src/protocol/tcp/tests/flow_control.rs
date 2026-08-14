@@ -1,7 +1,7 @@
 use super::*;
 
 /// Creates a `ConnState` that is the same as `AFTER_HANDSHAKE` except for a custom `snd_wnd`.
-fn after_handshake_with_snd_wnd(snd_wnd: SeqDist<u16, Local>) -> ConnState {
+fn after_handshake_with_snd_wnd(snd_wnd: SeqOffset<u16, Local>) -> ConnState {
     ConnState {
         window_state: Some(WindowState {
             snd_wnd,
@@ -14,7 +14,7 @@ fn after_handshake_with_snd_wnd(snd_wnd: SeqDist<u16, Local>) -> ConnState {
 
 #[test]
 fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result {
-    const WINDOW: SeqDist<u16, Local> = SeqDist::new(3);
+    const WINDOW: SeqOffset<u16, Local> = SeqOffset::new(3);
 
     let mut connections = TcpConnections::default();
     let mut expected_state = after_handshake_with_snd_wnd(WINDOW);
@@ -60,7 +60,7 @@ fn unacked_bytes_count_toward_room_left_in_send_window() -> Result {
     // zero unacked bytes, using the window directly without considering SND.NXT and SND.UNA would
     // pass.)
 
-    const WINDOW: SeqDist<u16, Local> = SeqDist::new(3);
+    const WINDOW: SeqOffset<u16, Local> = SeqOffset::new(3);
 
     let mut connections = TcpConnections::default();
     let mut expected_state = after_handshake_with_snd_wnd(WINDOW);
@@ -123,11 +123,11 @@ fn unacked_bytes_count_toward_room_left_in_send_window() -> Result {
 
 #[test]
 fn window_opening_via_ack_drains_buffered_remainder() -> Result {
-    const HEL_LEN: SeqDist<u32, Local> = SeqDist::new(3);
-    const LO_LEN: SeqDist<u32, Local> = SeqDist::new(2);
+    const HEL_LEN: SeqOffset<u32, Local> = SeqOffset::new(3);
+    const LO_LEN: SeqOffset<u32, Local> = SeqOffset::new(2);
 
-    const INITIAL_WINDOW: SeqDist<u16, Local> = SeqDist::new(3);
-    const LARGER_WINDOW: SeqDist<u16, Local> = SeqDist::new(10);
+    const INITIAL_WINDOW: SeqOffset<u16, Local> = SeqOffset::new(3);
+    const LARGER_WINDOW: SeqOffset<u16, Local> = SeqOffset::new(10);
 
     let mut connections = TcpConnections::default();
     let mut expected_state = after_handshake_with_snd_wnd(INITIAL_WINDOW);
@@ -190,7 +190,7 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
 
 #[test]
 fn zero_window_buffers_entire_payload_and_gets_bare_ack() -> Result {
-    const ZERO_WINDOW: SeqDist<u16, Local> = SeqDist::new(0);
+    const ZERO_WINDOW: SeqOffset<u16, Local> = SeqOffset::new(0);
 
     let mut connections = TcpConnections::default();
     let mut expected_state = after_handshake_with_snd_wnd(ZERO_WINDOW);

@@ -22,7 +22,7 @@ use {
                 flags::TcpFlags,
                 payload::{LenOrDefault as _, TcpPayload},
                 pending_segment::PendingSegment,
-                seq_space::{SeqDist, SeqPoint},
+                seq_space::{SeqOffset, SeqPoint},
                 state::{ConnState, TcpState, WindowState},
             },
         },
@@ -36,16 +36,16 @@ use {
 const TCP_HDR_MIN_LEN: u8 = 20;
 
 /// The single phantom byte consumed by SYN in the stream going in the local to remote direction.
-const LOCAL_SYN_BYTE: SeqDist<u32, Local> = SeqDist::new(1);
+const LOCAL_SYN_BYTE: SeqOffset<u32, Local> = SeqOffset::new(1);
 
 /// The single phantom byte consumed by FIN in the stream going in the local to remote direction.
-const LOCAL_FIN_BYTE: SeqDist<u32, Local> = SeqDist::new(1);
+const LOCAL_FIN_BYTE: SeqOffset<u32, Local> = SeqOffset::new(1);
 
 /// The single phantom byte consumed by SYN in the stream going in the remote to local direction.
-const REMOTE_SYN_BYTE: SeqDist<u32, Remote> = SeqDist::new(1);
+const REMOTE_SYN_BYTE: SeqOffset<u32, Remote> = SeqOffset::new(1);
 
 /// The single phantom byte consumed by FIN in the stream going in the remote to local direction.
-const REMOTE_FIN_BYTE: SeqDist<u32, Remote> = SeqDist::new(1);
+const REMOTE_FIN_BYTE: SeqOffset<u32, Remote> = SeqOffset::new(1);
 
 /// Fields that differ when determining a segment to send.
 #[derive(Clone)]
@@ -94,7 +94,7 @@ pub struct TcpHandler<S: Endpoint> {
 
     /// "The number of data octets beginning with the one indicated in the acknowledgment field
     /// that the sender of this segment is willing to accept."
-    window: SeqDist<u16, S::Peer>,
+    window: SeqOffset<u16, S::Peer>,
 
     payload: Option<TcpPayload>,
 }
@@ -492,7 +492,7 @@ impl TcpHandler<Local> {
     /// However, a dynamic RCV.WND could be used in the future to bound the send buffer's growth,
     /// throttling the peer's sending rate if they keep sending more data than they are willing to
     /// receive.
-    const RCV_WND: SeqDist<u16, Remote> = SeqDist::new(u16::MAX);
+    const RCV_WND: SeqOffset<u16, Remote> = SeqOffset::new(u16::MAX);
 
     fn from_pairs_and_info(
         ip_pair: Ipv4AddrPair<Local>,
@@ -554,7 +554,7 @@ impl<S: Endpoint> TcpHandler<S> {
             ])),
             offset_bytes,
             flags: tcp_header[13].try_into()?,
-            window: SeqDist::new(u16::from_be_bytes([tcp_header[14], tcp_header[15]])),
+            window: SeqOffset::new(u16::from_be_bytes([tcp_header[14], tcp_header[15]])),
             payload: TcpPayload::try_from_iter(
                 data.get(offset_bytes.into()..)
                     .into_iter()

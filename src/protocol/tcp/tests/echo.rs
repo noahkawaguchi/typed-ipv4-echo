@@ -329,7 +329,7 @@ fn ack_for_unsent_data_is_dropped_and_gets_current_state_reply() -> Result {
     // seq_num == RCV.NXT, but ack_num=SERVER_ISN+20 is past SND.NXT=SERVER_ISN+1
     let reply = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
-        ack_num: SERVER_ISN + SeqDist::new(20),
+        ack_num: SERVER_ISN + SeqOffset::new(20),
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     }
@@ -361,7 +361,7 @@ fn wraparound_ack_for_unsent_data_is_still_rejected() -> Result {
         snd_nxt: SeqPoint::new(u32::MAX),
         snd_una: SeqPoint::new(u32::MAX),
         window_state: Some(WindowState {
-            snd_wnd: SeqDist::new(u16::MAX),
+            snd_wnd: SeqOffset::new(u16::MAX),
             snd_wl1: CLIENT_ISN + REMOTE_SYN_BYTE,
             snd_wl2: SeqPoint::new(u32::MAX),
         }),

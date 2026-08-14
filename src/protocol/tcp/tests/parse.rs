@@ -22,7 +22,7 @@ fn correctly_parses_valid_packet() -> Result {
     assert_eq!(handler.ack_num, SeqPoint::new(2));
     assert_eq!(handler.offset_bytes, 20);
     assert_eq!(handler.flags, TcpFlags::SynAck);
-    assert_eq!(handler.window, SeqDist::new(29_200));
+    assert_eq!(handler.window, SeqOffset::new(29_200));
     assert_eq!(handler.payload.as_ref().map(TcpPayload::as_bytes), Some("Hello".as_ref()));
 
     Ok(())

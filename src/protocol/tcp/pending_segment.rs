@@ -1,7 +1,7 @@
 use {
     crate::{
         endpoint::Local,
-        protocol::tcp::{SendInfo, SeqDist, SeqPoint, TcpFlags, payload::LenOrDefault as _},
+        protocol::tcp::{SendInfo, SeqOffset, SeqPoint, TcpFlags, payload::LenOrDefault as _},
     },
     std::time::{Duration, Instant},
 };
@@ -31,7 +31,7 @@ impl PendingSegment {
         let end_seq = send_info
             .seq_num
             // Any SYN/FIN consumes a single phantom byte
-            + SeqDist::new(u32::from(matches!(
+            + SeqOffset::new(u32::from(matches!(
                 send_info.flags,
                 TcpFlags::Syn | TcpFlags::SynAck | TcpFlags::FinAck
             )))

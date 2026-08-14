@@ -138,7 +138,7 @@ fn handshake_ack_with_wrong_seq_and_no_data_gets_current_state_ack() -> Result {
 
     // Correct ack_num, but seq_num doesn't match RCV.NXT = CLIENT_ISN + SYN_BYTE
     let reply = TcpHandler {
-        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + SeqDist::new(1),
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + SeqOffset::new(1),
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         ..CLIENT_PACKET
     }
@@ -175,7 +175,7 @@ fn handshake_ack_with_with_wrong_seq_and_data_gets_current_state_ack() -> Result
 
     // Correct ack_num, but seq_num doesn't match RCV.NXT = CLIENT_ISN + SYN_BYTE
     let reply = TcpHandler {
-        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + SeqDist::new(1),
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + SeqOffset::new(1),
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET

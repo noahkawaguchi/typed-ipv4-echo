@@ -13,7 +13,7 @@ fn stray_syn_out_of_window_gets_challenge_ack() -> Result {
     // seq=CLIENT_ISN-20 < rcv_nxt=CLIENT_ISN+1, outside the receive window, caught at "First, check
     // sequence number"
     let reply = TcpHandler {
-        seq_num: CLIENT_ISN - SeqDist::new(20),
+        seq_num: CLIENT_ISN - SeqOffset::new(20),
         flags: TcpFlags::Syn,
         ..CLIENT_PACKET
     }
