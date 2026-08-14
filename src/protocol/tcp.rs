@@ -64,9 +64,8 @@ impl SendInfo {
 }
 
 /// Manages TCP headers, data, and reply logic. Field definitions below from RFC 9293, Section 3.1.
-/// `S` is the send direction (originated from the sender's ISN), while `S::Peer` is the receive
-/// direction (originated from the destination's ISN). In other words, this is a segment from `S` to
-/// `S::Peer`.
+/// Endpoint `S` is the sender (values based on the sender's ISN), while endpoint `S::Peer` is the
+/// receiver (values based on the receiver's ISN).
 #[cfg_attr(test, derive(Debug, PartialEq, Eq, Clone))]
 pub struct TcpHandler<S: Endpoint> {
     /// Not a part of the TCP header, but required for connection state and checksum calculation.

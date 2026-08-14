@@ -8,44 +8,44 @@ use {
     },
 };
 
-/// An offset between two points in TCP sequence number space that are both from the stream going in
-/// direction `D`.
+/// An offset between two points in TCP sequence number space that are both from the stream
+/// originating from sender `S`.
 #[derive(Default)]
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
-pub(super) struct SeqOffset<T, D> {
+pub(super) struct SeqOffset<T, S> {
     wrapping: Wrapping<T>,
-    phantom: PhantomData<D>,
+    phantom: PhantomData<S>,
 }
 
-impl<T: Copy, D> Clone for SeqOffset<T, D> {
+impl<T: Copy, S> Clone for SeqOffset<T, S> {
     fn clone(&self) -> Self { *self }
 }
 
-impl<T: Copy, D> Copy for SeqOffset<T, D> {}
+impl<T: Copy, S> Copy for SeqOffset<T, S> {}
 
-impl<T, D> SeqOffset<T, D> {
+impl<T, S> SeqOffset<T, S> {
     pub(super) const fn new(primitive: T) -> Self {
         Self { wrapping: Wrapping(primitive), phantom: PhantomData }
     }
 }
 
-impl<D> From<SeqOffset<u16, D>> for SeqOffset<u32, D> {
-    fn from(value: SeqOffset<u16, D>) -> Self {
+impl<S> From<SeqOffset<u16, S>> for SeqOffset<u32, S> {
+    fn from(value: SeqOffset<u16, S>) -> Self {
         Self { wrapping: Wrapping(value.wrapping.0.into()), phantom: PhantomData }
     }
 }
 
-impl<T: From<u16>, D> From<NonZeroU16> for SeqOffset<T, D> {
+impl<T: From<u16>, S> From<NonZeroU16> for SeqOffset<T, S> {
     fn from(value: NonZeroU16) -> Self {
         Self { wrapping: Wrapping(value.get().into()), phantom: PhantomData }
     }
 }
 
-impl<D> SeqOffset<u16, D> {
+impl<S> SeqOffset<u16, S> {
     pub(super) const fn to_be_bytes(self) -> [u8; 2] { self.wrapping.0.to_be_bytes() }
 }
 
-impl<D> SeqOffset<u32, D> {
+impl<S> SeqOffset<u32, S> {
     pub(super) const fn saturating_sub(self, rhs: Self) -> Self {
         Self {
             wrapping: Wrapping(self.wrapping.0.saturating_sub(rhs.wrapping.0)),
@@ -54,18 +54,18 @@ impl<D> SeqOffset<u32, D> {
     }
 }
 
-impl<T, D> TryFrom<SeqOffset<T, D>> for usize
+impl<T, S> TryFrom<SeqOffset<T, S>> for usize
 where
     Self: TryFrom<T>,
 {
     type Error = <Self as TryFrom<T>>::Error;
 
-    fn try_from(value: SeqOffset<T, D>) -> Result<Self, Self::Error> {
+    fn try_from(value: SeqOffset<T, S>) -> Result<Self, Self::Error> {
         Self::try_from(value.wrapping.0)
     }
 }
 
-impl<T, D> fmt::Display for ThousandsSeparated<SeqOffset<T, D>>
+impl<T, S> fmt::Display for ThousandsSeparated<SeqOffset<T, S>>
 where
     T: Copy,
     ThousandsSeparated<T>: fmt::Display,
@@ -75,25 +75,25 @@ where
     }
 }
 
-/// A specific point in TCP sequence number space from the stream going in direction `D`.
+/// A specific point in TCP sequence number space from the stream originating from sender `S`.
 #[derive(Eq)]
 #[cfg_attr(test, derive(Debug))]
-pub(super) struct SeqPoint<D> {
+pub(super) struct SeqPoint<S> {
     wrapping: Wrapping<u32>,
-    phantom: PhantomData<D>,
+    phantom: PhantomData<S>,
 }
 
-impl<D> Clone for SeqPoint<D> {
+impl<S> Clone for SeqPoint<S> {
     fn clone(&self) -> Self { *self }
 }
 
-impl<D> Copy for SeqPoint<D> {}
+impl<S> Copy for SeqPoint<S> {}
 
-impl<D> PartialEq for SeqPoint<D> {
+impl<S> PartialEq for SeqPoint<S> {
     fn eq(&self, other: &Self) -> bool { self.wrapping == other.wrapping }
 }
 
-impl<D> SeqPoint<D> {
+impl<S> SeqPoint<S> {
     pub(super) const fn new(primitive: u32) -> Self {
         Self { wrapping: Wrapping(primitive), phantom: PhantomData }
     }
@@ -115,25 +115,25 @@ impl<D> SeqPoint<D> {
     /// Returns the unsigned offset from `rhs` to `self`, or `None` if the offset would be negative,
     /// i.e. `rhs` does not precede or equal `self` in TCP sequence-number space (RFC 9293, Section
     /// 3.4).
-    pub(super) fn offset_past(self, rhs: Self) -> Option<SeqOffset<u32, D>> {
+    pub(super) fn offset_past(self, rhs: Self) -> Option<SeqOffset<u32, S>> {
         rhs.precedes_or_eq(self)
             .then(|| SeqOffset { wrapping: self.wrapping - rhs.wrapping, phantom: PhantomData })
     }
 }
 
-impl<D> Add<SeqOffset<u32, D>> for SeqPoint<D> {
+impl<S> Add<SeqOffset<u32, S>> for SeqPoint<S> {
     type Output = Self;
 
-    fn add(self, rhs: SeqOffset<u32, D>) -> Self::Output {
+    fn add(self, rhs: SeqOffset<u32, S>) -> Self::Output {
         Self { wrapping: self.wrapping + rhs.wrapping, phantom: PhantomData }
     }
 }
 
-impl<D> AddAssign<SeqOffset<u32, D>> for SeqPoint<D> {
-    fn add_assign(&mut self, rhs: SeqOffset<u32, D>) { *self = *self + rhs; }
+impl<S> AddAssign<SeqOffset<u32, S>> for SeqPoint<S> {
+    fn add_assign(&mut self, rhs: SeqOffset<u32, S>) { *self = *self + rhs; }
 }
 
-impl<D> fmt::Display for ThousandsSeparated<SeqPoint<D>> {
+impl<S> fmt::Display for ThousandsSeparated<SeqPoint<S>> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         ThousandsSeparated(self.0.wrapping.0).fmt(f)
     }
@@ -143,7 +143,7 @@ impl<D> fmt::Display for ThousandsSeparated<SeqPoint<D>> {
 mod tests {
     use {super::*, crate::endpoint::Local, std::ops::Sub};
 
-    impl<D> SeqOffset<u32, D> {
+    impl<S> SeqOffset<u32, S> {
         /// `self + rhs` with wrapping, but const. This should be removed once const traits are
         /// stabilized.
         pub(in super::super) const fn const_add(self, rhs: Self) -> Self {
@@ -151,7 +151,7 @@ mod tests {
         }
     }
 
-    impl<D> Add for SeqOffset<u32, D> {
+    impl<S> Add for SeqOffset<u32, S> {
         type Output = Self;
 
         fn add(self, rhs: Self) -> Self::Output {
@@ -159,24 +159,24 @@ mod tests {
         }
     }
 
-    impl<D> SeqPoint<D> {
+    impl<S> SeqPoint<S> {
         /// `self + rhs` with wrapping, but const. This should be removed once const traits are
         /// stabilized.
-        pub(in super::super) const fn const_add(self, rhs: SeqOffset<u32, D>) -> Self {
+        pub(in super::super) const fn const_add(self, rhs: SeqOffset<u32, S>) -> Self {
             Self::new(self.wrapping.0.wrapping_add(rhs.wrapping.0))
         }
 
         /// `self - rhs` with wrapping, but const. This should be removed once const traits are
         /// stabilized.
-        pub(in super::super) const fn const_sub(self, rhs: SeqOffset<u32, D>) -> Self {
+        pub(in super::super) const fn const_sub(self, rhs: SeqOffset<u32, S>) -> Self {
             Self::new(self.wrapping.0.wrapping_sub(rhs.wrapping.0))
         }
     }
 
-    impl<D> Sub<SeqOffset<u32, D>> for SeqPoint<D> {
+    impl<S> Sub<SeqOffset<u32, S>> for SeqPoint<S> {
         type Output = Self;
 
-        fn sub(self, rhs: SeqOffset<u32, D>) -> Self::Output {
+        fn sub(self, rhs: SeqOffset<u32, S>) -> Self::Output {
             Self { wrapping: self.wrapping - rhs.wrapping, phantom: PhantomData }
         }
     }
