@@ -2,7 +2,13 @@ use {
     crate::{
         Result,
         addr_pairs::{Ipv4AddrPair, PortPair},
-        protocol::{Protocol, display::PrettyPayload, handler::Encode, pseudo_header_checksum},
+        endpoint::{Endpoint, Local, Remote},
+        protocol::{
+            Protocol,
+            display::PrettyPayload,
+            handler::{Encode, PrettyProtocol},
+            pseudo_header_checksum,
+        },
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
     std::fmt,
@@ -11,19 +17,19 @@ use {
 /// The number of bytes in a UDP header.
 const UDP_HDR_LEN: u16 = 8;
 
-/// Manages UDP headers, data, and reply logic.
+/// Manages UDP headers, data, and reply logic. Sent from `S`.
 #[cfg_attr(test, derive(Debug))]
-pub struct UdpHandler<'a> {
+pub struct UdpHandler<'a, S: Endpoint> {
     /// Not a part of the UDP header, but required for checksum calculation.
-    ip_pair: Ipv4AddrPair,
+    ip_pair: Ipv4AddrPair<S>,
 
-    ports: PortPair,
+    ports: PortPair<S>,
     payload: &'a [u8],
 }
 
-impl<'a> UdpHandler<'a> {
+impl<'a> UdpHandler<'a, Remote> {
     /// Parses `data` as a UDP header and payload.
-    pub(super) fn parse(data: &'a [u8], ip_pair: Ipv4AddrPair) -> Result<Self> {
+    pub(super) fn parse(data: &'a [u8], ip_pair: Ipv4AddrPair<Remote>) -> Result<Self> {
         let Some((udp_header, payload)) = data.split_first_chunk::<{ UDP_HDR_LEN as usize }>()
         else {
             return Err(format!("Too short for UDP header ({} bytes)", data.len()).into());
@@ -39,21 +45,25 @@ impl<'a> UdpHandler<'a> {
 
         Ok(Self {
             ip_pair,
-            ports: PortPair {
-                src: u16::from_be_bytes([udp_header[0], udp_header[1]]),
-                dst: u16::from_be_bytes([udp_header[2], udp_header[3]]),
-            },
+            ports: PortPair::new(
+                u16::from_be_bytes([udp_header[0], udp_header[1]]),
+                u16::from_be_bytes([udp_header[2], udp_header[3]]),
+            ),
             payload,
         })
     }
 
     /// Creates a UDP header and payload for replying to `self`.
-    pub(super) const fn create_reply(&self) -> Self {
-        Self { ip_pair: self.ip_pair.swapped(), ports: self.ports.swapped(), payload: self.payload }
+    pub(super) const fn create_reply(&self) -> UdpHandler<'a, Local> {
+        UdpHandler::<Local> {
+            ip_pair: self.ip_pair.swapped(),
+            ports: self.ports.swapped(),
+            payload: self.payload,
+        }
     }
 }
 
-impl Encode for UdpHandler<'_> {
+impl Encode<Local> for UdpHandler<'_, Local> {
     fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
         // Source and destination ports
         buf.try_get_mut(..2)?
@@ -93,14 +103,16 @@ impl Encode for UdpHandler<'_> {
 
     fn proto(&self) -> Protocol { Protocol::Udp }
 
-    fn get_ip_pair(&self) -> Ipv4AddrPair { self.ip_pair }
+    fn get_ip_pair(&self) -> Ipv4AddrPair<Local> { self.ip_pair }
+}
 
+impl<S: Endpoint> PrettyProtocol for UdpHandler<'_, S> {
     fn pretty_payload(&self, include_content: bool) -> PrettyPayload<'_> {
         PrettyPayload { data: self.payload, include_content }
     }
 }
 
-impl fmt::Display for UdpHandler<'_> {
+impl<S: Endpoint> fmt::Display for UdpHandler<'_, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "UDP | {}", self.ports) }
 }
 
@@ -108,7 +120,10 @@ impl fmt::Display for UdpHandler<'_> {
 mod tests {
     use {
         super::*,
-        crate::{ETHERNET_MTU, protocol::test_consts::IP_PAIR},
+        crate::{
+            ETHERNET_MTU,
+            protocol::test_consts::{LOCAL_TO_REMOTE_IP_PAIR, REMOTE_TO_LOCAL_IP_PAIR},
+        },
         std::assert_matches,
     };
 
@@ -119,14 +134,14 @@ mod tests {
             0x04, 0xD2,              // Source port: 1234
             0x00, 0x35,              // Dest port: 53 (DNS)
             0x00, 0x10,              // Length: 16 (8 byte header + 8 byte payload)
-            0xA1, 0xB0,              // Checksum (valid for this datagram and `IP_PAIR`)
+            0xA1, 0xB0,              // Checksum (valid for this datagram and IP pair)
             0x48, 0x65, 0x6C, 0x6C,  // Payload: "Hell"
             0x6F, 0x21, 0x21, 0x21,  // Payload: "o!!!"
         ];
 
-        let handler = UdpHandler::parse(&DATA, IP_PAIR)?;
+        let handler = UdpHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
 
-        assert_eq!(handler.ports, PortPair { src: 1234, dst: 53 });
+        assert_eq!(handler.ports, PortPair::new(1234, 53));
         assert_eq!(handler.payload, b"Hello!!!");
 
         Ok(())
@@ -137,7 +152,7 @@ mod tests {
         const DATA: [u8; 3] = [0x04, 0xD2, 0x00]; // Only 3 bytes
 
         assert_matches!(
-            UdpHandler::parse(&DATA, IP_PAIR),
+            UdpHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR),
             Err(e) if e.to_string().contains("Too short")
         );
     }
@@ -155,7 +170,7 @@ mod tests {
         ];
 
         assert_matches!(
-            UdpHandler::parse(&DATA, IP_PAIR),
+            UdpHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR),
             Err(e) if e.to_string().contains("checksum")
         );
     }
@@ -172,9 +187,9 @@ mod tests {
             0x6F, 0x21, 0x21, 0x21,  // Payload: "o!!!"
         ];
 
-        let handler = UdpHandler::parse(&DATA, IP_PAIR)?;
+        let handler = UdpHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
 
-        assert_eq!(handler.ports, PortPair { src: 1234, dst: 53 });
+        assert_eq!(handler.ports, PortPair::new(1234, 53));
         assert_eq!(handler.payload, b"Hello!!!");
 
         Ok(())
@@ -187,12 +202,12 @@ mod tests {
             0x1F, 0x90,              // Source port: 8080
             0x00, 0x50,              // Dest port: 80
             0x00, 0x08,              // Length: 8 (header only, no payload)
-            0xCB, 0xFB,              // Checksum (valid for this datagram and `IP_PAIR`)
+            0xCB, 0xFB,              // Checksum (valid for this datagram and IP pair)
         ];
 
-        let handler = UdpHandler::parse(&DATA, IP_PAIR)?;
+        let handler = UdpHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
 
-        assert_eq!(handler.ports, PortPair { src: 8080, dst: 80 });
+        assert_eq!(handler.ports, PortPair::new(8080, 80));
         assert_eq!(handler.payload.len(), 0);
 
         Ok(())
@@ -205,25 +220,26 @@ mod tests {
             0xFF, 0xFF,              // Source port: 65535 (max)
             0x00, 0x01,              // Dest port: 1 (min non-zero)
             0x00, 0x0C,              // Length: 12
-            0x03, 0xF9,              // Checksum (valid for this datagram and `IP_PAIR`)
+            0x03, 0xF9,              // Checksum (valid for this datagram and IP pair)
             0x74, 0x65, 0x73, 0x74,  // Payload: "test"
         ];
 
-        let handler = UdpHandler::parse(&DATA, IP_PAIR)?;
+        let handler = UdpHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
 
-        assert_eq!(handler.ports, PortPair { src: 65535, dst: 1 });
+        assert_eq!(handler.ports, PortPair::new(65535, 1));
 
         Ok(())
     }
 
     #[test]
     fn transmits_all_ones_when_computed_checksum_is_zero() -> Result {
-        // Payload [0xE6, 0xB5] results in a pseudo-header checksum of 0x0000 for ports 1234 -> 80
-        // over `IP_PAIR`. However, 0xFFFF must be transmitted instead of 0x0000.
+        // Payload `[0xE6, 0xB5]` results in a pseudo-header checksum of 0x0000 for IP addresses
+        // 10.0.0.1 and 10.0.0.2 (in either order) and ports 1234 and 80 (in either order).
+        // However, 0xFFFF must be transmitted instead of 0x0000.
 
-        const HANDLER: UdpHandler = UdpHandler {
-            ip_pair: IP_PAIR,
-            ports: PortPair { src: 1234, dst: 80 },
+        const HANDLER: UdpHandler<Local> = UdpHandler {
+            ip_pair: LOCAL_TO_REMOTE_IP_PAIR,
+            ports: PortPair::new(1234, 80),
             payload: &[0xE6, 0xB5],
         };
 
@@ -242,17 +258,17 @@ mod tests {
             0x04, 0xD2,              // Source port: 1234
             0x00, 0x35,              // Dest port: 53
             0x00, 0x10,              // Length: 16
-            0xA1, 0xB0,              // Checksum (valid for this datagram and `IP_PAIR`)
+            0xA1, 0xB0,              // Checksum (valid for this datagram and IP pair)
             0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x21, 0x21, 0x21,  // Payload: "Hello!!!"
         ];
 
-        let handler = UdpHandler::parse(&REQUEST, IP_PAIR)?;
+        let handler = UdpHandler::parse(&REQUEST, REMOTE_TO_LOCAL_IP_PAIR)?;
         let mut reply_buf = [0u8; ETHERNET_MTU];
         let reply = handler.create_reply();
         let udp_len = reply.write_into(&mut reply_buf[20..])?;
 
         // IPs should be swapped
-        assert_eq!(reply.get_ip_pair(), IP_PAIR.swapped());
+        assert_eq!(reply.get_ip_pair(), REMOTE_TO_LOCAL_IP_PAIR.swapped());
 
         // Verify UDP header at offset 20
         assert_eq!(&reply_buf[20..22], &[0x00, 0x35]); // Source port: 53 (swapped)
@@ -266,7 +282,10 @@ mod tests {
         assert_eq!(udp_len, 8 + 8);
 
         // Verify checksum
-        assert_eq!(pseudo_header_checksum(&reply_buf[20..36], IP_PAIR, Protocol::Udp)?, 0x0000);
+        assert_eq!(
+            pseudo_header_checksum(&reply_buf[20..36], REMOTE_TO_LOCAL_IP_PAIR, Protocol::Udp)?,
+            0
+        );
 
         Ok(())
     }

@@ -2,9 +2,9 @@ use {
     crate::{
         Result,
         addr_pairs::{Ipv4AddrPair, PortPair},
+        endpoint::Local,
         protocol::tcp::{
-            PendingSegment, SendInfo, TcpFlags, TcpHandler,
-            seq_space::AdvanceBy as _,
+            LOCAL_FIN_BYTE, PendingSegment, SendInfo, TcpFlags, TcpHandler,
             state::{ConnState, TcpState},
         },
     },
@@ -92,7 +92,7 @@ impl TcpConnections {
     /// Reproduces every pending unacked segment that is due for retransmission. If any connection
     /// has a due segment that has already been retried `max_retries` times, gives up and removes
     /// that connection entirely.
-    pub fn make_retransmissions(&mut self) -> Vec<TcpHandler> {
+    pub fn make_retransmissions(&mut self) -> Vec<TcpHandler<Local>> {
         let now = Instant::now();
 
         let due_keys = self
@@ -121,8 +121,8 @@ impl TcpConnections {
             retransmissions.extend(conn.pending.iter_mut().filter_map(|seg| {
                 (seg.time_due(self.initial_rto) <= now).then(|| {
                     TcpHandler::from_pairs_and_info(
-                        Ipv4AddrPair { src: key.server_ip, dst: key.client_ip },
-                        PortPair { src: key.server_port, dst: key.client_port },
+                        Ipv4AddrPair::new(key.server_ip, key.client_ip),
+                        PortPair::new(key.server_port, key.client_port),
                         seg.retransmit_info(now),
                     )
                 })
@@ -134,7 +134,7 @@ impl TcpConnections {
 
     /// Initiates active close (RFC 9293 "CLOSE" call) for every connection currently ESTABLISHED,
     /// transitioning each to FIN-WAIT-1 and returning a FIN-ACK reply for it.
-    pub fn close_established(&mut self) -> Vec<TcpHandler> {
+    pub fn close_established(&mut self) -> Vec<TcpHandler<Local>> {
         let now = Instant::now();
 
         self.table
@@ -154,14 +154,14 @@ impl TcpConnections {
                 conn.tcp_state = TcpState::FinWait1;
 
                 // Consume one sequence number in SND.NXT for the FIN about to be sent
-                conn.snd_nxt.advance_by(1);
+                conn.snd_nxt += LOCAL_FIN_BYTE;
 
                 conn.pending
                     .push(PendingSegment::new(send_info.clone(), now));
 
                 Some(TcpHandler::from_pairs_and_info(
-                    Ipv4AddrPair { src: key.server_ip, dst: key.client_ip },
-                    PortPair { src: key.server_port, dst: key.client_port },
+                    Ipv4AddrPair::new(key.server_ip, key.client_ip),
+                    PortPair::new(key.server_port, key.client_port),
                     send_info,
                 ))
             })
@@ -197,7 +197,10 @@ impl TcpConnections {
     #[cfg(test)]
     pub(crate) fn with_syn_rcv_and_packet_last_sent(mut self, sent_at: Instant) -> Self {
         use {
-            crate::protocol::tcp::tests::{CLIENT_ISN, KEY, SERVER_ISN, SYN_BYTE},
+            crate::protocol::tcp::{
+                LOCAL_SYN_BYTE, REMOTE_SYN_BYTE,
+                tests::{CLIENT_ISN, KEY, SERVER_ISN},
+            },
             std::collections::VecDeque,
         };
 
@@ -205,14 +208,14 @@ impl TcpConnections {
             KEY,
             ConnState {
                 tcp_state: TcpState::SynReceived,
-                snd_nxt: SERVER_ISN + SYN_BYTE,
-                rcv_nxt: CLIENT_ISN + SYN_BYTE,
+                snd_nxt: SERVER_ISN + LOCAL_SYN_BYTE,
+                rcv_nxt: CLIENT_ISN + REMOTE_SYN_BYTE,
                 snd_una: SERVER_ISN,
                 window_state: None,
                 pending: vec![PendingSegment::new(
                     SendInfo {
                         seq_num: SERVER_ISN,
-                        ack_num: CLIENT_ISN + SYN_BYTE,
+                        ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
                         flags: TcpFlags::SynAck,
                         payload: None,
                     },

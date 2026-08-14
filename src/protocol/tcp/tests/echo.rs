@@ -6,8 +6,8 @@ fn creates_valid_data_echo() -> Result {
     let mut connections = TcpConnections::default().after_handshake();
 
     let reply = TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE,
-        ack_num: SERVER_ISN + SYN_BYTE,
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     }
@@ -16,8 +16,8 @@ fn creates_valid_data_echo() -> Result {
     assert_eq!(
         reply,
         Some(TcpHandler {
-            seq_num: SERVER_ISN + SYN_BYTE,
-            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
             payload: payload_from("Hello")?,
             ..SERVER_REPLY
         })
@@ -35,26 +35,26 @@ fn pure_ack_on_established_connection_returns_none() -> Result {
     let mut cloned_state = connections.try_get()?.clone();
 
     TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE,
-        ack_num: SERVER_ISN + SYN_BYTE,
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
 
-    cloned_state.snd_nxt.advance_by(HELLO_LEN);
-    cloned_state.rcv_nxt.advance_by(HELLO_LEN);
+    cloned_state.snd_nxt += LOCAL_HELLO_LEN;
+    cloned_state.rcv_nxt += REMOTE_HELLO_LEN;
 
     // ack=SERVER_ISN + 5 bytes echoed + 1
     let pure_ack = TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-        ack_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN,
         ..CLIENT_PACKET
     };
 
     assert_eq!(pure_ack.create_reply(&mut connections)?, None);
 
-    cloned_state.snd_una.advance_by(HELLO_LEN);
+    cloned_state.snd_una += LOCAL_HELLO_LEN;
     cloned_state.window_state = Some(WindowState {
         snd_wnd: pure_ack.window,
         snd_wl1: pure_ack.seq_num,
@@ -82,8 +82,8 @@ fn consecutive_replies_use_snd_nxt_for_seq_num() -> Result {
 
     // First data packet: "Hello" (5 bytes), ack=SERVER_ISN+1 (acknowledges our ISN+1)
     let reply1 = TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE,
-        ack_num: SERVER_ISN + SYN_BYTE,
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     }
@@ -92,16 +92,16 @@ fn consecutive_replies_use_snd_nxt_for_seq_num() -> Result {
     assert_eq!(
         reply1,
         Some(TcpHandler {
-            seq_num: SERVER_ISN + SYN_BYTE,
-            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
             payload: payload_from("Hello")?,
             ..SERVER_REPLY
         }),
         "Standard reply to the first data packet"
     );
 
-    cloned_state.snd_nxt.advance_by(HELLO_LEN);
-    cloned_state.rcv_nxt.advance_by(HELLO_LEN);
+    cloned_state.snd_nxt += LOCAL_HELLO_LEN;
+    cloned_state.rcv_nxt += REMOTE_HELLO_LEN;
     assert_eq!(
         connections.try_get()?,
         &cloned_state,
@@ -111,8 +111,8 @@ fn consecutive_replies_use_snd_nxt_for_seq_num() -> Result {
     // Second data packet: "Hi" (2 bytes), but with stale ack=SERVER_ISN+1 (hasn't ACKed our "Hello"
     // echo)
     let reply2 = TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-        ack_num: SERVER_ISN + SYN_BYTE,
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: payload_from("Hi")?,
         ..CLIENT_PACKET
     }
@@ -121,8 +121,8 @@ fn consecutive_replies_use_snd_nxt_for_seq_num() -> Result {
     assert_eq!(
         reply2,
         Some(TcpHandler {
-            seq_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
-            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_HI_LEN,
             payload: payload_from("Hi")?,
             ..SERVER_REPLY
         }),
@@ -142,13 +142,13 @@ fn old_ack_num_does_not_regress_snd_una() -> Result {
     // SND.UNA=SND.NXT=SERVER_ISN+1, RCV.NXT=CLIENT_ISN+1
     let mut connections = TcpConnections::default().after_handshake();
     let mut cloned_state = connections.try_get()?.clone();
-    assert_eq!(cloned_state.snd_una, SERVER_ISN + SYN_BYTE);
+    assert_eq!(cloned_state.snd_una, SERVER_ISN + LOCAL_SYN_BYTE);
 
     // First packet: "Hello" (5 bytes), ack=SERVER_ISN+1 -> SND.UNA is SERVER_ISN+1, SND.NXT becomes
     // SERVER_ISN+6
     let reply1 = TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE,
-        ack_num: SERVER_ISN + SYN_BYTE,
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     }
@@ -157,16 +157,16 @@ fn old_ack_num_does_not_regress_snd_una() -> Result {
     assert_eq!(
         reply1,
         Some(TcpHandler {
-            seq_num: SERVER_ISN + SYN_BYTE,
-            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
             payload: payload_from("Hello")?,
             ..SERVER_REPLY
         }),
         "Standard reply to the first data packet"
     );
 
-    cloned_state.snd_nxt.advance_by(HELLO_LEN);
-    cloned_state.rcv_nxt.advance_by(HELLO_LEN);
+    cloned_state.snd_nxt += LOCAL_HELLO_LEN;
+    cloned_state.rcv_nxt += REMOTE_HELLO_LEN;
     assert_eq!(
         connections.try_get()?,
         &cloned_state,
@@ -176,8 +176,8 @@ fn old_ack_num_does_not_regress_snd_una() -> Result {
     // Second packet: "Hi" (2 bytes), ack=SERVER_ISN+6 -> SND.UNA advances to SERVER_ISN+6, SND.NXT
     // becomes SERVER_ISN+8
     let hi_packet = TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-        ack_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN,
         payload: payload_from("Hi")?,
         ..CLIENT_PACKET
     };
@@ -187,17 +187,17 @@ fn old_ack_num_does_not_regress_snd_una() -> Result {
     assert_eq!(
         reply2,
         Some(TcpHandler {
-            seq_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
-            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_HI_LEN,
             payload: payload_from("Hi")?,
             ..SERVER_REPLY
         }),
         "Standard reply to the second data packet"
     );
 
-    cloned_state.snd_nxt.advance_by(HI_LEN);
-    cloned_state.rcv_nxt.advance_by(HI_LEN);
-    cloned_state.snd_una.advance_by(HELLO_LEN);
+    cloned_state.snd_nxt += LOCAL_HI_LEN;
+    cloned_state.rcv_nxt += REMOTE_HI_LEN;
+    cloned_state.snd_una += LOCAL_HELLO_LEN;
     cloned_state.window_state = Some(WindowState {
         snd_wnd: hi_packet.window,
         snd_wl1: hi_packet.seq_num,
@@ -212,8 +212,8 @@ fn old_ack_num_does_not_regress_snd_una() -> Result {
 
     // Third packet: "Hey" (3 bytes), ack=SERVER_ISN+1 (now stale, older than SND.UNA=SERVER_ISN+6)
     let reply3 = TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
-        ack_num: SERVER_ISN + SYN_BYTE,
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_HI_LEN,
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: payload_from("Hey")?,
         ..CLIENT_PACKET
     }
@@ -224,16 +224,20 @@ fn old_ack_num_does_not_regress_snd_una() -> Result {
     assert_eq!(
         reply3,
         Some(TcpHandler {
-            seq_num: SERVER_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
-            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN + HEY_LEN,
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN + LOCAL_HI_LEN,
+            ack_num: CLIENT_ISN
+                + REMOTE_SYN_BYTE
+                + REMOTE_HELLO_LEN
+                + REMOTE_HI_LEN
+                + REMOTE_HEY_LEN,
             payload: payload_from("Hey")?,
             ..SERVER_REPLY
         }),
         "Stale ack_num shouldn't prevent normal processing"
     );
 
-    cloned_state.snd_nxt.advance_by(HEY_LEN);
-    cloned_state.rcv_nxt.advance_by(HEY_LEN);
+    cloned_state.snd_nxt += LOCAL_HEY_LEN;
+    cloned_state.rcv_nxt += REMOTE_HEY_LEN;
     assert_eq!(
         connections.try_get()?,
         &cloned_state,
@@ -253,15 +257,15 @@ fn duplicate_data_packet_gets_duplicate_ack_without_echo() -> Result {
     let mut connections = TcpConnections::default().after_handshake();
 
     let hello = TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE,
-        ack_num: SERVER_ISN + SYN_BYTE,
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     };
 
     let hi = TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
-        ack_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN,
         payload: payload_from("Hi")?,
         ..CLIENT_PACKET
     };
@@ -272,8 +276,8 @@ fn duplicate_data_packet_gets_duplicate_ack_without_echo() -> Result {
     assert_eq!(
         reply1,
         Some(TcpHandler {
-            seq_num: SERVER_ISN + SYN_BYTE,
-            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
             payload: payload_from("Hello")?,
             ..SERVER_REPLY
         }),
@@ -286,8 +290,8 @@ fn duplicate_data_packet_gets_duplicate_ack_without_echo() -> Result {
     assert_eq!(
         reply2,
         Some(TcpHandler {
-            seq_num: SERVER_ISN + SYN_BYTE + HELLO_LEN,
-            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_HI_LEN,
             payload: payload_from("Hi")?,
             ..SERVER_REPLY
         }),
@@ -300,8 +304,8 @@ fn duplicate_data_packet_gets_duplicate_ack_without_echo() -> Result {
     assert_eq!(
         reply3,
         Some(TcpHandler {
-            seq_num: SERVER_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
-            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN + HI_LEN,
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN + LOCAL_HI_LEN,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_HI_LEN,
             ..SERVER_REPLY
         }),
         "Duplicate ACK should ack rcv_nxt=CLIENT_ISN+8 with no payload, not echo \
@@ -324,8 +328,8 @@ fn ack_for_unsent_data_is_dropped_and_gets_current_state_reply() -> Result {
 
     // seq_num == RCV.NXT, but ack_num=SERVER_ISN+20 is past SND.NXT=SERVER_ISN+1
     let reply = TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE,
-        ack_num: SERVER_ISN + 20,
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
+        ack_num: SERVER_ISN + SeqDist::new(20),
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     }
@@ -334,8 +338,8 @@ fn ack_for_unsent_data_is_dropped_and_gets_current_state_reply() -> Result {
     assert_eq!(
         reply,
         Some(TcpHandler {
-            seq_num: SERVER_ISN + SYN_BYTE,
-            ack_num: CLIENT_ISN + SYN_BYTE,
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
             ..SERVER_REPLY
         })
     );
@@ -354,24 +358,28 @@ fn wraparound_ack_for_unsent_data_is_still_rejected() -> Result {
 
     let mut connections = TcpConnections::default();
     let initial_state = ConnState {
-        snd_nxt: u32::MAX,
-        snd_una: u32::MAX,
+        snd_nxt: SeqPoint::new(u32::MAX),
+        snd_una: SeqPoint::new(u32::MAX),
         window_state: Some(WindowState {
-            snd_wnd: u16::MAX,
-            snd_wl1: CLIENT_ISN + SYN_BYTE,
-            snd_wl2: u32::MAX,
+            snd_wnd: SeqDist::new(u16::MAX),
+            snd_wl1: CLIENT_ISN + REMOTE_SYN_BYTE,
+            snd_wl2: SeqPoint::new(u32::MAX),
         }),
         ..AFTER_HANDSHAKE
     };
     connections.insert(initial_state.clone());
 
     // ack=0 wraps 1 past SND.NXT=`u32::MAX`
-    let reply = TcpHandler { seq_num: CLIENT_ISN + SYN_BYTE, ..CLIENT_PACKET }
+    let reply = TcpHandler { seq_num: CLIENT_ISN + REMOTE_SYN_BYTE, ..CLIENT_PACKET }
         .create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
-        Some(TcpHandler { seq_num: u32::MAX, ack_num: CLIENT_ISN + SYN_BYTE, ..SERVER_REPLY })
+        Some(TcpHandler {
+            seq_num: SeqPoint::new(u32::MAX),
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
+            ..SERVER_REPLY
+        })
     );
 
     assert_eq!(connections.try_get()?, &initial_state, "State must be untouched");
@@ -386,8 +394,8 @@ fn data_packet_for_unknown_connection_gets_rst() -> Result {
     let mut connections = TcpConnections::default(); // Empty, no known connections
 
     let reply = TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE,
-        ack_num: SERVER_ISN + SYN_BYTE,
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     }
@@ -395,7 +403,11 @@ fn data_packet_for_unknown_connection_gets_rst() -> Result {
 
     assert_eq!(
         reply,
-        Some(TcpHandler { seq_num: SERVER_ISN + SYN_BYTE, flags: TcpFlags::Rst, ..SERVER_REPLY })
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
+            flags: TcpFlags::Rst,
+            ..SERVER_REPLY
+        })
     );
 
     Ok(())

@@ -9,6 +9,7 @@ pub use config::Config;
 mod addr_pairs;
 mod checksum;
 mod config;
+mod endpoint;
 mod ipv4_header;
 mod logger;
 mod protocol;

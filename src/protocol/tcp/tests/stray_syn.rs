@@ -12,14 +12,18 @@ fn stray_syn_out_of_window_gets_challenge_ack() -> Result {
 
     // seq=CLIENT_ISN-20 < rcv_nxt=CLIENT_ISN+1, outside the receive window, caught at "First, check
     // sequence number"
-    let reply = TcpHandler { seq_num: CLIENT_ISN - 20, flags: TcpFlags::Syn, ..CLIENT_PACKET }
-        .create_reply(&mut connections)?;
+    let reply = TcpHandler {
+        seq_num: CLIENT_ISN - SeqDist::new(20),
+        flags: TcpFlags::Syn,
+        ..CLIENT_PACKET
+    }
+    .create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
         Some(TcpHandler {
-            seq_num: SERVER_ISN + SYN_BYTE,
-            ack_num: CLIENT_ISN + SYN_BYTE,
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
             ..SERVER_REPLY
         }),
         "Out-of-window stray SYN must produce a challenge ACK, not a RST"
@@ -46,14 +50,14 @@ fn stray_syn_in_window_gets_challenge_ack() -> Result {
 
     // seq=CLIENT_ISN+1 == rcv_nxt, inside the receive window, reaches "Fourth, check the SYN bit"
     let reply =
-        TcpHandler { seq_num: CLIENT_ISN + SYN_BYTE, flags: TcpFlags::Syn, ..CLIENT_PACKET }
+        TcpHandler { seq_num: CLIENT_ISN + REMOTE_SYN_BYTE, flags: TcpFlags::Syn, ..CLIENT_PACKET }
             .create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
         Some(TcpHandler {
-            seq_num: SERVER_ISN + SYN_BYTE,
-            ack_num: CLIENT_ISN + SYN_BYTE,
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
             ..SERVER_REPLY
         }),
         "In-window stray SYN must produce a challenge ACK, not a RST"
@@ -81,14 +85,14 @@ fn stray_syn_in_fin_wait_1_gets_challenge_ack() -> Result {
 
     // seq=CLIENT_ISN+1 == rcv_nxt, inside the receive window, reaches "Fourth, check the SYN bit"
     let reply =
-        TcpHandler { seq_num: CLIENT_ISN + SYN_BYTE, flags: TcpFlags::Syn, ..CLIENT_PACKET }
+        TcpHandler { seq_num: CLIENT_ISN + REMOTE_SYN_BYTE, flags: TcpFlags::Syn, ..CLIENT_PACKET }
             .create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
         Some(TcpHandler {
-            seq_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
-            ack_num: CLIENT_ISN + SYN_BYTE,
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
             ..SERVER_REPLY
         }),
         "Stray SYN in FIN-WAIT-1 must produce a challenge ACK using snd_nxt=SERVER_ISN+2"
@@ -116,8 +120,8 @@ fn stray_syn_ack_gets_challenge_ack() -> Result {
 
     // seq=CLIENT_ISN+1 == rcv_nxt, inside the receive window, reaches "Fourth, check the SYN bit"
     let reply = TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE,
-        ack_num: SERVER_ISN + SYN_BYTE,
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::SynAck,
         ..CLIENT_PACKET
     }
@@ -126,8 +130,8 @@ fn stray_syn_ack_gets_challenge_ack() -> Result {
     assert_eq!(
         reply,
         Some(TcpHandler {
-            seq_num: SERVER_ISN + SYN_BYTE,
-            ack_num: CLIENT_ISN + SYN_BYTE,
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
             ..SERVER_REPLY
         }),
         "Stray SYN-ACK must produce a challenge ACK, not a RST"

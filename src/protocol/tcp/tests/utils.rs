@@ -1,46 +1,49 @@
 use super::*;
 
 /// Fixed value to use as the ISN randomly chosen by the client.
-pub const CLIENT_ISN: u32 = 100;
+pub const CLIENT_ISN: SeqPoint<Remote> = SeqPoint::new(100);
 
 /// Fixed value to use as the ISN randomly chosen by the server.
-pub const SERVER_ISN: u32 = 400;
+pub const SERVER_ISN: SeqPoint<Local> = SeqPoint::new(400);
 
-/// Checks at compile time that `CLIENT_ISN` and `SERVER_ISN` are sufficiently far from each
-/// other so they cannot be mixed up in tests.
-const _: () = assert!(CLIENT_ISN.abs_diff(SERVER_ISN) >= 100);
+/// The number of bytes in the payload `"Hello"`, going in the local to remote direction.
+pub const LOCAL_HELLO_LEN: SeqDist<u32, Local> = SeqDist::new(5);
 
-/// The single phantom byte consumed by SYN.
-pub const SYN_BYTE: u32 = 1;
+/// The number of bytes in the payload `"Hi"`, going in the local to remote direction.
+pub const LOCAL_HI_LEN: SeqDist<u32, Local> = SeqDist::new(2);
 
-/// The single phantom byte consumed by FIN.
-pub const FIN_BYTE: u32 = 1;
+/// The number of bytes in the payload `"Hey"`, going in the local to remote direction.
+pub const LOCAL_HEY_LEN: SeqDist<u32, Local> = SeqDist::new(3);
 
-/// The number of bytes in the payload `"Hello"`.
-pub const HELLO_LEN: u32 = 5;
+/// The number of bytes in the payload `"Hello"`, going in the remote to local direction.
+pub const REMOTE_HELLO_LEN: SeqDist<u32, Remote> = SeqDist::new(5);
 
-/// The number of bytes in the payload `"Hi"`.
-pub const HI_LEN: u32 = 2;
+/// The number of bytes in the payload `"Hi"`, going in the remote to local direction.
+pub const REMOTE_HI_LEN: SeqDist<u32, Remote> = SeqDist::new(2);
 
-/// The number of bytes in the payload `"Hey"`.
-pub const HEY_LEN: u32 = 3;
+/// The number of bytes in the payload `"Hey"`, going in the remote to local direction.
+pub const REMOTE_HEY_LEN: SeqDist<u32, Remote> = SeqDist::new(3);
 
 /// Connection key shared by test modules.
-pub const KEY: ConnKey =
-    ConnKey { client_ip: SRC_IP, client_port: 1234, server_ip: DST_IP, server_port: 80 };
+pub const KEY: ConnKey = ConnKey {
+    client_ip: REMOTE_TO_LOCAL_IP_PAIR.src,
+    client_port: 1234,
+    server_ip: REMOTE_TO_LOCAL_IP_PAIR.dst,
+    server_port: 80,
+};
 
 /// An ESTABLISHED connection as if the initial three-way handshake had just completed. Uses the
 /// test constants `CLIENT_ISN` and `SERVER_ISN`. Has the maximum SND.WND and empty
 /// `pending`/`send_buffer`.
 pub const AFTER_HANDSHAKE: ConnState = ConnState {
     tcp_state: TcpState::Established,
-    snd_nxt: SERVER_ISN + SYN_BYTE,
-    rcv_nxt: CLIENT_ISN + SYN_BYTE,
-    snd_una: SERVER_ISN + SYN_BYTE,
+    snd_nxt: SERVER_ISN.const_add(LOCAL_SYN_BYTE),
+    rcv_nxt: CLIENT_ISN.const_add(REMOTE_SYN_BYTE),
+    snd_una: SERVER_ISN.const_add(LOCAL_SYN_BYTE),
     window_state: Some(WindowState {
-        snd_wnd: u16::MAX,
-        snd_wl1: CLIENT_ISN + SYN_BYTE,
-        snd_wl2: SERVER_ISN + SYN_BYTE,
+        snd_wnd: SeqDist::new(u16::MAX),
+        snd_wl1: CLIENT_ISN.const_add(REMOTE_SYN_BYTE),
+        snd_wl2: SERVER_ISN.const_add(LOCAL_SYN_BYTE),
     }),
     pending: Vec::new(),
     send_buffer: VecDeque::new(),
@@ -48,27 +51,27 @@ pub const AFTER_HANDSHAKE: ConnState = ConnState {
 
 /// An incoming pure ACK packet from the client (port 1234) to the server (port 80).
 /// `seq_num` and `ack_num` will be 0 if not overridden.
-pub const CLIENT_PACKET: TcpHandler = TcpHandler {
-    ip_pair: Ipv4AddrPair { src: KEY.client_ip, dst: KEY.server_ip },
-    ports: PortPair { src: KEY.client_port, dst: KEY.server_port },
-    seq_num: 0,
-    ack_num: 0,
+pub const CLIENT_PACKET: TcpHandler<Remote> = TcpHandler {
+    ip_pair: Ipv4AddrPair::new(KEY.client_ip, KEY.server_ip),
+    ports: PortPair::new(KEY.client_port, KEY.server_port),
+    seq_num: SeqPoint::new(0),
+    ack_num: SeqPoint::new(0),
     offset_bytes: 20,
     flags: TcpFlags::Ack,
-    window: u16::MAX,
+    window: SeqDist::new(u16::MAX),
     payload: None,
 };
 
 /// An outgoing pure ACK packet from the server (port 80) to the client (port 1234).
 /// `seq_num` and `ack_num` will be 0 if not overridden.
-pub const SERVER_REPLY: TcpHandler = TcpHandler {
-    ip_pair: Ipv4AddrPair { src: KEY.server_ip, dst: KEY.client_ip },
-    ports: PortPair { src: KEY.server_port, dst: KEY.client_port },
-    seq_num: 0,
-    ack_num: 0,
+pub const SERVER_REPLY: TcpHandler<Local> = TcpHandler {
+    ip_pair: Ipv4AddrPair::new(KEY.server_ip, KEY.client_ip),
+    ports: PortPair::new(KEY.server_port, KEY.client_port),
+    seq_num: SeqPoint::new(0),
+    ack_num: SeqPoint::new(0),
     offset_bytes: 20,
     flags: TcpFlags::Ack,
-    window: u16::MAX,
+    window: SeqDist::new(u16::MAX),
     payload: None,
 };
 

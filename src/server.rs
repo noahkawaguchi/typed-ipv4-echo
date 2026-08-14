@@ -2,6 +2,7 @@ use {
     crate::{
         ETHERNET_MTU, Result,
         config::Config,
+        endpoint::{Local, Remote},
         ipv4_header::Ipv4Header,
         logger::Logger,
         protocol::{
@@ -25,11 +26,20 @@ enum ShutdownDecision {
 
     /// This was the first interrupt, active close began, and at least one connection is still
     /// closing.
-    BeganDraining { to_send: Vec<TcpHandler>, deadline: Instant },
+    BeganDraining { to_send: Vec<TcpHandler<Local>>, deadline: Instant },
 
     /// This was the first interrupt, and no connection needs to finish closing, so shutdown can
     /// happen immediately.
     NoConnections,
+}
+
+/// A parsed incoming IPv4 header and protocol handler along with a reply handler if one is
+/// necessary.
+#[cfg_attr(test, derive(Debug))]
+struct ParsedExchange<'a> {
+    ipv4_header: Ipv4Header<Remote>,
+    incoming_handler: ProtocolHandler<'a, Remote>,
+    reply_handler: Option<ProtocolHandler<'a, Local>>,
 }
 
 /// Reads and writes IPv4 packets to and from `device`, maintaining TCP connection state and echoing
@@ -151,11 +161,12 @@ where
                     match self.parse_incoming(read_buf.try_get(..bytes_read)?) {
                         Err(e) => self.logger.pkt_err(e),
 
-                        Ok((ipv4_header, handler, reply_handler)) => {
+                        Ok(exchange) => {
                             self.logger.pkt_extra(" ==== Packet received ====");
-                            self.logger.pkt_in(&ipv4_header, &handler)?;
+                            self.logger
+                                .pkt_io(&exchange.ipv4_header, &exchange.incoming_handler)?;
 
-                            match reply_handler {
+                            match exchange.reply_handler {
                                 None => self.logger.pkt_extra("\n<no reply>"),
 
                                 Some(reply) => {
@@ -225,7 +236,7 @@ where
     /// Writes `handler`'s protocol-specific header and payload into the write buffer, prefixed with
     /// an IPv4 header, then writes the resulting packet to `device` and prints its string
     /// representation to stdout.
-    fn send_packet(&mut self, handler: &impl Encode) -> Result {
+    fn send_packet(&mut self, handler: &impl Encode<Local>) -> Result {
         let proto_len = handler.write_into(&mut self.write_buf[Ipv4Header::REPLY_HDR_LEN..])?;
 
         let ipv4_header = Ipv4Header::try_new(handler.proto(), handler.get_ip_pair(), proto_len)?;
@@ -234,7 +245,7 @@ where
         self.device
             .write_all(self.write_buf.try_get(..ipv4_header.total_len.into())?)?;
 
-        self.logger.pkt_out(&ipv4_header, handler)?;
+        self.logger.pkt_io(&ipv4_header, handler)?;
 
         Ok(())
     }
@@ -285,22 +296,19 @@ impl<D, P, S> Server<'_, D, P, S> {
     /// Parses `data` as an IPv4 header and protocol-specific header and payload, returning the
     /// incoming packet parsed into structs ready to be logged, and optionally a reply if one is
     /// required.
-    fn parse_incoming<'a>(
-        &mut self,
-        data: &'a [u8],
-    ) -> Result<(Ipv4Header, ProtocolHandler<'a>, Option<ProtocolHandler<'a>>), String> {
+    fn parse_incoming<'a>(&mut self, data: &'a [u8]) -> Result<ParsedExchange<'a>, String> {
         let (ipv4_header, ipv4_payload) =
             Ipv4Header::parse(data).map_err(|e| format!("Skipping packet: {e}"))?;
 
-        let handler =
+        let incoming_handler =
             ProtocolHandler::parse(ipv4_payload, ipv4_header.protocol, ipv4_header.ip_pair)
                 .map_err(|e| format!("Skipping packet: {e}"))?;
 
-        let reply_handler = handler
+        let reply_handler = incoming_handler
             .create_reply(&mut self.tcp_connections)
             .map_err(|e| format!("Error creating reply: {e}"))?;
 
-        Ok((ipv4_header, handler, reply_handler))
+        Ok(ParsedExchange { ipv4_header, incoming_handler, reply_handler })
     }
 }
 

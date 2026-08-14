@@ -14,7 +14,7 @@ fn creates_valid_syn_ack() -> Result {
         reply,
         Some(TcpHandler {
             seq_num: stored_isn,
-            ack_num: CLIENT_ISN + SYN_BYTE,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
             flags: TcpFlags::SynAck,
             ..SERVER_REPLY
         })
@@ -39,7 +39,7 @@ fn duplicate_syn_during_syn_received_resends_same_syn_ack() -> Result {
         reply,
         Some(TcpHandler {
             seq_num: SERVER_ISN,
-            ack_num: CLIENT_ISN + SYN_BYTE,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
             flags: TcpFlags::SynAck,
             ..SERVER_REPLY
         }),
@@ -63,8 +63,8 @@ fn handshake_ack_without_data_establishes_connection_and_returns_none() -> Resul
     let mut cloned_state = connections.try_get()?.clone();
 
     let handshake_ack = TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE,
-        ack_num: SERVER_ISN + SYN_BYTE,
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         ..CLIENT_PACKET
     };
 
@@ -72,8 +72,8 @@ fn handshake_ack_without_data_establishes_connection_and_returns_none() -> Resul
 
     // Reproduce the state changes that should happen at connection establishment
     cloned_state.tcp_state = TcpState::Established;
-    cloned_state.rcv_nxt = CLIENT_ISN + SYN_BYTE;
-    cloned_state.snd_una.advance_by(SYN_BYTE);
+    cloned_state.rcv_nxt = CLIENT_ISN + REMOTE_SYN_BYTE;
+    cloned_state.snd_una += LOCAL_SYN_BYTE;
     cloned_state.window_state = Some(WindowState {
         snd_wnd: handshake_ack.window,
         snd_wl1: handshake_ack.seq_num,
@@ -94,8 +94,8 @@ fn handshake_ack_with_data_establishes_and_echoes() -> Result {
     let mut cloned_state = connections.try_get()?.clone();
 
     let handshake_ack_with_data = TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE,
-        ack_num: SERVER_ISN + SYN_BYTE,
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     };
@@ -103,8 +103,8 @@ fn handshake_ack_with_data_establishes_and_echoes() -> Result {
     assert_eq!(
         handshake_ack_with_data.create_reply(&mut connections)?,
         Some(TcpHandler {
-            seq_num: SERVER_ISN + SYN_BYTE,
-            ack_num: CLIENT_ISN + SYN_BYTE + HELLO_LEN,
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
             payload: payload_from("Hello")?,
             ..SERVER_REPLY
         }),
@@ -112,9 +112,9 @@ fn handshake_ack_with_data_establishes_and_echoes() -> Result {
     );
 
     cloned_state.tcp_state = TcpState::Established;
-    cloned_state.rcv_nxt.advance_by(HELLO_LEN);
-    cloned_state.snd_nxt.advance_by(HELLO_LEN);
-    cloned_state.snd_una.advance_by(SYN_BYTE);
+    cloned_state.rcv_nxt += REMOTE_HELLO_LEN;
+    cloned_state.snd_nxt += LOCAL_HELLO_LEN;
+    cloned_state.snd_una += LOCAL_SYN_BYTE;
     cloned_state.window_state = Some(WindowState {
         snd_wnd: handshake_ack_with_data.window,
         snd_wl1: handshake_ack_with_data.seq_num,
@@ -138,8 +138,8 @@ fn handshake_ack_with_wrong_seq_and_no_data_gets_current_state_ack() -> Result {
 
     // Correct ack_num, but seq_num doesn't match RCV.NXT = CLIENT_ISN + SYN_BYTE
     let reply = TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE + 1,
-        ack_num: SERVER_ISN + SYN_BYTE,
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + SeqDist::new(1),
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -147,8 +147,8 @@ fn handshake_ack_with_wrong_seq_and_no_data_gets_current_state_ack() -> Result {
     assert_eq!(
         reply,
         Some(TcpHandler {
-            seq_num: SERVER_ISN + SYN_BYTE,
-            ack_num: CLIENT_ISN + SYN_BYTE,
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
             ..SERVER_REPLY
         }),
         "Wrong SEG.SEQ must get an ACK reflecting current state, not complete the handshake or \
@@ -175,8 +175,8 @@ fn handshake_ack_with_with_wrong_seq_and_data_gets_current_state_ack() -> Result
 
     // Correct ack_num, but seq_num doesn't match RCV.NXT = CLIENT_ISN + SYN_BYTE
     let reply = TcpHandler {
-        seq_num: CLIENT_ISN + SYN_BYTE + 1,
-        ack_num: SERVER_ISN + SYN_BYTE,
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + SeqDist::new(1),
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET
     }
@@ -185,8 +185,8 @@ fn handshake_ack_with_with_wrong_seq_and_data_gets_current_state_ack() -> Result
     assert_eq!(
         reply,
         Some(TcpHandler {
-            seq_num: SERVER_ISN + SYN_BYTE,
-            ack_num: CLIENT_ISN + SYN_BYTE,
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
             ..SERVER_REPLY
         }),
         "Wrong SEG.SEQ must get an ACK reflecting current state, not complete the handshake or \

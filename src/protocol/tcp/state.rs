@@ -1,10 +1,10 @@
 use {
     crate::{
         Result,
+        endpoint::{Local, Remote},
         protocol::tcp::{
-            SendInfo, TcpFlags, TcpHandler, TcpPayload,
+            LOCAL_SYN_BYTE, SendInfo, SeqDist, SeqPoint, TcpFlags, TcpHandler, TcpPayload,
             pending_segment::PendingSegment,
-            seq_space::{SeqLe as _, SeqLt as _},
         },
     },
     std::{collections::VecDeque, time::Instant},
@@ -17,13 +17,13 @@ pub(super) struct ConnState {
     pub(super) tcp_state: TcpState,
 
     /// "SND.NXT = next sequence number to be sent" (RFC 9293, Section 3.4).
-    pub(super) snd_nxt: u32,
+    pub(super) snd_nxt: SeqPoint<Local>,
 
     /// "RCV.NXT = next sequence number expected on an incoming segment" (RFC 9293, Section 3.4).
-    pub(super) rcv_nxt: u32,
+    pub(super) rcv_nxt: SeqPoint<Remote>,
 
     /// "SND.UNA = oldest unacknowledged sequence number" (RFC 9293, Section 3.4).
-    pub(super) snd_una: u32,
+    pub(super) snd_una: SeqPoint<Local>,
 
     /// SND.WND, SND.WL1, and SND.WL2. Should be `None` until establishment, then always `Some`.
     pub(super) window_state: Option<WindowState>,
@@ -47,7 +47,7 @@ impl ConnState {
                 // State after the initial two-way exchange
                 tcp_state: TcpState::SynReceived,
                 // SYN-ACK consumes one sequence number
-                snd_nxt: send_info.seq_num.wrapping_add(1),
+                snd_nxt: send_info.seq_num + LOCAL_SYN_BYTE,
                 // Our SYN-ACK's `ack_num` is the client's ISN + 1
                 rcv_nxt: send_info.ack_num,
                 // Our SYN-ACK is unacknowledged (this is our ISN)
@@ -70,18 +70,22 @@ impl ConnState {
     /// Ignores ACKs that are old (before SND.UNA) or for data not yet sent (past SND.NXT). For
     /// updates to SND.UNA and the retransmission queue, ignores duplicate ACKs
     /// (SND.UNA == SEG.ACK).
-    pub(super) fn incoming_ack_update(&mut self, seg: &TcpHandler) -> Result<(), &'static str> {
+    pub(super) fn incoming_ack_update(
+        &mut self,
+        seg: &TcpHandler<Remote>,
+    ) -> Result<(), &'static str> {
         let Some(window_state) = &self.window_state else {
             return Err("`incoming_ack_update` called with uninitialized window state");
         };
 
-        if self.snd_una.seq_le(seg.ack_num) && seg.ack_num.seq_le(self.snd_nxt) {
+        if self.snd_una.precedes_or_eq(seg.ack_num) && seg.ack_num.precedes_or_eq(self.snd_nxt) {
             // Include duplicate ACKs: SND.UNA <= SEG.ACK <= SND.NXT
             //     and
             // Guard against an old/reordered segment clobbering the window with stale data:
             //     SND.WL1 < SEG.SEQ or (SND.WL1 == SEG.SEQ and SND.WL2 <= SEG.ACK)
-            if window_state.snd_wl1.seq_lt(seg.seq_num)
-                || (window_state.snd_wl1 == seg.seq_num && window_state.snd_wl2.seq_le(seg.ack_num))
+            if window_state.snd_wl1.precedes(seg.seq_num)
+                || (window_state.snd_wl1 == seg.seq_num
+                    && window_state.snd_wl2.precedes_or_eq(seg.ack_num))
             {
                 self.window_state = Some(WindowState {
                     snd_wnd: seg.window,
@@ -91,7 +95,7 @@ impl ConnState {
             }
 
             // Exclude duplicate ACKs: SND.UNA < SEG.ACK <= SND.NXT
-            if self.snd_una.seq_lt(seg.ack_num) {
+            if self.snd_una.precedes(seg.ack_num) {
                 self.snd_una = seg.ack_num;
 
                 // ACKs are cumulative, so only keep pending segments not fully covered by SEG.ACK
@@ -107,12 +111,19 @@ impl ConnState {
     /// front of the send buffer, or returns `Ok(None)` if nothing can be sent right now because the
     /// buffer is empty or the window is full. Does not mutate any other state.
     pub(super) fn drain_transmittable(&mut self) -> Result<Option<TcpPayload>> {
-        let Some(window_state) = &self.window_state else {
-            return Err("`drain_transmittable` called with uninitialized window state".into());
-        };
+        let window_state = self
+            .window_state
+            .as_ref()
+            .ok_or("`drain_transmittable` called with uninitialized window state")?;
 
-        let sent_but_not_acked = self.snd_nxt.wrapping_sub(self.snd_una);
-        let space_in_window = u32::from(window_state.snd_wnd).saturating_sub(sent_but_not_acked);
+        let sent_but_not_acked = self
+            .snd_nxt
+            .distance_since(self.snd_una)
+            .ok_or("`drain_transmittable` called with SND.UNA not preceding or equaling SND.NXT")?;
+
+        let space_in_window =
+            SeqDist::<u32, Local>::from(window_state.snd_wnd).saturating_sub(sent_but_not_acked);
+
         let bytes_to_send = usize::try_from(space_in_window)?.min(self.send_buffer.len());
 
         TcpPayload::try_from_iter(self.send_buffer.drain(..bytes_to_send)).map_err(Into::into)
@@ -194,18 +205,18 @@ pub(super) enum TcpState {
 pub(super) struct WindowState {
     /// SND.WND or send window. "This represents the sequence numbers that the remote (receiving)
     /// TCP endpoint is willing to receive" (RFC 9293, Section 4).
-    pub(super) snd_wnd: u16,
+    pub(super) snd_wnd: SeqDist<u16, Local>,
 
     /// SND.WL1. "segment sequence number used for last window update" (RFC 9293, Section 3.3.1).
     ///
     /// Purely used for internal bookkeeping alongside `snd_wl2` to determine whether a window
     /// value is fresh or stale/reordered.
-    pub(super) snd_wl1: u32,
+    pub(super) snd_wl1: SeqPoint<Remote>,
 
     /// SND.WL2. "segment acknowledgment number used for last window update" (RFC 9293, Section
     /// 3.3.1).
     ///
     /// Purely used for internal bookkeeping alongside `snd_wl1` to determine whether a window
     /// value is fresh or stale/reordered.
-    pub(super) snd_wl2: u32,
+    pub(super) snd_wl2: SeqPoint<Local>,
 }

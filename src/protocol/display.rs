@@ -43,7 +43,7 @@ impl fmt::Display for PrettyPayload<'_> {
 }
 
 /// Wrapper implementing `Display` for thousands-separator formatting.
-pub(super) struct ThousandsSeparated<T>(T);
+pub(super) struct ThousandsSeparated<T>(pub(super) T);
 
 pub(super) trait WithThousandsSeparators: Sized
 where

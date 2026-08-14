@@ -11,17 +11,18 @@ use {
     crate::{
         Result,
         addr_pairs::{Ipv4AddrPair, PortPair},
+        endpoint::{Endpoint, Local, Remote},
         protocol::{
             Protocol,
             display::{PrettyPayload, WithThousandsSeparators as _},
-            handler::Encode,
+            handler::{Encode, PrettyProtocol},
             pseudo_header_checksum,
             tcp::{
                 connections::ConnKey,
                 flags::TcpFlags,
-                payload::TcpPayload,
+                payload::{LenOrDefault as _, TcpPayload},
                 pending_segment::PendingSegment,
-                seq_space::{AdvanceBy as _, SeqLe as _, SeqLt as _},
+                seq_space::{SeqDist, SeqPoint},
                 state::{ConnState, TcpState, WindowState},
             },
         },
@@ -34,23 +35,54 @@ use {
 /// The minimum number of bytes in a TCP header (no options).
 const TCP_HDR_MIN_LEN: u8 = 20;
 
-/// Manages TCP headers, data, and reply logic. Field definitions below from RFC 9293, Section 3.1.
-#[cfg_attr(test, derive(Debug, PartialEq, Eq, Clone))]
-pub struct TcpHandler {
-    /// Not a part of the TCP header, but required for connection state and checksum calculation.
-    ip_pair: Ipv4AddrPair,
+/// The single phantom byte consumed by SYN in the stream going in the local to remote direction.
+const LOCAL_SYN_BYTE: SeqDist<u32, Local> = SeqDist::new(1);
 
-    ports: PortPair,
+/// The single phantom byte consumed by FIN in the stream going in the local to remote direction.
+const LOCAL_FIN_BYTE: SeqDist<u32, Local> = SeqDist::new(1);
+
+/// The single phantom byte consumed by SYN in the stream going in the remote to local direction.
+const REMOTE_SYN_BYTE: SeqDist<u32, Remote> = SeqDist::new(1);
+
+/// The single phantom byte consumed by FIN in the stream going in the remote to local direction.
+const REMOTE_FIN_BYTE: SeqDist<u32, Remote> = SeqDist::new(1);
+
+/// Fields that differ when determining a segment to send.
+#[derive(Clone)]
+#[cfg_attr(test, derive(Debug))]
+struct SendInfo {
+    seq_num: SeqPoint<Local>,
+    ack_num: SeqPoint<Remote>,
+    flags: TcpFlags,
+    payload: Option<TcpPayload>,
+}
+
+impl SendInfo {
+    const fn pure_ack(seq_num: SeqPoint<Local>, ack_num: SeqPoint<Remote>) -> Self {
+        Self { seq_num, ack_num, flags: TcpFlags::Ack, payload: None }
+    }
+}
+
+/// Manages TCP headers, data, and reply logic. Field definitions below from RFC 9293, Section 3.1.
+/// `S` is the send direction (originated from the sender's ISN), while `S::Peer` is the receive
+/// direction (originated from the destination's ISN). In other words, this is a segment from `S` to
+/// `S::Peer`.
+#[cfg_attr(test, derive(Debug, PartialEq, Eq, Clone))]
+pub struct TcpHandler<S: Endpoint> {
+    /// Not a part of the TCP header, but required for connection state and checksum calculation.
+    ip_pair: Ipv4AddrPair<S>,
+
+    ports: PortPair<S>,
 
     /// "The sequence number of the first data octet in this segment (except when the SYN flag is
     /// set). If SYN is set, the sequence number is the initial sequence number (ISN) and the first
     /// data octet is ISN+1."
-    seq_num: u32,
+    seq_num: SeqPoint<S>,
 
     /// "If the ACK control bit is set, this field contains the value of the next sequence number
     /// the sender of the segment is expecting to receive. Once a connection is established, this
     /// is always sent."
-    ack_num: u32,
+    ack_num: SeqPoint<S::Peer>,
 
     /// **This field is stored in units of bytes.**
     ///
@@ -62,98 +94,15 @@ pub struct TcpHandler {
 
     /// "The number of data octets beginning with the one indicated in the acknowledgment field
     /// that the sender of this segment is willing to accept."
-    window: u16,
+    window: SeqDist<u16, S::Peer>,
 
     payload: Option<TcpPayload>,
 }
 
-/// Fields that differ when determining a segment to send.
-#[derive(Clone)]
-#[cfg_attr(test, derive(Debug))]
-struct SendInfo {
-    seq_num: u32,
-    ack_num: u32,
-    flags: TcpFlags,
-    payload: Option<TcpPayload>,
-}
-
-impl SendInfo {
-    const fn pure_ack(seq_num: u32, ack_num: u32) -> Self {
-        Self { seq_num, ack_num, flags: TcpFlags::Ack, payload: None }
-    }
-}
-
-impl TcpHandler {
-    /// "This represents the sequence numbers the local (receiving) TCP endpoint is willing to
-    /// receive... segments overlapping the range RCV.NXT to RCV.NXT + RCV.WND - 1 carry acceptable
-    /// data or control" (RFC 9293, Section 4).
-    ///
-    /// Currently left at max because as an echo server, there's no receive-side buffer accumulating
-    /// data for an application.
-    ///
-    /// However, a dynamic RCV.WND could be used in the future to bound the send buffer's growth,
-    /// throttling the peer's sending rate if they keep sending more data than they are willing to
-    /// receive.
-    const RCV_WND: u16 = u16::MAX;
-
-    /// Parses `data` as a TCP header and payload.
-    pub(super) fn parse(data: &[u8], ip_pair: Ipv4AddrPair) -> Result<Self> {
-        let Some(tcp_header) = data.first_chunk::<{ TCP_HDR_MIN_LEN as usize }>() else {
-            return Err(format!("Too short for TCP header ({} bytes)", data.len()).into());
-        };
-
-        if pseudo_header_checksum(data, ip_pair, Protocol::Tcp)? != 0 {
-            return Err("Invalid TCP checksum".into());
-        }
-
-        // Convert length in 32-bit words in the upper 4 bits to length in bytes in the full 8 bits
-        let offset_bytes = tcp_header[12] >> 4 << 2;
-
-        Ok(Self {
-            ip_pair,
-            ports: PortPair {
-                src: u16::from_be_bytes([tcp_header[0], tcp_header[1]]),
-                dst: u16::from_be_bytes([tcp_header[2], tcp_header[3]]),
-            },
-            seq_num: u32::from_be_bytes([
-                tcp_header[4],
-                tcp_header[5],
-                tcp_header[6],
-                tcp_header[7],
-            ]),
-            ack_num: u32::from_be_bytes([
-                tcp_header[8],
-                tcp_header[9],
-                tcp_header[10],
-                tcp_header[11],
-            ]),
-            offset_bytes,
-            flags: tcp_header[13].try_into()?,
-            window: u16::from_be_bytes([tcp_header[14], tcp_header[15]]),
-            payload: TcpPayload::try_from_iter(
-                data.get(offset_bytes.into()..)
-                    .into_iter()
-                    .flatten()
-                    .copied(),
-            )?,
-        })
-    }
-
-    fn from_pairs_and_info(
-        ip_pair: Ipv4AddrPair,
-        ports: PortPair,
-        SendInfo { seq_num, ack_num, flags, payload }: SendInfo,
-    ) -> Self {
-        Self {
-            ip_pair,
-            ports,
-            seq_num,
-            ack_num,
-            offset_bytes: TCP_HDR_MIN_LEN,
-            flags,
-            window: Self::RCV_WND,
-            payload,
-        }
+impl TcpHandler<Remote> {
+    /// Parses `data` as a TCP header and payload in the remote to local direction.
+    pub(super) fn parse(data: &[u8], ip_pair: Ipv4AddrPair<Remote>) -> Result<Self> {
+        Self::inner_parse(data, ip_pair)
     }
 
     /// Creates a TCP header and payload for replying to `self`, or returns `Ok(None)` for no reply.
@@ -161,7 +110,10 @@ impl TcpHandler {
         clippy::too_many_lines,
         reason = "Large match expression to express reply cases clearly"
     )]
-    pub(super) fn create_reply(&self, connections: &mut TcpConnections) -> Result<Option<Self>> {
+    pub(super) fn create_reply(
+        &self,
+        connections: &mut TcpConnections,
+    ) -> Result<Option<TcpHandler<Local>>> {
         let key = ConnKey {
             client_ip: self.ip_pair.src,
             client_port: self.ports.src,
@@ -175,8 +127,8 @@ impl TcpHandler {
             (None, TcpFlags::Syn, _) => {
                 // seq num = random ISN, local ack num = remote seq num + 1
                 let send_info = SendInfo {
-                    seq_num: sys::random_u32()?,
-                    ack_num: self.seq_num.wrapping_add(1),
+                    seq_num: SeqPoint::new(sys::random_u32()?),
+                    ack_num: self.seq_num + REMOTE_SYN_BYTE,
                     flags: TcpFlags::SynAck,
                     payload: None,
                 };
@@ -196,7 +148,7 @@ impl TcpHandler {
             ) => {
                 let send_info = SendInfo {
                     seq_num: *snd_una, // ISN
-                    ack_num: self.seq_num.wrapping_add(1),
+                    ack_num: self.seq_num + REMOTE_SYN_BYTE,
                     flags: TcpFlags::SynAck,
                     payload: None,
                 };
@@ -242,8 +194,8 @@ impl TcpHandler {
                 TcpFlags::Ack,
                 maybe_payload,
             ) if self.seq_num == conn.rcv_nxt
-                && conn.snd_una.seq_lt(self.ack_num)
-                && self.ack_num.seq_le(conn.snd_nxt) =>
+                && conn.snd_una.precedes(self.ack_num)
+                && self.ack_num.precedes_or_eq(conn.snd_nxt) =>
             {
                 conn.tcp_state = TcpState::Established;
                 conn.rcv_nxt = self.seq_num;
@@ -258,8 +210,8 @@ impl TcpHandler {
                 maybe_payload
                     .as_ref()
                     .map(|payload| {
-                        conn.rcv_nxt.advance_by(u32::from(payload.len().get()));
-                        conn.send_buffer.extend(payload.as_bytes().iter());
+                        conn.rcv_nxt += payload.len().into();
+                        conn.send_buffer.extend(payload.as_bytes());
 
                         conn.drain_transmittable()
                             .map(|maybe_to_send| match maybe_to_send {
@@ -277,7 +229,7 @@ impl TcpHandler {
                 Some(&mut ConnState { tcp_state: TcpState::Established, snd_nxt, rcv_nxt, .. }),
                 TcpFlags::Ack,
                 _,
-            ) if snd_nxt.seq_lt(self.ack_num) => Some(SendInfo::pure_ack(snd_nxt, rcv_nxt)),
+            ) if snd_nxt.precedes(self.ack_num) => Some(SendInfo::pure_ack(snd_nxt, rcv_nxt)),
 
             // Pure ACK (no payload) on an established connection (acknowledgment of data sent by
             // the server) -> advance SND.UNA, then send however much the window allows from the
@@ -300,11 +252,9 @@ impl TcpHandler {
                 TcpFlags::Ack,
                 Some(payload),
             ) if self.seq_num == conn.rcv_nxt => {
-                let payload_len = u32::from(payload.len().get());
-
                 conn.incoming_ack_update(self)?;
-                conn.rcv_nxt.advance_by(payload_len);
-                conn.send_buffer.extend(payload.as_bytes().iter());
+                conn.rcv_nxt += payload.len().into();
+                conn.send_buffer.extend(payload.as_bytes());
 
                 Some(match conn.drain_transmittable()? {
                     Some(to_send) => Self::data_payload(conn, to_send),
@@ -337,17 +287,15 @@ impl TcpHandler {
                 conn.incoming_ack_update(self)?;
 
                 if let Some(payload) = maybe_payload {
-                    conn.rcv_nxt.advance_by(u32::from(payload.len().get()));
-                    conn.send_buffer.extend(payload.as_bytes().iter());
+                    conn.rcv_nxt += payload.len().into();
+                    conn.send_buffer.extend(payload.as_bytes());
                 }
 
-                conn.rcv_nxt.advance_by(1); // Peer's FIN consumes one sequence number
+                conn.rcv_nxt += REMOTE_FIN_BYTE; // Peer's FIN consumes one sequence number
                 conn.tcp_state = TcpState::LastAck;
 
                 let to_send = conn.drain_transmittable()?;
-                let send_len = to_send
-                    .as_ref()
-                    .map_or(0, |payload| u32::from(payload.len().get()));
+                let send_len = to_send.len_or_default();
 
                 let send_info = SendInfo {
                     seq_num: conn.snd_nxt,
@@ -356,8 +304,8 @@ impl TcpHandler {
                     payload: to_send,
                 };
 
-                conn.snd_nxt.advance_by(send_len);
-                conn.snd_nxt.advance_by(1); // Our FIN consumes one sequence number
+                conn.snd_nxt += send_len;
+                conn.snd_nxt += LOCAL_FIN_BYTE; // Our FIN consumes one sequence number
 
                 conn.pending
                     .push(PendingSegment::new(send_info.clone(), Instant::now()));
@@ -393,7 +341,7 @@ impl TcpHandler {
                 TcpFlags::Ack,
                 Some(payload),
             ) if self.seq_num == conn.rcv_nxt => {
-                conn.rcv_nxt.advance_by(u32::from(payload.len().get()));
+                conn.rcv_nxt += payload.len().into();
 
                 let send_info = SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt);
                 conn.incoming_ack_update(self)?;
@@ -421,12 +369,10 @@ impl TcpHandler {
                 TcpFlags::FinAck,
                 maybe_payload,
             ) if self.seq_num == conn.rcv_nxt => {
-                if let Some(payload) = maybe_payload {
-                    conn.rcv_nxt.advance_by(u32::from(payload.len().get()));
-                }
+                conn.rcv_nxt += maybe_payload.len_or_default();
 
                 // Consume one sequence number in RCV.NXT for the peer's FIN
-                conn.rcv_nxt.advance_by(1);
+                conn.rcv_nxt += REMOTE_FIN_BYTE;
 
                 let send_info = SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt);
 
@@ -450,11 +396,10 @@ impl TcpHandler {
             ) if self.seq_num == rcv_nxt => {
                 connections.remove(&key);
 
-                let payload_len = maybe_payload
-                    .as_ref()
-                    .map_or(0, |payload| u32::from(payload.len().get()));
-
-                Some(SendInfo::pure_ack(snd_nxt, rcv_nxt.wrapping_add(payload_len).wrapping_add(1)))
+                Some(SendInfo::pure_ack(
+                    snd_nxt,
+                    rcv_nxt + maybe_payload.len_or_default() + REMOTE_FIN_BYTE,
+                ))
             }
 
             // CLOSING (simultaneous close), the remote peer's ACK of our FIN arrives -> fully
@@ -486,10 +431,10 @@ impl TcpHandler {
                 } else {
                     // Check whether `seq_num` falls within the receive window [RCV.NXT, RCV.NXT +
                     // RCV.WND). true -> Case 3, false -> Case 1.
-                    (rcv_nxt.seq_le(self.seq_num)
+                    (rcv_nxt.precedes_or_eq(self.seq_num)
                         && self
                             .seq_num
-                            .seq_lt(rcv_nxt.wrapping_add(u32::from(Self::RCV_WND))))
+                            .precedes(rcv_nxt + TcpHandler::<Local>::RCV_WND.into()))
                     .then_some(SendInfo::pure_ack(snd_nxt, rcv_nxt))
                 }
             }
@@ -503,19 +448,23 @@ impl TcpHandler {
             _ => Some(SendInfo {
                 seq_num: self.ack_num,
                 // ack_num is 0 because sending bare RST with no ACK flag leaves ack_num undefined
-                ack_num: 0,
+                ack_num: SeqPoint::new(0),
                 flags: TcpFlags::Rst,
                 payload: None,
             }),
         }
         .map(|send_info| {
-            Self::from_pairs_and_info(self.ip_pair.swapped(), self.ports.swapped(), send_info)
+            TcpHandler::<Local>::from_pairs_and_info(
+                self.ip_pair.swapped(),
+                self.ports.swapped(),
+                send_info,
+            )
         }))
     }
 
     /// Creates a `SendInfo` for the payload `to_send`, using and then updating the state of `conn`.
     fn data_payload(conn: &mut ConnState, to_send: TcpPayload) -> SendInfo {
-        let send_len = u32::from(to_send.len().get());
+        let send_len = to_send.len().into();
 
         let send_info = SendInfo {
             seq_num: conn.snd_nxt,
@@ -524,7 +473,7 @@ impl TcpHandler {
             payload: Some(to_send),
         };
 
-        conn.snd_nxt.advance_by(send_len);
+        conn.snd_nxt += send_len;
         conn.pending
             .push(PendingSegment::new(send_info.clone(), Instant::now()));
 
@@ -532,8 +481,95 @@ impl TcpHandler {
     }
 }
 
-impl Encode for TcpHandler {
-    fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
+impl TcpHandler<Local> {
+    /// "This represents the sequence numbers the local (receiving) TCP endpoint is willing to
+    /// receive... segments overlapping the range RCV.NXT to RCV.NXT + RCV.WND - 1 carry acceptable
+    /// data or control" (RFC 9293, Section 4).
+    ///
+    /// Currently left at max because as an echo server, there's no receive-side buffer accumulating
+    /// data for an application.
+    ///
+    /// However, a dynamic RCV.WND could be used in the future to bound the send buffer's growth,
+    /// throttling the peer's sending rate if they keep sending more data than they are willing to
+    /// receive.
+    const RCV_WND: SeqDist<u16, Remote> = SeqDist::new(u16::MAX);
+
+    fn from_pairs_and_info(
+        ip_pair: Ipv4AddrPair<Local>,
+        ports: PortPair<Local>,
+        SendInfo { seq_num, ack_num, flags, payload }: SendInfo,
+    ) -> Self {
+        Self {
+            ip_pair,
+            ports,
+            seq_num,
+            ack_num,
+            offset_bytes: TCP_HDR_MIN_LEN,
+            flags,
+            window: Self::RCV_WND,
+            payload,
+        }
+    }
+}
+
+impl Encode<Local> for TcpHandler<Local> {
+    fn write_into(&self, buf: &mut [u8]) -> Result<u16> { self.inner_write_into(buf) }
+    fn proto(&self) -> Protocol { Protocol::Tcp }
+    fn get_ip_pair(&self) -> Ipv4AddrPair<Local> { self.ip_pair }
+}
+
+impl<S: Endpoint> TcpHandler<S> {
+    /// Parses `data` as a TCP header and payload, which could be local to remote or remote to
+    /// local. The local to remote direction is for tests only. Only the remote to local direction
+    /// should be exposed in production code.
+    fn inner_parse(data: &[u8], ip_pair: Ipv4AddrPair<S>) -> Result<Self> {
+        let Some(tcp_header) = data.first_chunk::<{ TCP_HDR_MIN_LEN as usize }>() else {
+            return Err(format!("Too short for TCP header ({} bytes)", data.len()).into());
+        };
+
+        if pseudo_header_checksum(data, ip_pair, Protocol::Tcp)? != 0 {
+            return Err("Invalid TCP checksum".into());
+        }
+
+        // Convert length in 32-bit words in the upper 4 bits to length in bytes in the full 8 bits
+        let offset_bytes = tcp_header[12] >> 4 << 2;
+
+        Ok(Self {
+            ip_pair,
+            ports: PortPair::new(
+                u16::from_be_bytes([tcp_header[0], tcp_header[1]]),
+                u16::from_be_bytes([tcp_header[2], tcp_header[3]]),
+            ),
+            seq_num: SeqPoint::new(u32::from_be_bytes([
+                tcp_header[4],
+                tcp_header[5],
+                tcp_header[6],
+                tcp_header[7],
+            ])),
+            ack_num: SeqPoint::new(u32::from_be_bytes([
+                tcp_header[8],
+                tcp_header[9],
+                tcp_header[10],
+                tcp_header[11],
+            ])),
+            offset_bytes,
+            flags: tcp_header[13].try_into()?,
+            window: SeqDist::new(u16::from_be_bytes([tcp_header[14], tcp_header[15]])),
+            payload: TcpPayload::try_from_iter(
+                data.get(offset_bytes.into()..)
+                    .into_iter()
+                    .flatten()
+                    .copied(),
+            )?,
+        })
+    }
+
+    /// Copies data from `self` to write the protocol-specific header and payload into `buf`, which
+    /// could be local to remote or remote to local, returning the number of bytes written.
+    ///
+    /// The remote to local direction is for tests only. Only the local to remote direction
+    /// should be exposed in production code.
+    fn inner_write_into(&self, buf: &mut [u8]) -> Result<u16> {
         // Source and destination ports
         buf.try_get_mut(..2)?
             .copy_from_slice(&self.ports.src.to_be_bytes());
@@ -589,7 +625,7 @@ impl Encode for TcpHandler {
         let tcp_checksum = pseudo_header_checksum(
             buf.try_get(..usize::from(tcp_seg_len))?,
             self.ip_pair,
-            self.proto(),
+            Protocol::Tcp,
         )?;
 
         buf.try_get_mut(16..18)?
@@ -597,11 +633,9 @@ impl Encode for TcpHandler {
 
         Ok(tcp_seg_len)
     }
+}
 
-    fn proto(&self) -> Protocol { Protocol::Tcp }
-
-    fn get_ip_pair(&self) -> Ipv4AddrPair { self.ip_pair }
-
+impl<S: Endpoint> PrettyProtocol for TcpHandler<S> {
     fn pretty_payload(&self, include_content: bool) -> PrettyPayload<'_> {
         PrettyPayload {
             data: self
@@ -614,7 +648,7 @@ impl Encode for TcpHandler {
     }
 }
 
-impl fmt::Display for TcpHandler {
+impl<S: Endpoint> fmt::Display for TcpHandler<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -645,57 +679,77 @@ mod tests {
     pub(super) use utils::*;
     use {
         super::*,
-        crate::protocol::test_consts::{DST_IP, IP_PAIR, SRC_IP},
+        crate::{
+            ETHERNET_MTU,
+            protocol::test_consts::{LOCAL_TO_REMOTE_IP_PAIR, REMOTE_TO_LOCAL_IP_PAIR},
+        },
         std::{assert_matches, collections::VecDeque},
     };
 
-    impl TcpHandler {
+    impl TcpHandler<Remote> {
         /// A SYN requesting a new connection using the regular `CLIENT_PACKET` consts, which should
         /// generate a SYN-ACK reply.
         pub(crate) const CLIENT_SYN: Self = Self { flags: TcpFlags::Syn, ..CLIENT_PACKET };
 
-        /// The server's SYN-ACK reply for the standard SYN-RECEIVED connection using the module's
-        /// standard test consts.
-        pub(crate) const SERVER_SYN_ACK: Self = Self {
-            seq_num: SERVER_ISN,
-            ack_num: CLIENT_ISN + SYN_BYTE,
-            flags: TcpFlags::SynAck,
-            ..SERVER_REPLY
-        };
-
         /// The handshake-completing ACK matching the module's standard test consts, which should be
         /// accepted if in SYN-RECEIVED by transitioning to ESTABLISHED and replying with `None`.
         pub(crate) const CLIENT_ACK_COMPLETING_HANDSHAKE: Self = Self {
-            seq_num: CLIENT_ISN + SYN_BYTE,
-            ack_num: SERVER_ISN + SYN_BYTE,
+            seq_num: CLIENT_ISN.const_add(REMOTE_SYN_BYTE),
+            ack_num: SERVER_ISN.const_add(LOCAL_SYN_BYTE),
             ..CLIENT_PACKET
-        };
-
-        /// The server's FIN-ACK reply when actively initiating close right after the handshake for
-        /// the standard connection using the module's test consts.
-        pub(crate) const SERVER_FIN_ACK_INITIATING_CLOSE: Self = Self {
-            seq_num: SERVER_ISN + SYN_BYTE,
-            ack_num: CLIENT_ISN + SYN_BYTE,
-            flags: TcpFlags::FinAck,
-            ..SERVER_REPLY
         };
 
         /// The client's FIN-ACK completing active close after our own FIN was sent (FIN-WAIT-1),
         /// which also acknowledges our FIN, so the connection should close immediately.
         pub(crate) const CLIENT_FIN_ACK_COMPLETING_CLOSE: Self = Self {
-            seq_num: CLIENT_ISN + SYN_BYTE,
-            ack_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
+            seq_num: CLIENT_ISN.const_add(REMOTE_SYN_BYTE),
+            ack_num: SERVER_ISN.const_add(LOCAL_SYN_BYTE.const_add(LOCAL_FIN_BYTE)),
             flags: TcpFlags::FinAck,
             ..CLIENT_PACKET
+        };
+    }
+
+    impl Encode<Remote> for TcpHandler<Remote> {
+        fn write_into(&self, buf: &mut [u8]) -> Result<u16> { self.inner_write_into(buf) }
+        fn proto(&self) -> Protocol { Protocol::Tcp }
+        fn get_ip_pair(&self) -> Ipv4AddrPair<Remote> { self.ip_pair }
+    }
+
+    impl TcpHandler<Local> {
+        /// The server's SYN-ACK reply for the standard SYN-RECEIVED connection using the module's
+        /// standard test consts.
+        pub(crate) const SERVER_SYN_ACK: Self = Self {
+            seq_num: SERVER_ISN,
+            ack_num: CLIENT_ISN.const_add(REMOTE_SYN_BYTE),
+            flags: TcpFlags::SynAck,
+            ..SERVER_REPLY
+        };
+
+        /// The server's FIN-ACK reply when actively initiating close right after the handshake for
+        /// the standard connection using the module's test consts.
+        pub(crate) const SERVER_FIN_ACK_INITIATING_CLOSE: Self = Self {
+            seq_num: SERVER_ISN.const_add(LOCAL_SYN_BYTE),
+            ack_num: CLIENT_ISN.const_add(REMOTE_SYN_BYTE),
+            flags: TcpFlags::FinAck,
+            ..SERVER_REPLY
         };
 
         /// The server's final ACK completing close from FIN-WAIT-1, matching the module's standard
         /// test consts for a connection closing right after the handshake, after its FIN
         /// was both acked and matched by the peer's own FIN in the same segment.
         pub(crate) const SERVER_FINAL_ACK_COMPLETING_CLOSE: Self = Self {
-            seq_num: SERVER_ISN + SYN_BYTE + FIN_BYTE,
-            ack_num: CLIENT_ISN + SYN_BYTE + FIN_BYTE,
+            seq_num: SERVER_ISN.const_add(LOCAL_SYN_BYTE.const_add(LOCAL_FIN_BYTE)),
+            ack_num: CLIENT_ISN.const_add(REMOTE_SYN_BYTE.const_add(REMOTE_FIN_BYTE)),
             ..SERVER_REPLY
         };
+
+        /// Parses `data` as a TCP header and payload in the local to remote direction for testing
+        /// purposes only.
+        ///
+        /// This is a test-only version because a segment created locally would never be parsed from
+        /// bytes in production.
+        pub(crate) fn test_parse_local(data: &[u8], ip_pair: Ipv4AddrPair<Local>) -> Result<Self> {
+            Self::inner_parse(data, ip_pair)
+        }
     }
 }

@@ -1,8 +1,5 @@
 use {
-    crate::{
-        ipv4_header::Ipv4Header,
-        protocol::handler::{Encode, ProtocolHandler},
-    },
+    crate::{endpoint::Endpoint, ipv4_header::Ipv4Header, protocol::handler::PrettyProtocol},
     std::{
         fmt,
         io::{self, Write as _},
@@ -98,36 +95,17 @@ impl Logger {
         }
     }
 
-    /// Logs receipt of a packet to stdout if and how the log level allows.
-    pub(crate) fn pkt_in(
-        &self,
-        ipv4_header: &Ipv4Header,
-        proto_handler: &ProtocolHandler,
-    ) -> io::Result<()> {
-        self.pkt_in_or_out(true, ipv4_header, proto_handler)
-    }
-
-    /// Logs transmission of a packet to stdout if and how the log level allows.
-    pub(crate) fn pkt_out(
-        &self,
-        ipv4_header: &Ipv4Header,
-        proto_handler: &impl Encode,
-    ) -> io::Result<()> {
-        self.pkt_in_or_out(false, ipv4_header, proto_handler)
-    }
-
     /// Logs receipt or transmission of a packet to stdout if and how the log level allows.
-    fn pkt_in_or_out(
+    pub(crate) fn pkt_io<S: Endpoint>(
         &self,
-        is_in: bool,
-        ipv4_header: &Ipv4Header,
-        proto_handler: &impl Encode,
+        ipv4_header: &Ipv4Header<S>,
+        proto_handler: &impl PrettyProtocol,
     ) -> io::Result<()> {
         match self.level {
             LogLevel::Silent | LogLevel::ServerInfo => {}
 
             LogLevel::PacketQuiet => {
-                print!("{}", if is_in { "↓" } else { "↑" });
+                print!("{}", S::INDICATOR);
                 io::stdout().flush()?;
             }
 

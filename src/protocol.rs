@@ -12,6 +12,7 @@ use {
         ETHERNET_MTU, Result,
         addr_pairs::Ipv4AddrPair,
         checksum,
+        endpoint::Endpoint,
         try_ops::{TryGet as _, TryGetMut as _},
     },
     std::fmt,
@@ -20,7 +21,11 @@ use {
 /// Calculates the TCP/UDP checksum of the pseudo-header + `data`. `data` should be the TCP/UDP
 /// header and payload. Does not zero out the checksum field inside the header of `data` before
 /// calculating.
-fn pseudo_header_checksum(data: &[u8], ip_pair: Ipv4AddrPair, protocol: Protocol) -> Result<u16> {
+fn pseudo_header_checksum<S: Endpoint>(
+    data: &[u8],
+    ip_pair: Ipv4AddrPair<S>,
+    protocol: Protocol,
+) -> Result<u16> {
     /// The number of bytes in a TCP/UDP pseudo-header.
     const PSEUDO_HDR_LEN: usize = 12;
 
@@ -83,14 +88,18 @@ impl fmt::Display for Protocol {
 /// Test constants shared between protocols.
 #[cfg(test)]
 mod test_consts {
-    use {crate::addr_pairs::Ipv4AddrPair, std::net::Ipv4Addr};
+    use {
+        crate::{
+            addr_pairs::Ipv4AddrPair,
+            endpoint::{Local, Remote},
+        },
+        std::net::Ipv4Addr,
+    };
 
-    /// Test source IP address: 10.0.0.2
-    pub const SRC_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
+    /// A pair of IP addresses going from 10.0.0.2 to 10.0.0.1 in the remote to local direction.
+    pub const REMOTE_TO_LOCAL_IP_PAIR: Ipv4AddrPair<Remote> =
+        Ipv4AddrPair::new(Ipv4Addr::new(10, 0, 0, 2), Ipv4Addr::new(10, 0, 0, 1));
 
-    /// Test destination IP address: 10.0.0.1
-    pub const DST_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
-
-    /// An `Ipv4AddrPair` of `SRC_IP` and `DST_IP`.
-    pub const IP_PAIR: Ipv4AddrPair = Ipv4AddrPair { src: SRC_IP, dst: DST_IP };
+    /// A pair of IP addresses going from 10.0.0.1 to 10.0.0.2 in the local to remote direction.
+    pub const LOCAL_TO_REMOTE_IP_PAIR: Ipv4AddrPair<Local> = REMOTE_TO_LOCAL_IP_PAIR.swapped();
 }

@@ -1,6 +1,11 @@
 use {
     crate::{
-        ETHERNET_MTU, addr_pairs::Ipv4AddrPair, checksum, protocol::Protocol, try_ops::TryAdd as _,
+        ETHERNET_MTU,
+        addr_pairs::Ipv4AddrPair,
+        checksum,
+        endpoint::{Endpoint, Local, Remote},
+        protocol::Protocol,
+        try_ops::TryAdd as _,
     },
     std::{fmt, net::Ipv4Addr},
 };
@@ -11,37 +16,50 @@ const IPV4_HDR_MIN_LEN_U8: u8 = 20;
 /// The minimum number of bytes in an IPv4 header (no options) as a `usize`.
 const IPV4_HDR_MIN_LEN_USIZE: usize = IPV4_HDR_MIN_LEN_U8 as usize;
 
-/// Manages IPv4 header fields.
+/// Manages IPv4 header fields for a packet sent from `S`.
 #[cfg_attr(test, derive(Debug))]
-pub struct Ipv4Header {
+pub struct Ipv4Header<S: Endpoint> {
     pub total_len: u16,
     pub protocol: Protocol,
-    pub ip_pair: Ipv4AddrPair,
+    pub ip_pair: Ipv4AddrPair<S>,
 }
 
-impl Ipv4Header {
+impl Ipv4Header<Remote> {
+    /// Parses `data` as an IPv4 packet going in the remote to local direction, returning the header
+    /// fields and a slice starting at the beginning of the payload.
+    pub fn parse(data: &[u8]) -> Result<(Self, &[u8]), String> { Self::inner_parse(data) }
+}
+
+impl Ipv4Header<Local> {
     /// The length in bytes of an IPv4 header for a reply packet (no options).
     pub const REPLY_HDR_LEN: usize = IPV4_HDR_MIN_LEN_USIZE;
 
-    /// Creates an IPv4 header with the given `protocol` and `ip_pair`. Total length is the length
-    /// of the IPv4 header + `proto_len`.
+    /// Creates an IPv4 header with the given `protocol` and `ip_pair` going in the local to remote
+    /// direction. Total length is the length of the IPv4 header + `proto_len`.
     ///
     /// # Errors
     ///
     /// Returns `Err` if adding `proto_len` to the IPv4 header length overflows `u16`.
     pub fn try_new(
         protocol: Protocol,
-        ip_pair: Ipv4AddrPair,
+        ip_pair: Ipv4AddrPair<Local>,
         proto_len: u16,
     ) -> Result<Self, String> {
-        u16::from(IPV4_HDR_MIN_LEN_U8)
-            .try_add(proto_len)
-            .map(|total_len| Self { total_len, protocol, ip_pair })
+        Self::inner_try_new(protocol, ip_pair, proto_len)
     }
 
-    /// Parses `data` as an IPv4 packet, returning the header fields and a slice starting at the
-    /// beginning of the payload.
-    pub fn parse(data: &[u8]) -> Result<(Self, &[u8]), String> {
+    /// Writes an IPv4 header going in the local to remote direction into `buf`, copying the header
+    /// data from `self`.
+    pub fn write_into(&self, buf: &mut [u8; ETHERNET_MTU]) { self.inner_write_into(buf); }
+}
+
+impl<S: Endpoint> Ipv4Header<S> {
+    /// Parses `data` as an IPv4 packet that could be local to remote or remote to local, returning
+    /// the header fields and a slice starting at the beginning of the payload.
+    ///
+    /// The local to remote direction is for tests only. Only the remote to local direction should
+    /// be exposed in production code.
+    fn inner_parse(data: &[u8]) -> Result<(Self, &[u8]), String> {
         let Some(ip_header) = data.first_chunk::<IPV4_HDR_MIN_LEN_USIZE>() else {
             return Err(format!("Too short for IPv4 header ({} bytes)", data.len()));
         };
@@ -63,18 +81,41 @@ impl Ipv4Header {
             Self {
                 total_len: u16::from_be_bytes([ip_header[2], ip_header[3]]),
                 protocol: ip_header[9].try_into()?,
-                ip_pair: Ipv4AddrPair {
-                    src: Ipv4Addr::new(ip_header[12], ip_header[13], ip_header[14], ip_header[15]),
-                    dst: Ipv4Addr::new(ip_header[16], ip_header[17], ip_header[18], ip_header[19]),
-                },
+                ip_pair: Ipv4AddrPair::new(
+                    Ipv4Addr::new(ip_header[12], ip_header[13], ip_header[14], ip_header[15]),
+                    Ipv4Addr::new(ip_header[16], ip_header[17], ip_header[18], ip_header[19]),
+                ),
             },
             data.get(ihl_bytes..)
                 .ok_or("IPv4 data shorter than its IHL")?,
         ))
     }
 
-    /// Writes an IPv4 header into `buf`, copying the header data from `self`.
-    pub fn write_into(&self, buf: &mut [u8; ETHERNET_MTU]) {
+    /// Creates an IPv4 header with the given `protocol` and `ip_pair`, which could be local to
+    /// remote or remote to local. Total length is the length of the IPv4 header + `proto_len`.
+    ///
+    /// The remote to local direction is for tests only. Only the local to remote direction should
+    /// be exposed in production code.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if adding `proto_len` to the IPv4 header length overflows `u16`.
+    fn inner_try_new(
+        protocol: Protocol,
+        ip_pair: Ipv4AddrPair<S>,
+        proto_len: u16,
+    ) -> Result<Self, String> {
+        u16::from(IPV4_HDR_MIN_LEN_U8)
+            .try_add(proto_len)
+            .map(|total_len| Self { total_len, protocol, ip_pair })
+    }
+
+    /// Writes an IPv4 header that could be local to remote or remote to local into `buf`, copying
+    /// the header data from `self`.
+    ///
+    /// The remote to local direction is for tests only. Only the local to remote direction should
+    /// be exposed in production code.
+    fn inner_write_into(&self, buf: &mut [u8; ETHERNET_MTU]) {
         // IP header (no options, 20 bytes)
         buf[0] = 0x40 | (IPV4_HDR_MIN_LEN_U8 / 4); // Version 4, IHL 5 (20 bytes)
         buf[1] = 0x00; // DSCP/ECN
@@ -96,7 +137,7 @@ impl Ipv4Header {
     }
 }
 
-impl fmt::Display for Ipv4Header {
+impl<S: Endpoint> fmt::Display for Ipv4Header<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "IPv4 | {} bytes total | {} | {}", self.total_len, self.protocol, self.ip_pair)
     }
@@ -105,6 +146,45 @@ impl fmt::Display for Ipv4Header {
 #[cfg(test)]
 mod tests {
     use {super::*, std::assert_matches};
+
+    impl Ipv4Header<Local> {
+        /// Parses `data` as an IPv4 packet going in the local to remote direction, returning the
+        /// header fields and a slice starting at the beginning of the payload.
+        ///
+        /// This is a test-only version because a header created locally would never be parsed from
+        /// bytes in production.
+        pub fn test_parse_local(data: &[u8]) -> Result<(Self, &[u8]), String> {
+            Self::inner_parse(data)
+        }
+    }
+
+    impl Ipv4Header<Remote> {
+        /// Creates an IPv4 header with the given `protocol` and `ip_pair` going in the remote to
+        /// local direction. Total length is the length of the IPv4 header + `proto_len`.
+        ///
+        /// This is a test-only version because a header from the remote endpoint would never be
+        /// constructed in production (only parsed from bytes).
+        ///
+        /// # Errors
+        ///
+        /// Returns `Err` if adding `proto_len` to the IPv4 header length overflows `u16`.
+        pub fn test_try_new_remote(
+            protocol: Protocol,
+            ip_pair: Ipv4AddrPair<Remote>,
+            proto_len: u16,
+        ) -> Result<Self, String> {
+            Self::inner_try_new(protocol, ip_pair, proto_len)
+        }
+
+        /// Writes an IPv4 header going in the remote to local direction into `buf`, copying the
+        /// header data from `self`.
+        ///
+        /// This is a test-only version because a header from the remote endpoint would never be
+        /// encoded into bytes in production.
+        pub fn test_write_into_remote(&self, buf: &mut [u8; ETHERNET_MTU]) {
+            self.inner_write_into(buf);
+        }
+    }
 
     #[test]
     fn correctly_parses_valid_packet() -> Result<(), String> {
