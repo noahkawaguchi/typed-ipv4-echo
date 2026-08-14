@@ -4,13 +4,25 @@ Typenet is a userspace IPv4/ICMP/TCP/UDP implementation and echo server that ope
 
 ## Table of Contents
 
-1. [Features](#features)
-2. [Architecture](#architecture)
-3. [Prerequisites](#prerequisites)
-4. [Running the Server](#running-the-server)
-5. [Connecting as a Client](#connecting-as-a-client)
-6. [Testing](#testing)
-7. [Development and CI](#development-and-ci)
+1. [Goals and Non-Goals](#goals-and-non-goals)
+2. [Features](#features)
+3. [Architecture](#architecture)
+4. [Prerequisites](#prerequisites)
+5. [Running the Server](#running-the-server)
+6. [Connecting as a Client](#connecting-as-a-client)
+7. [Testing](#testing)
+8. [Development and CI](#development-and-ci)
+
+## Goals and Non-Goals
+
+| Goal                                             | Non-goal                                   |
+| ------------------------------------------------ | ------------------------------------------ |
+| Learning and demonstration project               | Production-ready stack                     |
+| Direct engagement with low-level Linux APIs      | Cross-platform abstraction layers          |
+| Manual parsing/encoding of a few key protocols   | Supporting as many protocols as possible   |
+| No panicking                                     | Avoiding theoretically infallible `Result` |
+| Maximal type safety at little to no cost         | Absolutely zero-cost abstractions only     |
+| Stack allocation and references where reasonable | No heap, `no_std`                          |
 
 ## Features
 
