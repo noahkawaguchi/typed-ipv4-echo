@@ -71,14 +71,15 @@ fn handshake_ack_without_data_establishes_connection_and_returns_none() -> Resul
     assert_eq!(handshake_ack.create_reply(&mut connections)?, None);
 
     // Reproduce the state changes that should happen at connection establishment
-    cloned_state.tcp_state = TcpState::Established;
-    cloned_state.rcv_nxt = CLIENT_ISN + REMOTE_SYN_BYTE;
-    cloned_state.snd_una += LOCAL_SYN_BYTE;
-    cloned_state.window_state = Some(WindowState {
+    let window_state = WindowState {
         snd_wnd: handshake_ack.window,
         snd_wl1: handshake_ack.seq_num,
         snd_wl2: handshake_ack.ack_num,
-    });
+    };
+    cloned_state.tcp_state = TcpState::Established(Established::test_new(window_state));
+    cloned_state.rcv_nxt = CLIENT_ISN + REMOTE_SYN_BYTE;
+    cloned_state.snd_una += LOCAL_SYN_BYTE;
+    cloned_state.window_state = Some(window_state);
 
     assert_eq!(connections.try_get()?, &cloned_state);
 
@@ -111,15 +112,16 @@ fn handshake_ack_with_data_establishes_and_echoes() -> Result {
         "Handshake-completing ACK with data should establish the connection and echo the data"
     );
 
-    cloned_state.tcp_state = TcpState::Established;
-    cloned_state.rcv_nxt += REMOTE_HELLO_LEN;
-    cloned_state.snd_nxt += LOCAL_HELLO_LEN;
-    cloned_state.snd_una += LOCAL_SYN_BYTE;
-    cloned_state.window_state = Some(WindowState {
+    let window_state = WindowState {
         snd_wnd: handshake_ack_with_data.window,
         snd_wl1: handshake_ack_with_data.seq_num,
         snd_wl2: handshake_ack_with_data.ack_num,
-    });
+    };
+    cloned_state.tcp_state = TcpState::Established(Established::test_new(window_state));
+    cloned_state.rcv_nxt += REMOTE_HELLO_LEN;
+    cloned_state.snd_nxt += LOCAL_HELLO_LEN;
+    cloned_state.snd_una += LOCAL_SYN_BYTE;
+    cloned_state.window_state = Some(window_state);
 
     assert_eq!(connections.try_get()?, &cloned_state);
 

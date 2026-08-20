@@ -36,7 +36,11 @@ pub const KEY: ConnKey = ConnKey {
 /// test constants `CLIENT_ISN` and `SERVER_ISN`. Has the maximum SND.WND and empty
 /// `pending`/`send_buffer`.
 pub const AFTER_HANDSHAKE: ConnState = ConnState {
-    tcp_state: TcpState::Established,
+    tcp_state: TcpState::Established(Established::test_new(WindowState {
+        snd_wnd: SeqOffset::new(u16::MAX),
+        snd_wl1: CLIENT_ISN.const_add(REMOTE_SYN_BYTE),
+        snd_wl2: SERVER_ISN.const_add(LOCAL_SYN_BYTE),
+    })),
     snd_nxt: SERVER_ISN.const_add(LOCAL_SYN_BYTE),
     rcv_nxt: CLIENT_ISN.const_add(REMOTE_SYN_BYTE),
     snd_una: SERVER_ISN.const_add(LOCAL_SYN_BYTE),

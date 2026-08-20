@@ -45,7 +45,7 @@ impl ConnState {
         (send_info.flags == TcpFlags::SynAck)
             .then(|| Self {
                 // State after the initial two-way exchange
-                tcp_state: TcpState::SynReceived,
+                tcp_state: TcpState::SynReceived(SynReceived),
                 // SYN-ACK consumes one sequence number
                 snd_nxt: send_info.seq_num + LOCAL_SYN_BYTE,
                 // Our SYN-ACK's `ack_num` is the client's ISN + 1
@@ -165,30 +165,30 @@ pub(super) enum TcpState {
     ///
     /// ISN field: "The Initial Sequence Number. The first sequence number used on a connection"
     /// (RFC 9293, Section 4).
-    SynReceived,
+    SynReceived(SynReceived),
 
     /// "ESTABLISHED - represents an open connection, data received can be delivered to the user.
     /// The normal state for the data transfer phase of the connection."
-    Established,
+    Established(Established),
 
     /// "FIN-WAIT-1 - represents waiting for a connection termination request from the remote TCP
     /// peer, or an acknowledgment of the connection termination request previously sent."
     ///
     /// Entered when this server actively closes the connection.
-    FinWait1,
+    FinWait1(FinWait1),
 
     /// "FIN-WAIT-2 - represents waiting for a connection termination request from the remote TCP
     /// peer."
     ///
     /// Reached from `FinWait1` once our FIN has been acknowledged.
-    FinWait2,
+    FinWait2(FinWait2),
 
     /// "CLOSING - represents waiting for a connection termination request acknowledgment from the
     /// remote TCP peer."
     ///
     /// Reached via simultaneous close, when the remote peer's FIN arrives before our own FIN has
     /// been acknowledged.
-    Closing,
+    Closing(Closing),
 
     /// "LAST-ACK - represents waiting for an acknowledgment of the connection termination request
     /// previously sent to the remote TCP peer (this termination request sent to the remote TCP peer
@@ -196,11 +196,55 @@ pub(super) enum TcpState {
     /// peer)."
     ///
     /// Reached via passive close, after acknowledging the remote peer's FIN with our own.
-    LastAck,
+    LastAck(LastAck),
 }
 
+#[derive(PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(test, derive(Debug))]
+pub(super) struct SynReceived;
+
+impl SynReceived {
+    #[expect(clippy::unused_self, reason = "Require an instance for state transition")]
+    pub(super) const fn establish(self, seg: &TcpHandler<Remote>) -> Established {
+        Established(WindowState { snd_wnd: seg.window, snd_wl1: seg.seq_num, snd_wl2: seg.ack_num })
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(test, derive(Debug))]
+pub(super) struct Established(WindowState);
+
+impl Established {
+    #[cfg(test)]
+    pub(super) const fn test_new(window_state: WindowState) -> Self { Self(window_state) }
+    pub(super) const fn close(self) -> FinWait1 { FinWait1(self.0) }
+    pub(super) const fn skip_close_wait(self) -> LastAck { LastAck(self.0) }
+}
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(test, derive(Debug))]
+pub(super) struct FinWait1(WindowState);
+
+impl FinWait1 {
+    pub(super) const fn rcv_ack_of_fin(self) -> FinWait2 { FinWait2(self.0) }
+    pub(super) const fn wait_for_simultaneous_close_ack(self) -> Closing { Closing(self.0) }
+}
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(test, derive(Debug))]
+pub(super) struct FinWait2(WindowState);
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(test, derive(Debug))]
+pub(super) struct Closing(WindowState);
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(test, derive(Debug))]
+pub(super) struct LastAck(WindowState);
+
 /// The SND.WND, SND.WL1, and SND.WL2 values of a connection.
-#[cfg_attr(test, derive(Debug, Copy, Clone, PartialEq, Eq))]
+#[derive(Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(test, derive(Debug))]
 #[expect(clippy::struct_field_names, reason = "Match RFC terminology")]
 pub(super) struct WindowState {
     /// SND.WND or send window. "This represents the sequence numbers that the remote (receiving)

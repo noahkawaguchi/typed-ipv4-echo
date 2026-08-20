@@ -174,7 +174,7 @@ fn gives_up_after_max_retransmits() -> Result {
         let resent = connections.make_retransmissions();
 
         assert_eq!(resent.len(), 1, "Should still be retried");
-        assert_eq!(connections.try_get()?.tcp_state, TcpState::SynReceived);
+        assert_eq!(connections.try_get()?.tcp_state, TcpState::SynReceived(SynReceived));
     }
 
     // Exceeds MAX_RETRIES -> give up
