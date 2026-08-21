@@ -708,9 +708,7 @@ mod tests {
         crate::{
             ETHERNET_MTU,
             protocol::{
-                tcp::state::{
-                    Closing, Established, FinWait1, FinWait2, LastAck, SynReceived, WindowState,
-                },
+                tcp::state::{SynReceived, SyncedState, WindowState},
                 test_consts::{LOCAL_TO_REMOTE_IP_PAIR, REMOTE_TO_LOCAL_IP_PAIR},
             },
         },

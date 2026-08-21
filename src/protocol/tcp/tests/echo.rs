@@ -55,7 +55,7 @@ fn pure_ack_on_established_connection_returns_none() -> Result {
     assert_eq!(pure_ack.create_reply(&mut connections)?, None);
 
     cloned_state.snd_una += LOCAL_HELLO_LEN;
-    cloned_state.tcp_state = TcpState::Established(Established::test_new(WindowState {
+    cloned_state.tcp_state = TcpState::Established(SyncedState::test_new(WindowState {
         snd_wnd: pure_ack.window,
         snd_wl1: pure_ack.seq_num,
         snd_wl2: pure_ack.ack_num,
@@ -198,7 +198,7 @@ fn old_ack_num_does_not_regress_snd_una() -> Result {
     cloned_state.snd_nxt += LOCAL_HI_LEN;
     cloned_state.rcv_nxt += REMOTE_HI_LEN;
     cloned_state.snd_una += LOCAL_HELLO_LEN;
-    cloned_state.tcp_state = TcpState::Established(Established::test_new(WindowState {
+    cloned_state.tcp_state = TcpState::Established(SyncedState::test_new(WindowState {
         snd_wnd: hi_packet.window,
         snd_wl1: hi_packet.seq_num,
         snd_wl2: hi_packet.ack_num,
@@ -358,7 +358,7 @@ fn wraparound_ack_for_unsent_data_is_still_rejected() -> Result {
 
     let mut connections = TcpConnections::default();
     let initial_state = ConnState {
-        tcp_state: TcpState::Established(Established::test_new(WindowState {
+        tcp_state: TcpState::Established(SyncedState::test_new(WindowState {
             snd_wnd: SeqOffset::new(u16::MAX),
             snd_wl1: CLIENT_ISN + REMOTE_SYN_BYTE,
             snd_wl2: SeqPoint::new(u32::MAX),

@@ -76,7 +76,7 @@ fn handshake_ack_without_data_establishes_connection_and_returns_none() -> Resul
         snd_wl1: handshake_ack.seq_num,
         snd_wl2: handshake_ack.ack_num,
     };
-    cloned_state.tcp_state = TcpState::Established(Established::test_new(window_state));
+    cloned_state.tcp_state = TcpState::Established(SyncedState::test_new(window_state));
     cloned_state.rcv_nxt = CLIENT_ISN + REMOTE_SYN_BYTE;
     cloned_state.snd_una += LOCAL_SYN_BYTE;
 
@@ -116,7 +116,7 @@ fn handshake_ack_with_data_establishes_and_echoes() -> Result {
         snd_wl1: handshake_ack_with_data.seq_num,
         snd_wl2: handshake_ack_with_data.ack_num,
     };
-    cloned_state.tcp_state = TcpState::Established(Established::test_new(window_state));
+    cloned_state.tcp_state = TcpState::Established(SyncedState::test_new(window_state));
     cloned_state.rcv_nxt += REMOTE_HELLO_LEN;
     cloned_state.snd_nxt += LOCAL_HELLO_LEN;
     cloned_state.snd_una += LOCAL_SYN_BYTE;

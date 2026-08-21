@@ -7,7 +7,7 @@ use {
             pending_segment::PendingSegment,
         },
     },
-    std::{collections::VecDeque, time::Instant},
+    std::{collections::VecDeque, marker::PhantomData, time::Instant},
 };
 
 /// The state of a connection in the table, including its TCP state, buffered data, and other
@@ -62,15 +62,15 @@ impl ConnState {
     /// buffer is empty or the window is full. Does not mutate any other state.
     pub(super) fn drain_transmittable(
         &mut self,
-        established: &Established,
+        established: &SyncedState<Established>,
     ) -> Result<Option<TcpPayload>> {
         let sent_but_not_acked = self
             .snd_nxt
             .offset_past(self.snd_una)
             .ok_or("`drain_transmittable` called with SND.UNA not preceding or equaling SND.NXT")?;
 
-        let space_in_window =
-            SeqOffset::<u32, Local>::from(established.0.snd_wnd).saturating_sub(sent_but_not_acked);
+        let space_in_window = SeqOffset::<u32, Local>::from(established.window_state.snd_wnd)
+            .saturating_sub(sent_but_not_acked);
 
         let bytes_to_send = usize::try_from(space_in_window)?.min(self.send_buffer.len());
 
@@ -81,11 +81,11 @@ impl ConnState {
     pub(super) const fn test_get_snd_wnd(&self) -> Option<SeqOffset<u16, Local>> {
         match self.tcp_state {
             TcpState::SynReceived(_) => None,
-            TcpState::Established(established) => Some(established.0.snd_wnd),
-            TcpState::FinWait1(fin_wait_1) => Some(fin_wait_1.0.snd_wnd),
-            TcpState::FinWait2(fin_wait_2) => Some(fin_wait_2.0.snd_wnd),
-            TcpState::Closing(closing) => Some(closing.0.snd_wnd),
-            TcpState::LastAck(last_ack) => Some(last_ack.0.snd_wnd),
+            TcpState::Established(established) => Some(established.window_state.snd_wnd),
+            TcpState::FinWait1(fin_wait_1) => Some(fin_wait_1.window_state.snd_wnd),
+            TcpState::FinWait2(fin_wait_2) => Some(fin_wait_2.window_state.snd_wnd),
+            TcpState::Closing(closing) => Some(closing.window_state.snd_wnd),
+            TcpState::LastAck(last_ack) => Some(last_ack.window_state.snd_wnd),
         }
     }
 }
@@ -127,26 +127,26 @@ pub(super) enum TcpState {
 
     /// "ESTABLISHED - represents an open connection, data received can be delivered to the user.
     /// The normal state for the data transfer phase of the connection."
-    Established(Established),
+    Established(SyncedState<Established>),
 
     /// "FIN-WAIT-1 - represents waiting for a connection termination request from the remote TCP
     /// peer, or an acknowledgment of the connection termination request previously sent."
     ///
     /// Entered when this server actively closes the connection.
-    FinWait1(FinWait1),
+    FinWait1(SyncedState<FinWait1>),
 
     /// "FIN-WAIT-2 - represents waiting for a connection termination request from the remote TCP
     /// peer."
     ///
     /// Reached from `FinWait1` once our FIN has been acknowledged.
-    FinWait2(FinWait2),
+    FinWait2(SyncedState<FinWait2>),
 
     /// "CLOSING - represents waiting for a connection termination request acknowledgment from the
     /// remote TCP peer."
     ///
     /// Reached via simultaneous close, when the remote peer's FIN arrives before our own FIN has
     /// been acknowledged.
-    Closing(Closing),
+    Closing(SyncedState<Closing>),
 
     /// "LAST-ACK - represents waiting for an acknowledgment of the connection termination request
     /// previously sent to the remote TCP peer (this termination request sent to the remote TCP peer
@@ -154,59 +154,7 @@ pub(super) enum TcpState {
     /// peer)."
     ///
     /// Reached via passive close, after acknowledging the remote peer's FIN with our own.
-    LastAck(LastAck),
-}
-
-macro_rules! fn_test_new {
-    () => {
-        #[cfg(test)]
-        pub(super) const fn test_new(window_state: WindowState) -> Self { Self(window_state) }
-    };
-}
-
-macro_rules! fn_incoming_ack_update {
-    () => {
-        /// Per RFC 9293, Section 3.10.7.4, "Fifth, check the ACK field," "ESTABLISHED STATE,"
-        /// processes an incoming segment's acknowledgment against the send-side state, updating
-        /// SND.WND, SND.WL1, SND.WL2, SND.UNA, and the retransmission queue as necessary.
-        ///
-        /// Ignores ACKs that are old (before SND.UNA) or for data not yet sent (past SND.NXT).
-        /// For updates to SND.UNA and the retransmission queue, ignores duplicate ACKs
-        /// (SND.UNA == SEG.ACK).
-        #[must_use = "Returns updated state as a new instance"]
-        pub(super) fn incoming_ack_update(
-            self,
-            conn: &mut ConnState,
-            seg: &TcpHandler<Remote>,
-        ) -> Self {
-            // Exclude duplicate ACKs: SND.UNA < SEG.ACK <= SND.NXT
-            if conn.snd_una.precedes(seg.ack_num) && seg.ack_num.precedes_or_eq(conn.snd_nxt) {
-                conn.snd_una = seg.ack_num;
-
-                // ACKs are cumulative, so only keep pending segments not fully covered by SEG.ACK
-                conn.pending
-                    .retain(|pending_seg| !pending_seg.is_covered_by(seg.ack_num));
-            }
-
-            // Include duplicate ACKs: SND.UNA <= SEG.ACK <= SND.NXT
-            //     and
-            // Guard against an old/reordered segment clobbering the window with stale data:
-            //     SND.WL1 < SEG.SEQ or (SND.WL1 == SEG.SEQ and SND.WL2 <= SEG.ACK)
-            if conn.snd_una.precedes_or_eq(seg.ack_num)
-                && seg.ack_num.precedes_or_eq(conn.snd_nxt)
-                && self.0.snd_wl1.precedes(seg.seq_num)
-                || (self.0.snd_wl1 == seg.seq_num && self.0.snd_wl2.precedes_or_eq(seg.ack_num))
-            {
-                Self(WindowState {
-                    snd_wnd: seg.window,
-                    snd_wl1: seg.seq_num,
-                    snd_wl2: seg.ack_num,
-                })
-            } else {
-                self
-            }
-        }
-    };
+    LastAck(SyncedState<LastAck>),
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -215,62 +163,111 @@ pub(super) struct SynReceived;
 
 impl SynReceived {
     #[expect(clippy::unused_self, reason = "Require an instance for state transition")]
-    pub(super) const fn establish(self, seg: &TcpHandler<Remote>) -> Established {
-        Established(WindowState { snd_wnd: seg.window, snd_wl1: seg.seq_num, snd_wl2: seg.ack_num })
+    pub(super) const fn establish(self, seg: &TcpHandler<Remote>) -> SyncedState<Established> {
+        SyncedState {
+            window_state: WindowState {
+                snd_wnd: seg.window,
+                snd_wl1: seg.seq_num,
+                snd_wl2: seg.ack_num,
+            },
+            phantom: PhantomData,
+        }
     }
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(test, derive(Debug))]
-pub(super) struct Established(WindowState);
-
-impl Established {
-    pub(super) const fn close(self) -> FinWait1 { FinWait1(self.0) }
-
-    pub(super) const fn skip_close_wait(self) -> LastAck { LastAck(self.0) }
-
-    fn_incoming_ack_update!();
-    fn_test_new!();
-}
+pub(super) struct Established;
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(test, derive(Debug))]
-pub(super) struct FinWait1(WindowState);
-
-impl FinWait1 {
-    pub(super) const fn rcv_ack_of_fin(self) -> FinWait2 { FinWait2(self.0) }
-
-    pub(super) const fn wait_for_simultaneous_close_ack(self) -> Closing { Closing(self.0) }
-
-    fn_incoming_ack_update!();
-    fn_test_new!();
-}
+pub(super) struct FinWait1;
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(test, derive(Debug))]
-pub(super) struct FinWait2(WindowState);
-
-impl FinWait2 {
-    fn_incoming_ack_update!();
-    fn_test_new!();
-}
+pub(super) struct FinWait2;
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(test, derive(Debug))]
-pub(super) struct Closing(WindowState);
-
-impl Closing {
-    fn_test_new!();
-}
+pub(super) struct Closing;
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(test, derive(Debug))]
-pub(super) struct LastAck(WindowState);
+pub(super) struct LastAck;
 
-impl LastAck {
-    fn_incoming_ack_update!();
-    fn_test_new!();
+#[derive(PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(test, derive(Debug))]
+pub(super) struct SyncedState<T> {
+    window_state: WindowState,
+    phantom: PhantomData<T>,
 }
+
+impl<T> SyncedState<T> {
+    /// Per RFC 9293, Section 3.10.7.4, "Fifth, check the ACK field," "ESTABLISHED STATE,"
+    /// processes an incoming segment's acknowledgment against the send-side state, updating
+    /// SND.WND, SND.WL1, SND.WL2, SND.UNA, and the retransmission queue as necessary.
+    ///
+    /// Ignores ACKs that are old (before SND.UNA) or for data not yet sent (past SND.NXT).
+    /// For updates to SND.UNA and the retransmission queue, ignores duplicate ACKs
+    /// (SND.UNA == SEG.ACK).
+    #[must_use = "Returns updated state as a new instance"]
+    pub(super) fn incoming_ack_update(
+        self,
+        conn: &mut ConnState,
+        seg: &TcpHandler<Remote>,
+    ) -> Self {
+        // Exclude duplicate ACKs: SND.UNA < SEG.ACK <= SND.NXT
+        if conn.snd_una.precedes(seg.ack_num) && seg.ack_num.precedes_or_eq(conn.snd_nxt) {
+            conn.snd_una = seg.ack_num;
+
+            // ACKs are cumulative, so only keep pending segments not fully covered by SEG.ACK
+            conn.pending
+                .retain(|pending_seg| !pending_seg.is_covered_by(seg.ack_num));
+        }
+
+        // Include duplicate ACKs: SND.UNA <= SEG.ACK <= SND.NXT
+        //     and
+        // Guard against an old/reordered segment clobbering the window with stale data:
+        //     SND.WL1 < SEG.SEQ or (SND.WL1 == SEG.SEQ and SND.WL2 <= SEG.ACK)
+        if conn.snd_una.precedes_or_eq(seg.ack_num)
+            && seg.ack_num.precedes_or_eq(conn.snd_nxt)
+            && self.window_state.snd_wl1.precedes(seg.seq_num)
+            || (self.window_state.snd_wl1 == seg.seq_num
+                && self.window_state.snd_wl2.precedes_or_eq(seg.ack_num))
+        {
+            Self {
+                window_state: WindowState {
+                    snd_wnd: seg.window,
+                    snd_wl1: seg.seq_num,
+                    snd_wl2: seg.ack_num,
+                },
+                phantom: PhantomData,
+            }
+        } else {
+            self
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) const fn test_new(window_state: WindowState) -> Self {
+        Self { window_state, phantom: PhantomData }
+    }
+}
+
+macro_rules! synced_state_transition {
+    ($from:ty => $fn_name:ident => $to:ty) => {
+        impl SyncedState<$from> {
+            pub(super) const fn $fn_name(self) -> SyncedState<$to> {
+                SyncedState { window_state: self.window_state, phantom: PhantomData }
+            }
+        }
+    };
+}
+
+synced_state_transition!(Established => skip_close_wait => LastAck);
+synced_state_transition!(Established => close => FinWait1);
+synced_state_transition!(FinWait1 => rcv_ack_of_fin => FinWait2);
+synced_state_transition!(FinWait1 => wait_for_simultaneous_close_ack => Closing);
 
 /// The SND.WND, SND.WL1, and SND.WL2 values of a connection.
 #[derive(Copy, Clone, PartialEq, Eq)]
