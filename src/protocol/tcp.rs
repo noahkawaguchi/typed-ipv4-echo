@@ -358,12 +358,14 @@ impl TcpHandler<Remote> {
 
                 let send_info = SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt);
 
-                conn.tcp_state = if let TcpState::FinWait1(fin_wait_1) = conn.tcp_state {
-                    TcpState::FinWait1(fin_wait_1.incoming_ack_update(conn, self))
-                } else if let TcpState::FinWait2(fin_wait_2) = conn.tcp_state {
-                    TcpState::FinWait2(fin_wait_2.incoming_ack_update(conn, self))
-                } else {
-                    conn.tcp_state
+                conn.tcp_state = match conn.tcp_state {
+                    TcpState::FinWait1(fin_wait_1) => {
+                        TcpState::FinWait1(fin_wait_1.incoming_ack_update(conn, self))
+                    }
+                    TcpState::FinWait2(fin_wait_2) => {
+                        TcpState::FinWait2(fin_wait_2.incoming_ack_update(conn, self))
+                    }
+                    _ => conn.tcp_state,
                 };
 
                 Some(send_info)
