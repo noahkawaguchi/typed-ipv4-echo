@@ -3,11 +3,11 @@ use super::*;
 /// Creates a `ConnState` that is the same as `AFTER_HANDSHAKE` except for a custom `snd_wnd`.
 fn after_handshake_with_snd_wnd(snd_wnd: SeqOffset<u16, Local>) -> ConnState {
     ConnState {
-        tcp_state: TcpState::Established(SyncedState::test_new(WindowState {
+        tcp_state: TcpState::Established(SyncedState::test_new(WindowState::test_new(
             snd_wnd,
-            snd_wl1: CLIENT_ISN + REMOTE_SYN_BYTE,
-            snd_wl2: SERVER_ISN + LOCAL_SYN_BYTE,
-        })),
+            CLIENT_ISN + REMOTE_SYN_BYTE,
+            SERVER_ISN + LOCAL_SYN_BYTE,
+        ))),
         ..AFTER_HANDSHAKE
     }
 }
@@ -106,11 +106,11 @@ fn unacked_bytes_count_toward_room_left_in_send_window() -> Result {
         "No room left in the window while the first 3 bytes remain unacked"
     );
 
-    expected_state.tcp_state = TcpState::Established(SyncedState::test_new(WindowState {
-        snd_wnd: dup_ack_same_window.window,
-        snd_wl1: dup_ack_same_window.seq_num,
-        snd_wl2: dup_ack_same_window.ack_num,
-    }));
+    expected_state.tcp_state = TcpState::Established(SyncedState::test_new(WindowState::test_new(
+        dup_ack_same_window.window,
+        dup_ack_same_window.seq_num,
+        dup_ack_same_window.ack_num,
+    )));
 
     assert_eq!(
         connections.try_get()?,
@@ -172,11 +172,11 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
 
     expected_state.snd_una += HEL_LEN;
     expected_state.snd_nxt += LO_LEN;
-    expected_state.tcp_state = TcpState::Established(SyncedState::test_new(WindowState {
-        snd_wnd: LARGER_WINDOW,
-        snd_wl1: window_update.seq_num,
-        snd_wl2: window_update.ack_num,
-    }));
+    expected_state.tcp_state = TcpState::Established(SyncedState::test_new(WindowState::test_new(
+        LARGER_WINDOW,
+        window_update.seq_num,
+        window_update.ack_num,
+    )));
     expected_state.send_buffer.clear();
 
     assert_eq!(

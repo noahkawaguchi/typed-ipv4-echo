@@ -273,18 +273,29 @@ synced_state_transition!(FinWait1 => wait_for_simultaneous_close_ack => Closing)
 pub(super) struct WindowState {
     /// SND.WND or send window. "This represents the sequence numbers that the remote (receiving)
     /// TCP endpoint is willing to receive" (RFC 9293, Section 4).
-    pub(super) snd_wnd: SeqOffset<u16, Local>,
+    snd_wnd: SeqOffset<u16, Local>,
 
     /// SND.WL1. "segment sequence number used for last window update" (RFC 9293, Section 3.3.1).
     ///
     /// Purely used for internal bookkeeping alongside `snd_wl2` to determine whether a window
     /// value is fresh or stale/reordered.
-    pub(super) snd_wl1: SeqPoint<Remote>,
+    snd_wl1: SeqPoint<Remote>,
 
     /// SND.WL2. "segment acknowledgment number used for last window update" (RFC 9293, Section
     /// 3.3.1).
     ///
     /// Purely used for internal bookkeeping alongside `snd_wl1` to determine whether a window
     /// value is fresh or stale/reordered.
-    pub(super) snd_wl2: SeqPoint<Local>,
+    snd_wl2: SeqPoint<Local>,
+}
+
+#[cfg(test)]
+impl WindowState {
+    pub(super) const fn test_new(
+        snd_wnd: SeqOffset<u16, Local>,
+        snd_wl1: SeqPoint<Remote>,
+        snd_wl2: SeqPoint<Local>,
+    ) -> Self {
+        Self { snd_wnd, snd_wl1, snd_wl2 }
+    }
 }

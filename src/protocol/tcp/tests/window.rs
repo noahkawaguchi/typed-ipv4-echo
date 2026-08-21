@@ -43,11 +43,11 @@ fn new_ack_adopts_window_from_segment() -> Result {
     assert_eq!(window_update.create_reply(&mut connections)?, None);
 
     cloned_state.snd_una += LOCAL_HELLO_LEN;
-    cloned_state.tcp_state = TcpState::Established(SyncedState::test_new(WindowState {
-        snd_wnd: window_update.window,
-        snd_wl1: window_update.seq_num,
-        snd_wl2: window_update.ack_num,
-    }));
+    cloned_state.tcp_state = TcpState::Established(SyncedState::test_new(WindowState::test_new(
+        window_update.window,
+        window_update.seq_num,
+        window_update.ack_num,
+    )));
 
     assert_eq!(
         connections.try_get()?,
@@ -96,11 +96,11 @@ fn stale_segment_does_not_clobber_send_window() -> Result {
 
     assert_eq!(fresh_window_update.create_reply(&mut connections)?, None);
 
-    cloned_state.tcp_state = TcpState::Established(SyncedState::test_new(WindowState {
-        snd_wnd: fresh_window_update.window,
-        snd_wl1: fresh_window_update.seq_num,
-        snd_wl2: fresh_window_update.ack_num,
-    }));
+    cloned_state.tcp_state = TcpState::Established(SyncedState::test_new(WindowState::test_new(
+        fresh_window_update.window,
+        fresh_window_update.seq_num,
+        fresh_window_update.ack_num,
+    )));
 
     assert_eq!(connections.try_get()?, &cloned_state, "First window update should be adopted");
 
@@ -164,11 +164,11 @@ fn same_seq_but_fresher_ack_updates_window() -> Result {
 
     cloned_state.snd_nxt += LOCAL_HI_LEN;
     cloned_state.rcv_nxt += REMOTE_HI_LEN;
-    cloned_state.tcp_state = TcpState::Established(SyncedState::test_new(WindowState {
-        snd_wnd: hi_packet.window,
-        snd_wl1: hi_packet.seq_num,
-        snd_wl2: hi_packet.ack_num,
-    }));
+    cloned_state.tcp_state = TcpState::Established(SyncedState::test_new(WindowState::test_new(
+        hi_packet.window,
+        hi_packet.seq_num,
+        hi_packet.ack_num,
+    )));
 
     assert_eq!(connections.try_get()?, &cloned_state);
 
@@ -184,11 +184,11 @@ fn same_seq_but_fresher_ack_updates_window() -> Result {
     assert_eq!(window_update_1.create_reply(&mut connections)?, None);
 
     cloned_state.snd_una += LOCAL_HELLO_LEN;
-    cloned_state.tcp_state = TcpState::Established(SyncedState::test_new(WindowState {
-        snd_wnd: window_update_1.window,
-        snd_wl1: window_update_1.seq_num,
-        snd_wl2: window_update_1.ack_num,
-    }));
+    cloned_state.tcp_state = TcpState::Established(SyncedState::test_new(WindowState::test_new(
+        window_update_1.window,
+        window_update_1.seq_num,
+        window_update_1.ack_num,
+    )));
 
     assert_eq!(connections.try_get()?, &cloned_state, "First window update should be adopted");
 
@@ -204,11 +204,11 @@ fn same_seq_but_fresher_ack_updates_window() -> Result {
     assert_eq!(window_update_2.create_reply(&mut connections)?, None);
 
     cloned_state.snd_una += LOCAL_HI_LEN;
-    cloned_state.tcp_state = TcpState::Established(SyncedState::test_new(WindowState {
-        snd_wnd: window_update_2.window,
-        snd_wl1: window_update_2.seq_num,
-        snd_wl2: window_update_2.ack_num,
-    }));
+    cloned_state.tcp_state = TcpState::Established(SyncedState::test_new(WindowState::test_new(
+        window_update_2.window,
+        window_update_2.seq_num,
+        window_update_2.ack_num,
+    )));
 
     assert_eq!(
         connections.try_get()?,
@@ -265,11 +265,11 @@ fn duplicate_ack_updates_window() -> Result {
 
     assert_eq!(dup_ack_fresh_seq.create_reply(&mut connections)?, None);
 
-    cloned_state.tcp_state = TcpState::Established(SyncedState::test_new(WindowState {
-        snd_wnd: dup_ack_fresh_seq.window,
-        snd_wl1: dup_ack_fresh_seq.seq_num,
-        snd_wl2: dup_ack_fresh_seq.ack_num,
-    }));
+    cloned_state.tcp_state = TcpState::Established(SyncedState::test_new(WindowState::test_new(
+        dup_ack_fresh_seq.window,
+        dup_ack_fresh_seq.seq_num,
+        dup_ack_fresh_seq.ack_num,
+    )));
 
     assert_eq!(
         connections.try_get()?,
