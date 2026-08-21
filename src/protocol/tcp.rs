@@ -213,7 +213,7 @@ impl TcpHandler<Remote> {
                         conn.rcv_nxt += payload.len().into();
                         conn.send_buffer.extend(payload.as_bytes());
 
-                        conn.drain_transmittable(&established).map(|maybe_to_send| {
+                        established.drain_transmittable(conn).map(|maybe_to_send| {
                             match maybe_to_send {
                                 Some(to_send) => Self::data_payload(conn, to_send),
                                 None => SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt),
@@ -238,13 +238,18 @@ impl TcpHandler<Remote> {
             // the server) -> advance SND.UNA, then send however much the window allows from the
             // data queued to be sent, if any
             (
-                Some(conn @ &mut ConnState { tcp_state: TcpState::Established(established), .. }),
+                Some(
+                    conn @ &mut ConnState {
+                        tcp_state: TcpState::Established(old_established), ..
+                    },
+                ),
                 TcpFlags::Ack,
                 None,
             ) => {
-                conn.tcp_state = TcpState::Established(established.incoming_ack_update(conn, self));
-
-                conn.drain_transmittable(&established)?
+                let new_established = old_established.incoming_ack_update(conn, self);
+                conn.tcp_state = TcpState::Established(new_established);
+                new_established
+                    .drain_transmittable(conn)?
                     .map(|to_send| Self::data_payload(conn, to_send))
             }
 
@@ -252,15 +257,21 @@ impl TcpHandler<Remote> {
             // RCV.NXT, and echo as much of the queued data as SND.WND currently allows. Buffer
             // anything that doesn't fit to go out later as the window opens.
             (
-                Some(conn @ &mut ConnState { tcp_state: TcpState::Established(established), .. }),
+                Some(
+                    conn @ &mut ConnState {
+                        tcp_state: TcpState::Established(old_established), ..
+                    },
+                ),
                 TcpFlags::Ack,
                 Some(payload),
             ) if self.seq_num == conn.rcv_nxt => {
-                conn.tcp_state = TcpState::Established(established.incoming_ack_update(conn, self));
+                let new_established = old_established.incoming_ack_update(conn, self);
+
+                conn.tcp_state = TcpState::Established(new_established);
                 conn.rcv_nxt += payload.len().into();
                 conn.send_buffer.extend(payload.as_bytes());
 
-                Some(match conn.drain_transmittable(&established)? {
+                Some(match new_established.drain_transmittable(conn)? {
                     Some(to_send) => Self::data_payload(conn, to_send),
                     None => SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt),
                 })
@@ -284,7 +295,11 @@ impl TcpHandler<Remote> {
             // FIN-WAIT-1/2, our own FIN hasn't gone out yet, so we can piggyback the data echo on
             // this same reply.
             (
-                Some(conn @ &mut ConnState { tcp_state: TcpState::Established(established), .. }),
+                Some(
+                    conn @ &mut ConnState {
+                        tcp_state: TcpState::Established(old_established), ..
+                    },
+                ),
                 TcpFlags::FinAck,
                 maybe_payload,
             ) if self.seq_num == conn.rcv_nxt => {
@@ -294,14 +309,12 @@ impl TcpHandler<Remote> {
                 }
 
                 conn.rcv_nxt += REMOTE_FIN_BYTE; // Peer's FIN consumes one sequence number
-                conn.tcp_state = TcpState::LastAck(
-                    established
-                        .incoming_ack_update(conn, self)
-                        .skip_close_wait(),
-                );
 
-                let to_send = conn.drain_transmittable(&established)?;
+                let new_established = old_established.incoming_ack_update(conn, self);
+                let to_send = new_established.drain_transmittable(conn)?;
                 let send_len = to_send.len_or_default();
+
+                conn.tcp_state = TcpState::LastAck(new_established.skip_close_wait());
 
                 let send_info = SendInfo {
                     seq_num: conn.snd_nxt,

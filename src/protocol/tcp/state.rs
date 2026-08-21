@@ -57,26 +57,6 @@ impl ConnState {
             )
     }
 
-    /// Removes and returns as many bytes as the peer's currently advertised window allows from the
-    /// front of the send buffer, or returns `Ok(None)` if nothing can be sent right now because the
-    /// buffer is empty or the window is full. Does not mutate any other state.
-    pub(super) fn drain_transmittable(
-        &mut self,
-        established: &SyncedState<Established>,
-    ) -> Result<Option<TcpPayload>> {
-        let sent_but_not_acked = self
-            .snd_nxt
-            .offset_past(self.snd_una)
-            .ok_or("`drain_transmittable` called with SND.UNA not preceding or equaling SND.NXT")?;
-
-        let space_in_window = SeqOffset::<u32, Local>::from(established.window_state.snd_wnd)
-            .saturating_sub(sent_but_not_acked);
-
-        let bytes_to_send = usize::try_from(space_in_window)?.min(self.send_buffer.len());
-
-        TcpPayload::try_from_iter(self.send_buffer.drain(..bytes_to_send)).map_err(Into::into)
-    }
-
     #[cfg(test)]
     pub(super) const fn test_get_snd_wnd(&self) -> Option<SeqOffset<u16, Local>> {
         match self.tcp_state {
@@ -241,6 +221,33 @@ impl<T> SyncedState<T> {
     #[cfg(test)]
     pub(super) const fn test_new(window_state: WindowState) -> Self {
         Self { window_state, phantom: PhantomData }
+    }
+}
+
+/// Represents being in a state where data is allowed to go out on the wire because our send side is
+/// open, i.e. a synchronized state before our FIN has been sent. Private to this module to uphold
+/// the invariant that this is only allowed in ESTABLISHED (and eventually CLOSE-WAIT).
+trait SendSide {}
+impl SendSide for Established {}
+// TODO: Once CLOSE-WAIT is implemented, `impl SendSide for CloseWait {}`
+
+#[expect(private_bounds, reason = "Ensure only states allowed in this module can send data")]
+impl<T: SendSide> SyncedState<T> {
+    /// Removes and returns as many bytes as the peer's currently advertised window allows from the
+    /// front of the send buffer, or returns `Ok(None)` if nothing can be sent right now because the
+    /// buffer is empty or the window is full. Does not mutate any other state.
+    pub(super) fn drain_transmittable(&self, conn: &mut ConnState) -> Result<Option<TcpPayload>> {
+        let sent_but_not_acked = conn
+            .snd_nxt
+            .offset_past(conn.snd_una)
+            .ok_or("`drain_transmittable` called with SND.UNA not preceding or equaling SND.NXT")?;
+
+        let space_in_window = SeqOffset::<u32, Local>::from(self.window_state.snd_wnd)
+            .saturating_sub(sent_but_not_acked);
+
+        let bytes_to_send = usize::try_from(space_in_window)?.min(conn.send_buffer.len());
+
+        TcpPayload::try_from_iter(conn.send_buffer.drain(..bytes_to_send)).map_err(Into::into)
     }
 }
 
