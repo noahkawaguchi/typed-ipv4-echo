@@ -215,7 +215,6 @@ impl TcpConnections {
                 snd_nxt: SERVER_ISN + LOCAL_SYN_BYTE,
                 rcv_nxt: CLIENT_ISN + REMOTE_SYN_BYTE,
                 snd_una: SERVER_ISN,
-                window_state: None,
                 pending: vec![PendingSegment::new(
                     SendInfo {
                         seq_num: SERVER_ISN,
