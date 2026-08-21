@@ -93,6 +93,40 @@ impl PartialEq for ConnState {
     }
 }
 
+/// The SND.WND, SND.WL1, and SND.WL2 values of a connection.
+#[derive(Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(test, derive(Debug))]
+#[expect(clippy::struct_field_names, reason = "Match RFC terminology")]
+pub(super) struct WindowState {
+    /// SND.WND or send window. "This represents the sequence numbers that the remote (receiving)
+    /// TCP endpoint is willing to receive" (RFC 9293, Section 4).
+    snd_wnd: SeqOffset<u16, Local>,
+
+    /// SND.WL1. "segment sequence number used for last window update" (RFC 9293, Section 3.3.1).
+    ///
+    /// Purely used for internal bookkeeping alongside `snd_wl2` to determine whether a window
+    /// value is fresh or stale/reordered.
+    snd_wl1: SeqPoint<Remote>,
+
+    /// SND.WL2. "segment acknowledgment number used for last window update" (RFC 9293, Section
+    /// 3.3.1).
+    ///
+    /// Purely used for internal bookkeeping alongside `snd_wl1` to determine whether a window
+    /// value is fresh or stale/reordered.
+    snd_wl2: SeqPoint<Local>,
+}
+
+#[cfg(test)]
+impl WindowState {
+    pub(super) const fn test_new(
+        snd_wnd: SeqOffset<u16, Local>,
+        snd_wl1: SeqPoint<Remote>,
+        snd_wl2: SeqPoint<Local>,
+    ) -> Self {
+        Self { snd_wnd, snd_wl1, snd_wl2 }
+    }
+}
+
 /// The set of states of a TCP connection (non-exhaustive). Variant meanings below from RFC 9293,
 /// Section 3.3.2.
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -172,6 +206,21 @@ pub(super) struct SyncedState<T> {
     phantom: PhantomData<T>,
 }
 
+macro_rules! synced_state_transition {
+    ($from:ty => $fn_name:ident => $to:ty) => {
+        impl SyncedState<$from> {
+            pub(super) const fn $fn_name(self) -> SyncedState<$to> {
+                SyncedState { window_state: self.window_state, phantom: PhantomData }
+            }
+        }
+    };
+}
+
+synced_state_transition!(Established => skip_close_wait => LastAck);
+synced_state_transition!(Established => close => FinWait1);
+synced_state_transition!(FinWait1 => rcv_ack_of_fin => FinWait2);
+synced_state_transition!(FinWait1 => wait_for_simultaneous_close_ack => Closing);
+
 impl<T> SyncedState<T> {
     /// Per RFC 9293, Section 3.10.7.4, "Fifth, check the ACK field," "ESTABLISHED STATE,"
     /// processes an incoming segment's acknowledgment against the send-side state, updating
@@ -248,54 +297,5 @@ impl<T: SendSide> SyncedState<T> {
         let bytes_to_send = usize::try_from(space_in_window)?.min(conn.send_buffer.len());
 
         TcpPayload::try_from_iter(conn.send_buffer.drain(..bytes_to_send)).map_err(Into::into)
-    }
-}
-
-macro_rules! synced_state_transition {
-    ($from:ty => $fn_name:ident => $to:ty) => {
-        impl SyncedState<$from> {
-            pub(super) const fn $fn_name(self) -> SyncedState<$to> {
-                SyncedState { window_state: self.window_state, phantom: PhantomData }
-            }
-        }
-    };
-}
-
-synced_state_transition!(Established => skip_close_wait => LastAck);
-synced_state_transition!(Established => close => FinWait1);
-synced_state_transition!(FinWait1 => rcv_ack_of_fin => FinWait2);
-synced_state_transition!(FinWait1 => wait_for_simultaneous_close_ack => Closing);
-
-/// The SND.WND, SND.WL1, and SND.WL2 values of a connection.
-#[derive(Copy, Clone, PartialEq, Eq)]
-#[cfg_attr(test, derive(Debug))]
-#[expect(clippy::struct_field_names, reason = "Match RFC terminology")]
-pub(super) struct WindowState {
-    /// SND.WND or send window. "This represents the sequence numbers that the remote (receiving)
-    /// TCP endpoint is willing to receive" (RFC 9293, Section 4).
-    snd_wnd: SeqOffset<u16, Local>,
-
-    /// SND.WL1. "segment sequence number used for last window update" (RFC 9293, Section 3.3.1).
-    ///
-    /// Purely used for internal bookkeeping alongside `snd_wl2` to determine whether a window
-    /// value is fresh or stale/reordered.
-    snd_wl1: SeqPoint<Remote>,
-
-    /// SND.WL2. "segment acknowledgment number used for last window update" (RFC 9293, Section
-    /// 3.3.1).
-    ///
-    /// Purely used for internal bookkeeping alongside `snd_wl1` to determine whether a window
-    /// value is fresh or stale/reordered.
-    snd_wl2: SeqPoint<Local>,
-}
-
-#[cfg(test)]
-impl WindowState {
-    pub(super) const fn test_new(
-        snd_wnd: SeqOffset<u16, Local>,
-        snd_wl1: SeqPoint<Remote>,
-        snd_wl2: SeqPoint<Local>,
-    ) -> Self {
-        Self { snd_wnd, snd_wl1, snd_wl2 }
     }
 }
