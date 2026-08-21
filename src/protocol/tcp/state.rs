@@ -157,9 +157,19 @@ pub(super) enum TcpState {
     LastAck(SyncedState<LastAck>),
 }
 
-#[derive(PartialEq, Eq, Clone, Copy)]
-#[cfg_attr(test, derive(Debug))]
-pub(super) struct SynReceived;
+/// Generates unit struct definitions for all identifiers passed as comma-separated arguments,
+/// including the appropriate derives and visibility for use in `TcpState`.
+macro_rules! tcp_state_inner_structs {
+    ($($state:ident),+ $(,)?) => {
+        $(
+            #[derive(PartialEq, Eq, Clone, Copy)]
+            #[cfg_attr(test, derive(Debug))]
+            pub(super) struct $state;
+        )+
+    };
+}
+
+tcp_state_inner_structs!(SynReceived, Established, FinWait1, FinWait2, Closing, LastAck);
 
 impl SynReceived {
     #[expect(clippy::unused_self, reason = "Require an instance for state transition")]
@@ -174,26 +184,6 @@ impl SynReceived {
         }
     }
 }
-
-#[derive(PartialEq, Eq, Clone, Copy)]
-#[cfg_attr(test, derive(Debug))]
-pub(super) struct Established;
-
-#[derive(PartialEq, Eq, Clone, Copy)]
-#[cfg_attr(test, derive(Debug))]
-pub(super) struct FinWait1;
-
-#[derive(PartialEq, Eq, Clone, Copy)]
-#[cfg_attr(test, derive(Debug))]
-pub(super) struct FinWait2;
-
-#[derive(PartialEq, Eq, Clone, Copy)]
-#[cfg_attr(test, derive(Debug))]
-pub(super) struct Closing;
-
-#[derive(PartialEq, Eq, Clone, Copy)]
-#[cfg_attr(test, derive(Debug))]
-pub(super) struct LastAck;
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(test, derive(Debug))]
