@@ -57,23 +57,6 @@ impl ConnState {
             )
     }
 
-    /// Per RFC 9293, Section 3.10.7.4, "Fifth, check the ACK field," "ESTABLISHED STATE," processes
-    /// an incoming segment's acknowledgment against the send-side state, updating SND.UNA and the
-    /// retransmission queue as necessary.
-    ///
-    /// Ignores ACKs that are old (before SND.UNA), duplicate (SND.UNA == SEG.ACK), or for data not
-    /// yet sent (past SND.NXT).
-    pub(super) fn incoming_ack_update(&mut self, seg: &TcpHandler<Remote>) {
-        // Exclude duplicate ACKs: SND.UNA < SEG.ACK <= SND.NXT
-        if self.snd_una.precedes(seg.ack_num) && seg.ack_num.precedes_or_eq(self.snd_nxt) {
-            self.snd_una = seg.ack_num;
-
-            // ACKs are cumulative, so only keep pending segments not fully covered by SEG.ACK
-            self.pending
-                .retain(|pending_seg| !pending_seg.is_covered_by(seg.ack_num));
-        }
-    }
-
     /// Removes and returns as many bytes as the peer's currently advertised window allows from the
     /// front of the send buffer, or returns `Ok(None)` if nothing can be sent right now because the
     /// buffer is empty or the window is full. Does not mutate any other state.
@@ -174,19 +157,55 @@ pub(super) enum TcpState {
     LastAck(LastAck),
 }
 
-macro_rules! fn_update_window {
-    () => {
-        #[must_use = "Returns update as a new instance"]
-        pub(super) fn update_window(self, conn: &ConnState, seg: &TcpHandler<Remote>) -> Self {
-            Self(self.0.update(conn, seg))
-        }
-    };
-}
-
 macro_rules! fn_test_new {
     () => {
         #[cfg(test)]
         pub(super) const fn test_new(window_state: WindowState) -> Self { Self(window_state) }
+    };
+}
+
+macro_rules! fn_incoming_ack_update {
+    () => {
+        /// Per RFC 9293, Section 3.10.7.4, "Fifth, check the ACK field," "ESTABLISHED STATE,"
+        /// processes an incoming segment's acknowledgment against the send-side state, updating
+        /// SND.WND, SND.WL1, SND.WL2, SND.UNA, and the retransmission queue as necessary.
+        ///
+        /// Ignores ACKs that are old (before SND.UNA) or for data not yet sent (past SND.NXT).
+        /// For updates to SND.UNA and the retransmission queue, ignores duplicate ACKs
+        /// (SND.UNA == SEG.ACK).
+        #[must_use = "Returns updated state as a new instance"]
+        pub(super) fn incoming_ack_update(
+            self,
+            conn: &mut ConnState,
+            seg: &TcpHandler<Remote>,
+        ) -> Self {
+            // Exclude duplicate ACKs: SND.UNA < SEG.ACK <= SND.NXT
+            if conn.snd_una.precedes(seg.ack_num) && seg.ack_num.precedes_or_eq(conn.snd_nxt) {
+                conn.snd_una = seg.ack_num;
+
+                // ACKs are cumulative, so only keep pending segments not fully covered by SEG.ACK
+                conn.pending
+                    .retain(|pending_seg| !pending_seg.is_covered_by(seg.ack_num));
+            }
+
+            // Include duplicate ACKs: SND.UNA <= SEG.ACK <= SND.NXT
+            //     and
+            // Guard against an old/reordered segment clobbering the window with stale data:
+            //     SND.WL1 < SEG.SEQ or (SND.WL1 == SEG.SEQ and SND.WL2 <= SEG.ACK)
+            if conn.snd_una.precedes_or_eq(seg.ack_num)
+                && seg.ack_num.precedes_or_eq(conn.snd_nxt)
+                && self.0.snd_wl1.precedes(seg.seq_num)
+                || (self.0.snd_wl1 == seg.seq_num && self.0.snd_wl2.precedes_or_eq(seg.ack_num))
+            {
+                Self(WindowState {
+                    snd_wnd: seg.window,
+                    snd_wl1: seg.seq_num,
+                    snd_wl2: seg.ack_num,
+                })
+            } else {
+                self
+            }
+        }
     };
 }
 
@@ -208,11 +227,9 @@ pub(super) struct Established(WindowState);
 impl Established {
     pub(super) const fn close(self) -> FinWait1 { FinWait1(self.0) }
 
-    pub(super) fn skip_close_wait(self, conn: &ConnState, seg: &TcpHandler<Remote>) -> LastAck {
-        LastAck(self.0.update(conn, seg))
-    }
+    pub(super) const fn skip_close_wait(self) -> LastAck { LastAck(self.0) }
 
-    fn_update_window!();
+    fn_incoming_ack_update!();
     fn_test_new!();
 }
 
@@ -221,19 +238,11 @@ impl Established {
 pub(super) struct FinWait1(WindowState);
 
 impl FinWait1 {
-    pub(super) fn rcv_ack_of_fin(self, conn: &ConnState, seg: &TcpHandler<Remote>) -> FinWait2 {
-        FinWait2(self.0.update(conn, seg))
-    }
+    pub(super) const fn rcv_ack_of_fin(self) -> FinWait2 { FinWait2(self.0) }
 
-    pub(super) fn wait_for_simultaneous_close_ack(
-        self,
-        conn: &ConnState,
-        seg: &TcpHandler<Remote>,
-    ) -> Closing {
-        Closing(self.0.update(conn, seg))
-    }
+    pub(super) const fn wait_for_simultaneous_close_ack(self) -> Closing { Closing(self.0) }
 
-    fn_update_window!();
+    fn_incoming_ack_update!();
     fn_test_new!();
 }
 
@@ -242,7 +251,7 @@ impl FinWait1 {
 pub(super) struct FinWait2(WindowState);
 
 impl FinWait2 {
-    fn_update_window!();
+    fn_incoming_ack_update!();
     fn_test_new!();
 }
 
@@ -259,7 +268,7 @@ impl Closing {
 pub(super) struct LastAck(WindowState);
 
 impl LastAck {
-    fn_update_window!();
+    fn_incoming_ack_update!();
     fn_test_new!();
 }
 
@@ -284,28 +293,4 @@ pub(super) struct WindowState {
     /// Purely used for internal bookkeeping alongside `snd_wl1` to determine whether a window
     /// value is fresh or stale/reordered.
     pub(super) snd_wl2: SeqPoint<Local>,
-}
-
-impl WindowState {
-    /// Per RFC 9293, Section 3.10.7.4, "Fifth, check the ACK field," "ESTABLISHED STATE," processes
-    /// an incoming segment's acknowledgment against the send-side state, updating SND.WND, SND.WL1,
-    /// and SND.WL2 as necessary.
-    ///
-    /// Ignores ACKs that are old (before SND.UNA) or for data not yet sent (past SND.NXT).
-    #[must_use = "Returns update as a new instance"]
-    fn update(self, conn: &ConnState, seg: &TcpHandler<Remote>) -> Self {
-        // Include duplicate ACKs: SND.UNA <= SEG.ACK <= SND.NXT
-        //     and
-        // Guard against an old/reordered segment clobbering the window with stale data:
-        //     SND.WL1 < SEG.SEQ or (SND.WL1 == SEG.SEQ and SND.WL2 <= SEG.ACK)
-        if conn.snd_una.precedes_or_eq(seg.ack_num)
-            && seg.ack_num.precedes_or_eq(conn.snd_nxt)
-            && self.snd_wl1.precedes(seg.seq_num)
-            || (self.snd_wl1 == seg.seq_num && self.snd_wl2.precedes_or_eq(seg.ack_num))
-        {
-            Self { snd_wnd: seg.window, snd_wl1: seg.seq_num, snd_wl2: seg.ack_num }
-        } else {
-            self
-        }
-    }
 }

@@ -242,8 +242,8 @@ impl TcpHandler<Remote> {
                 TcpFlags::Ack,
                 None,
             ) => {
-                conn.incoming_ack_update(self);
-                conn.tcp_state = TcpState::Established(established.update_window(conn, self));
+                conn.tcp_state = TcpState::Established(established.incoming_ack_update(conn, self));
+
                 conn.drain_transmittable(&established)?
                     .map(|to_send| Self::data_payload(conn, to_send))
             }
@@ -256,8 +256,7 @@ impl TcpHandler<Remote> {
                 TcpFlags::Ack,
                 Some(payload),
             ) if self.seq_num == conn.rcv_nxt => {
-                conn.incoming_ack_update(self);
-                conn.tcp_state = TcpState::Established(established.update_window(conn, self));
+                conn.tcp_state = TcpState::Established(established.incoming_ack_update(conn, self));
                 conn.rcv_nxt += payload.len().into();
                 conn.send_buffer.extend(payload.as_bytes());
 
@@ -275,8 +274,7 @@ impl TcpHandler<Remote> {
                 TcpFlags::Ack | TcpFlags::FinAck,
                 _,
             ) if self.seq_num != conn.rcv_nxt => {
-                conn.incoming_ack_update(self);
-                conn.tcp_state = TcpState::Established(established.update_window(conn, self));
+                conn.tcp_state = TcpState::Established(established.incoming_ack_update(conn, self));
                 Some(SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt))
             }
 
@@ -290,15 +288,17 @@ impl TcpHandler<Remote> {
                 TcpFlags::FinAck,
                 maybe_payload,
             ) if self.seq_num == conn.rcv_nxt => {
-                conn.incoming_ack_update(self);
-
                 if let Some(payload) = maybe_payload {
                     conn.rcv_nxt += payload.len().into();
                     conn.send_buffer.extend(payload.as_bytes());
                 }
 
                 conn.rcv_nxt += REMOTE_FIN_BYTE; // Peer's FIN consumes one sequence number
-                conn.tcp_state = TcpState::LastAck(established.skip_close_wait(conn, self));
+                conn.tcp_state = TcpState::LastAck(
+                    established
+                        .incoming_ack_update(conn, self)
+                        .skip_close_wait(),
+                );
 
                 let to_send = conn.drain_transmittable(&established)?;
                 let send_len = to_send.len_or_default();
@@ -326,8 +326,7 @@ impl TcpHandler<Remote> {
                 TcpFlags::Ack,
                 None,
             ) if self.ack_num != conn.snd_nxt => {
-                conn.incoming_ack_update(self);
-                conn.tcp_state = TcpState::LastAck(last_ack.update_window(conn, self));
+                conn.tcp_state = TcpState::LastAck(last_ack.incoming_ack_update(conn, self));
                 None
             }
 
@@ -358,12 +357,11 @@ impl TcpHandler<Remote> {
                 conn.rcv_nxt += payload.len().into();
 
                 let send_info = SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt);
-                conn.incoming_ack_update(self);
 
                 conn.tcp_state = if let TcpState::FinWait1(fin_wait_1) = conn.tcp_state {
-                    TcpState::FinWait1(fin_wait_1.update_window(conn, self))
+                    TcpState::FinWait1(fin_wait_1.incoming_ack_update(conn, self))
                 } else if let TcpState::FinWait2(fin_wait_2) = conn.tcp_state {
-                    TcpState::FinWait2(fin_wait_2.update_window(conn, self))
+                    TcpState::FinWait2(fin_wait_2.incoming_ack_update(conn, self))
                 } else {
                     conn.tcp_state
                 };
@@ -377,8 +375,9 @@ impl TcpHandler<Remote> {
                 TcpFlags::Ack,
                 None,
             ) if self.ack_num == conn.snd_nxt => {
-                conn.incoming_ack_update(self);
-                conn.tcp_state = TcpState::FinWait2(fin_wait_1.rcv_ack_of_fin(conn, self));
+                conn.tcp_state =
+                    TcpState::FinWait2(fin_wait_1.incoming_ack_update(conn, self).rcv_ack_of_fin());
+
                 None
             }
 
@@ -403,9 +402,11 @@ impl TcpHandler<Remote> {
                 if self.ack_num == conn.snd_nxt {
                     connections.remove(&key);
                 } else {
-                    conn.incoming_ack_update(self);
-                    conn.tcp_state =
-                        TcpState::Closing(fin_wait_1.wait_for_simultaneous_close_ack(conn, self));
+                    conn.tcp_state = TcpState::Closing(
+                        fin_wait_1
+                            .incoming_ack_update(conn, self)
+                            .wait_for_simultaneous_close_ack(),
+                    );
                 }
 
                 Some(send_info)
