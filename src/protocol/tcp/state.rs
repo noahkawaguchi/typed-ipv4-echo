@@ -238,35 +238,34 @@ impl<T> SyncedState<T> {
         conn: &mut ConnState,
         seg: &TcpHandler<Remote>,
     ) -> Self {
-        // The first block may mutate SND.UNA before the second block reads it, but this does not
-        // change the outcome. The second block's check effectively becomes an equality check only.
+        if conn.snd_una.precedes_or_eq(seg.ack_num) && seg.ack_num.precedes_or_eq(conn.snd_nxt) {
+            // Exclude duplicate ACKs: SND.UNA < SEG.ACK <= SND.NXT
+            if conn.snd_una.precedes(seg.ack_num) {
+                conn.snd_una = seg.ack_num;
 
-        // Exclude duplicate ACKs: SND.UNA < SEG.ACK <= SND.NXT
-        if conn.snd_una.precedes(seg.ack_num) && seg.ack_num.precedes_or_eq(conn.snd_nxt) {
-            conn.snd_una = seg.ack_num;
+                // ACKs are cumulative, so only keep pending segments not fully covered by SEG.ACK
+                conn.pending
+                    .retain(|pending_seg| !pending_seg.is_covered_by(seg.ack_num));
+            }
 
-            // ACKs are cumulative, so only keep pending segments not fully covered by SEG.ACK
-            conn.pending
-                .retain(|pending_seg| !pending_seg.is_covered_by(seg.ack_num));
-        }
-
-        // Include duplicate ACKs: SND.UNA <= SEG.ACK <= SND.NXT
-        //     and
-        // Guard against an old/reordered segment clobbering the window with stale data:
-        //     SND.WL1 < SEG.SEQ or (SND.WL1 == SEG.SEQ and SND.WL2 <= SEG.ACK)
-        if conn.snd_una.precedes_or_eq(seg.ack_num)
-            && seg.ack_num.precedes_or_eq(conn.snd_nxt)
-            && self.window_state.snd_wl1.precedes(seg.seq_num)
-            || (self.window_state.snd_wl1 == seg.seq_num
-                && self.window_state.snd_wl2.precedes_or_eq(seg.ack_num))
-        {
-            Self {
-                window_state: WindowState {
-                    snd_wnd: seg.window,
-                    snd_wl1: seg.seq_num,
-                    snd_wl2: seg.ack_num,
-                },
-                phantom: PhantomData,
+            // Include duplicate ACKs: SND.UNA <= SEG.ACK <= SND.NXT
+            //     and
+            // Guard against an old/reordered segment clobbering the window with stale data:
+            //     SND.WL1 < SEG.SEQ or (SND.WL1 == SEG.SEQ and SND.WL2 <= SEG.ACK)
+            if self.window_state.snd_wl1.precedes(seg.seq_num)
+                || (self.window_state.snd_wl1 == seg.seq_num
+                    && self.window_state.snd_wl2.precedes_or_eq(seg.ack_num))
+            {
+                Self {
+                    window_state: WindowState {
+                        snd_wnd: seg.window,
+                        snd_wl1: seg.seq_num,
+                        snd_wl2: seg.ack_num,
+                    },
+                    phantom: PhantomData,
+                }
+            } else {
+                self
             }
         } else {
             self
