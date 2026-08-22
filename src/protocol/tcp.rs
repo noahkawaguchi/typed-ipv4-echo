@@ -420,7 +420,7 @@ impl TcpHandler<Remote> {
                     conn.tcp_state = TcpState::Closing(
                         fin_wait_1
                             .incoming_ack_update(conn, self)
-                            .wait_for_simultaneous_close_ack(),
+                            .rcv_fin_before_fin_is_acked(),
                     );
                 }
 

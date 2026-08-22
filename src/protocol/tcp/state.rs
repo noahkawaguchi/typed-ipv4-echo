@@ -171,8 +171,8 @@ pub(super) enum TcpState {
     LastAck(SyncedState<LastAck>),
 }
 
-/// Generates unit struct definitions for all identifiers passed as comma-separated arguments,
-/// including the appropriate derives and visibility for use in `TcpState`.
+/// Defines unit structs for all identifiers passed as comma-separated arguments, including the
+/// appropriate derives and visibility for use in `TcpState`.
 macro_rules! tcp_state_inner_structs {
     ($($state:ident),+ $(,)?) => {
         $(
@@ -199,6 +199,7 @@ impl SynReceived {
     }
 }
 
+/// One of the synchronized TCP states.
 #[derive(PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(test, derive(Debug))]
 pub(super) struct SyncedState<T> {
@@ -206,6 +207,8 @@ pub(super) struct SyncedState<T> {
     phantom: PhantomData<T>,
 }
 
+/// Given the pattern `($from:ty => $fn_name:ident => $to:ty)`, creates a method on
+/// `SyncedState<$from>` called `$fn_name` that returns `SyncedState<$to>`.
 macro_rules! synced_state_transition {
     ($from:ty => $fn_name:ident => $to:ty) => {
         impl SyncedState<$from> {
@@ -219,22 +222,25 @@ macro_rules! synced_state_transition {
 synced_state_transition!(Established => skip_close_wait => LastAck);
 synced_state_transition!(Established => close => FinWait1);
 synced_state_transition!(FinWait1 => rcv_ack_of_fin => FinWait2);
-synced_state_transition!(FinWait1 => wait_for_simultaneous_close_ack => Closing);
+synced_state_transition!(FinWait1 => rcv_fin_before_fin_is_acked => Closing);
 
 impl<T> SyncedState<T> {
-    /// Per RFC 9293, Section 3.10.7.4, "Fifth, check the ACK field," "ESTABLISHED STATE,"
-    /// processes an incoming segment's acknowledgment against the send-side state, updating
-    /// SND.WND, SND.WL1, SND.WL2, SND.UNA, and the retransmission queue as necessary.
+    /// Per RFC 9293, Section 3.10.7.4, "Fifth, check the ACK field," "ESTABLISHED STATE," processes
+    /// an incoming segment's acknowledgment against the send-side state, updating SND.WND, SND.WL1,
+    /// SND.WL2, SND.UNA, and the retransmission queue as necessary, both mutating `conn` in place
+    /// and returning an updated `Self`.
     ///
-    /// Ignores ACKs that are old (before SND.UNA) or for data not yet sent (past SND.NXT).
-    /// For updates to SND.UNA and the retransmission queue, ignores duplicate ACKs
-    /// (SND.UNA == SEG.ACK).
+    /// Ignores ACKs that are old (before SND.UNA) or for data not yet sent (past SND.NXT). Ignores
+    /// duplicate ACKs (SND.UNA == SEG.ACK) for updates to SND.UNA and the retransmission queue.
     #[must_use = "Returns updated state as a new instance"]
     pub(super) fn incoming_ack_update(
         self,
         conn: &mut ConnState,
         seg: &TcpHandler<Remote>,
     ) -> Self {
+        // The first block may mutate SND.UNA before the second block reads it, but this does not
+        // change the outcome. The second block's check effectively becomes an equality check only.
+
         // Exclude duplicate ACKs: SND.UNA < SEG.ACK <= SND.NXT
         if conn.snd_una.precedes(seg.ack_num) && seg.ack_num.precedes_or_eq(conn.snd_nxt) {
             conn.snd_una = seg.ack_num;
@@ -276,12 +282,12 @@ impl<T> SyncedState<T> {
 /// Represents being in a state where data is allowed to go out on the wire because our send side is
 /// open, i.e. a synchronized state before our FIN has been sent. Private to this module to uphold
 /// the invariant that this is only allowed in ESTABLISHED (and eventually CLOSE-WAIT).
-trait SendSide {}
-impl SendSide for Established {}
-// TODO: Once CLOSE-WAIT is implemented, `impl SendSide for CloseWait {}`
+trait SendSideOpen {}
+impl SendSideOpen for Established {}
+// TODO: Once CLOSE-WAIT is implemented, `impl SendSideOpen for CloseWait {}`
 
 #[expect(private_bounds, reason = "Ensure only states allowed in this module can send data")]
-impl<T: SendSide> SyncedState<T> {
+impl<T: SendSideOpen> SyncedState<T> {
     /// Removes and returns as many bytes as the peer's currently advertised window allows from the
     /// front of the send buffer, or returns `Ok(None)` if nothing can be sent right now because the
     /// buffer is empty or the window is full. Does not mutate any other state.
