@@ -186,12 +186,8 @@ impl TcpHandler<Remote> {
                 _,
             ) if self.seq_num != rcv_nxt => Some(SendInfo::pure_ack(snd_nxt, rcv_nxt)),
 
-            // Handshake ACK (step 3) -> transition to ESTABLISHED. If it also carries data, echo
-            // it, otherwise no reply is needed.
-            //
-            // As per RFC 9293, Section 3.10.7.4, "Fifth, check the ACK field," "SYN-RECEIVED
-            // STATE," if SND.UNA < SEG.ACK <= SND.NXT, enter ESTABLISHED and set SND.WND, SND.WL1,
-            // and SND.WL2 without the freshness check used for ESTABLISHED state ACKs.
+            // Acceptable handshake-completing ACK (step 3) -> transition to ESTABLISHED. If it also
+            // carries data, echo it, otherwise no reply is needed.
             (
                 Some(conn @ &mut ConnState { tcp_state: TcpState::SynReceived(syn_received), .. }),
                 TcpFlags::Ack,

@@ -186,6 +186,8 @@ macro_rules! tcp_state_inner_structs {
 tcp_state_inner_structs!(SynReceived, Established, FinWait1, FinWait2, Closing, LastAck);
 
 impl SynReceived {
+    /// Enters ESTABLISHED, setting SND.WND, SND.WL1, and SND.WL2 (RFC 9293, Section 3.10.7.4,
+    /// "Fifth, check the ACK field," "SYN-RECEIVED STATE").
     #[expect(clippy::unused_self, reason = "Require an instance for state transition")]
     pub(super) const fn establish(self, seg: &TcpHandler<Remote>) -> SyncedState<Established> {
         SyncedState {
