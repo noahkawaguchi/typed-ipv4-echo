@@ -223,6 +223,54 @@ impl TcpHandler<Remote> {
                     .transpose()?
             }
 
+            // Handshake-completing FIN-ACK (step 3 combined with the peer's own close) -> as per
+            // RFC 9293, Section 3.10.7.4, complete the handshake, transitioning to ESTABLISHED
+            // ("Fifth, check the ACK field"), then immediately start closing ("Eighth, check the
+            // FIN bit"), skipping CLOSE-WAIT under the current simplification, the same as a
+            // FIN-ACK arriving on an ESTABLISHED connection. Also echo as much trailing data as
+            // possible, if any.
+            (
+                Some(conn @ &mut ConnState { tcp_state: TcpState::SynReceived(syn_received), .. }),
+                TcpFlags::FinAck,
+                maybe_payload,
+            ) if self.seq_num == conn.rcv_nxt
+                && conn.snd_una.precedes(self.ack_num)
+                && self.ack_num.precedes_or_eq(conn.snd_nxt) =>
+            {
+                let established = syn_received.establish(self);
+
+                conn.rcv_nxt = self.seq_num;
+                conn.snd_una = self.ack_num;
+                conn.pending.clear(); // Only the SYN-ACK just acknowledged could have been pending
+
+                if let Some(payload) = maybe_payload {
+                    conn.rcv_nxt += payload.len().into();
+                    conn.send_buffer.extend(payload.as_bytes());
+                }
+
+                conn.rcv_nxt += REMOTE_FIN_BYTE; // Peer's FIN consumes one sequence number
+
+                let to_send = established.drain_transmittable(conn)?;
+                let send_len = to_send.len_or_default();
+
+                conn.tcp_state = TcpState::LastAck(established.skip_close_wait());
+
+                let send_info = SendInfo {
+                    seq_num: conn.snd_nxt,
+                    ack_num: conn.rcv_nxt,
+                    flags: TcpFlags::FinAck,
+                    payload: to_send,
+                };
+
+                conn.snd_nxt += send_len;
+                conn.snd_nxt += LOCAL_FIN_BYTE; // Our FIN consumes one sequence number
+
+                conn.pending
+                    .push(PendingSegment::new(send_info.clone(), Instant::now()));
+
+                Some(send_info)
+            }
+
             // ACK acknowledging data the server has not yet sent (ack_num is past snd_nxt) ->
             // per RFC 9293, Section 3.10.7.4, drop the segment and reply with an ACK reflecting
             // current state.
