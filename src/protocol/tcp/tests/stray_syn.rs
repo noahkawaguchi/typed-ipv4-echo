@@ -81,7 +81,7 @@ fn stray_syn_in_fin_wait_1_gets_challenge_ack() -> Result {
     connections.close_established(); // -> FIN-WAIT-1, snd_nxt=SERVER_ISN+2
 
     let initial_state = connections.try_get()?.clone();
-    assert_eq!(initial_state.tcp_state, TcpState::FinWait1);
+    assert_matches!(initial_state.tcp_state, TcpState::FinWait1(_));
 
     // seq=CLIENT_ISN+1 == rcv_nxt, inside the receive window, reaches "Fourth, check the SYN bit"
     let reply =

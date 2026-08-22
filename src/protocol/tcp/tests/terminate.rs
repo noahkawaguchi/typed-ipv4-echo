@@ -6,16 +6,15 @@ fn creates_valid_fin_ack() -> Result {
     let mut connections = TcpConnections::default().after_handshake();
     let mut cloned_state = connections.try_get()?.clone();
 
-    let reply = TcpHandler {
+    let client_fin_ack = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
         ..CLIENT_PACKET
-    }
-    .create_reply(&mut connections)?;
+    };
 
     assert_eq!(
-        reply,
+        client_fin_ack.create_reply(&mut connections)?,
         Some(TcpHandler {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_FIN_BYTE,
@@ -25,7 +24,11 @@ fn creates_valid_fin_ack() -> Result {
     );
 
     // Connection is now in LAST-ACK state (waiting for client's final ACK), not yet removed
-    cloned_state.tcp_state = TcpState::LastAck;
+    cloned_state.tcp_state = TcpState::LastAck(SyncedState::test_new(WindowState::test_new(
+        client_fin_ack.window,
+        client_fin_ack.seq_num,
+        client_fin_ack.ack_num,
+    )));
     cloned_state.snd_nxt += LOCAL_SYN_BYTE;
     cloned_state.rcv_nxt += REMOTE_FIN_BYTE;
 
@@ -82,15 +85,14 @@ fn fin_ack_acks_prior_data_and_advances_snd_una() -> Result {
 
     client_fin_ack.create_reply(&mut connections)?;
 
-    cloned_state.tcp_state = TcpState::LastAck;
+    cloned_state.tcp_state = TcpState::LastAck(SyncedState::test_new(WindowState::test_new(
+        client_fin_ack.window,
+        client_fin_ack.seq_num,
+        client_fin_ack.ack_num,
+    )));
     cloned_state.snd_nxt += LOCAL_FIN_BYTE;
     cloned_state.rcv_nxt += REMOTE_FIN_BYTE;
     cloned_state.snd_una += LOCAL_HELLO_LEN;
-    cloned_state.window_state = Some(WindowState {
-        snd_wnd: client_fin_ack.window,
-        snd_wl1: client_fin_ack.seq_num,
-        snd_wl2: client_fin_ack.ack_num,
-    });
 
     let final_state = connections.try_get()?;
 
@@ -137,11 +139,11 @@ fn out_of_order_fin_ack_gets_duplicate_ack_without_closing() -> Result {
          FIN-ACK in response"
     );
 
-    cloned_state.window_state = Some(WindowState {
-        snd_wnd: client_fin_ack.window,
-        snd_wl1: client_fin_ack.seq_num,
-        snd_wl2: client_fin_ack.ack_num,
-    });
+    cloned_state.tcp_state = TcpState::Established(SyncedState::test_new(WindowState::test_new(
+        client_fin_ack.window,
+        client_fin_ack.seq_num,
+        client_fin_ack.ack_num,
+    )));
 
     assert_eq!(
         connections.try_get()?,
@@ -163,16 +165,21 @@ fn partial_ack_in_last_ack_does_not_close_connection() -> Result {
     let mut cloned_state = connections.try_get()?.clone();
 
     // Client's FIN-ACK arrives with trailing data, echoed alongside our own FIN -> LAST-ACK
-    TcpHandler {
+    let client_fin_ack = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET
-    }
-    .create_reply(&mut connections)?;
+    };
 
-    cloned_state.tcp_state = TcpState::LastAck;
+    client_fin_ack.create_reply(&mut connections)?;
+
+    cloned_state.tcp_state = TcpState::LastAck(SyncedState::test_new(WindowState::test_new(
+        client_fin_ack.window,
+        client_fin_ack.seq_num,
+        client_fin_ack.ack_num,
+    )));
     cloned_state.snd_nxt += LOCAL_HELLO_LEN + LOCAL_FIN_BYTE;
     cloned_state.rcv_nxt += REMOTE_HELLO_LEN + REMOTE_FIN_BYTE;
 
@@ -193,11 +200,11 @@ fn partial_ack_in_last_ack_does_not_close_connection() -> Result {
     );
 
     cloned_state.snd_una += LOCAL_HELLO_LEN;
-    cloned_state.window_state = Some(WindowState {
-        snd_wnd: partial_ack.window,
-        snd_wl1: partial_ack.seq_num,
-        snd_wl2: partial_ack.ack_num,
-    });
+    cloned_state.tcp_state = TcpState::LastAck(SyncedState::test_new(WindowState::test_new(
+        partial_ack.window,
+        partial_ack.seq_num,
+        partial_ack.ack_num,
+    )));
 
     assert_eq!(
         connections.try_get()?,
@@ -216,15 +223,20 @@ fn final_ack_after_fin_ack_removes_connection_and_returns_none() -> Result {
     let mut connections = TcpConnections::default().after_handshake();
     let mut cloned_state = connections.try_get()?.clone();
 
-    TcpHandler {
+    let client_fin_ack = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
         ..CLIENT_PACKET
-    }
-    .create_reply(&mut connections)?;
+    };
 
-    cloned_state.tcp_state = TcpState::LastAck;
+    client_fin_ack.create_reply(&mut connections)?;
+
+    cloned_state.tcp_state = TcpState::LastAck(SyncedState::test_new(WindowState::test_new(
+        client_fin_ack.window,
+        client_fin_ack.seq_num,
+        client_fin_ack.ack_num,
+    )));
     cloned_state.snd_nxt += LOCAL_FIN_BYTE;
     cloned_state.rcv_nxt += REMOTE_FIN_BYTE;
 
@@ -269,7 +281,7 @@ fn close_established_sends_fin_ack_and_transitions_to_fin_wait_1() -> Result {
     // IP addresses are swapped: server -> client
     assert_eq!(reply.get_ip_pair(), REMOTE_TO_LOCAL_IP_PAIR.swapped());
 
-    cloned_state.tcp_state = TcpState::FinWait1;
+    cloned_state.tcp_state = TcpState::FinWait1(SyncedState::test_new(WINDOW_AFTER_HANDSHAKE));
     cloned_state.snd_nxt += LOCAL_FIN_BYTE;
     assert_eq!(connections.try_get()?, &cloned_state, "FIN consumes one sequence number");
 
@@ -291,13 +303,12 @@ fn fin_wait_1_to_fin_wait_2_on_ack_of_our_fin() -> Result {
 
     assert_eq!(ack_of_fin.create_reply(&mut connections)?, None);
 
-    cloned_state.tcp_state = TcpState::FinWait2;
+    cloned_state.tcp_state = TcpState::FinWait2(SyncedState::test_new(WindowState::test_new(
+        ack_of_fin.window,
+        ack_of_fin.seq_num,
+        ack_of_fin.ack_num,
+    )));
     cloned_state.snd_una += LOCAL_FIN_BYTE;
-    cloned_state.window_state = Some(WindowState {
-        snd_wnd: ack_of_fin.window,
-        snd_wl1: ack_of_fin.seq_num,
-        snd_wl2: ack_of_fin.ack_num,
-    });
 
     assert_eq!(connections.try_get()?, &cloned_state);
 
@@ -319,13 +330,12 @@ fn fin_wait_2_closes_on_fin_ack_from_peer() -> Result {
 
     assert_eq!(ack_of_fin.create_reply(&mut connections)?, None);
 
-    cloned_state.tcp_state = TcpState::FinWait2;
+    cloned_state.tcp_state = TcpState::FinWait2(SyncedState::test_new(WindowState::test_new(
+        ack_of_fin.window,
+        ack_of_fin.seq_num,
+        ack_of_fin.ack_num,
+    )));
     cloned_state.snd_una += LOCAL_FIN_BYTE;
-    cloned_state.window_state = Some(WindowState {
-        snd_wnd: ack_of_fin.window,
-        snd_wl1: ack_of_fin.seq_num,
-        snd_wl2: ack_of_fin.ack_num,
-    });
 
     assert_eq!(connections.try_get()?, &cloned_state);
 
@@ -432,13 +442,12 @@ fn data_after_our_fin_in_fin_wait_2_is_acked_without_echo() -> Result {
 
     assert_eq!(ack_of_fin.create_reply(&mut connections)?, None);
 
-    cloned_state.tcp_state = TcpState::FinWait2;
+    cloned_state.tcp_state = TcpState::FinWait2(SyncedState::test_new(WindowState::test_new(
+        ack_of_fin.window,
+        ack_of_fin.seq_num,
+        ack_of_fin.ack_num,
+    )));
     cloned_state.snd_una += LOCAL_FIN_BYTE;
-    cloned_state.window_state = Some(WindowState {
-        snd_wnd: ack_of_fin.window,
-        snd_wl1: ack_of_fin.seq_num,
-        snd_wl2: ack_of_fin.ack_num,
-    });
 
     assert_eq!(connections.try_get()?, &cloned_state);
 
@@ -474,16 +483,15 @@ fn simultaneous_close_transitions_through_closing_to_closed() -> Result {
 
     // Client's FIN arrives in order, but doesn't yet acknowledge our FIN (ack=SERVER_ISN+1,
     // simultaneous close) -> CLOSING
-    let reply = TcpHandler {
+    let client_fin_ack = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
         ..CLIENT_PACKET
-    }
-    .create_reply(&mut connections)?;
+    };
 
     assert_eq!(
-        reply,
+        client_fin_ack.create_reply(&mut connections)?,
         Some(TcpHandler {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_FIN_BYTE,
@@ -491,7 +499,11 @@ fn simultaneous_close_transitions_through_closing_to_closed() -> Result {
         })
     );
 
-    cloned_state.tcp_state = TcpState::Closing;
+    cloned_state.tcp_state = TcpState::Closing(SyncedState::test_new(WindowState::test_new(
+        client_fin_ack.window,
+        client_fin_ack.seq_num,
+        client_fin_ack.ack_num,
+    )));
     cloned_state.rcv_nxt += REMOTE_FIN_BYTE;
     assert_eq!(connections.try_get()?, &cloned_state);
 
@@ -522,17 +534,16 @@ fn fin_ack_with_data_in_fin_wait_1_advances_rcv_nxt_past_data_and_fin() -> Resul
     let mut cloned_state = connections.try_get()?.clone();
 
     // Client's FIN-ACK arrives in order with data, not yet acknowledging our FIN (ack=SERVER_ISN+1)
-    let reply = TcpHandler {
+    let fin_ack_with_data = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET
-    }
-    .create_reply(&mut connections)?;
+    };
 
     assert_eq!(
-        reply,
+        fin_ack_with_data.create_reply(&mut connections)?,
         Some(TcpHandler {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_FIN_BYTE,
@@ -541,7 +552,11 @@ fn fin_ack_with_data_in_fin_wait_1_advances_rcv_nxt_past_data_and_fin() -> Resul
         "ACK should reflect RCV.NXT advanced past both the data and the FIN, not just the FIN"
     );
 
-    cloned_state.tcp_state = TcpState::Closing;
+    cloned_state.tcp_state = TcpState::Closing(SyncedState::test_new(WindowState::test_new(
+        fin_ack_with_data.window,
+        fin_ack_with_data.seq_num,
+        fin_ack_with_data.ack_num,
+    )));
     cloned_state.rcv_nxt += REMOTE_HELLO_LEN + REMOTE_FIN_BYTE;
     assert_eq!(connections.try_get()?, &cloned_state);
 
@@ -633,17 +648,16 @@ fn fin_ack_with_data_in_established_echoes_data_and_starts_closing() -> Result {
     let mut connections = TcpConnections::default().after_handshake(); // rcv_nxt=CLIENT_ISN+1
     let mut cloned_state = connections.try_get()?.clone();
 
-    let reply = TcpHandler {
+    let fin_ack_with_data = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET
-    }
-    .create_reply(&mut connections)?;
+    };
 
     assert_eq!(
-        reply,
+        fin_ack_with_data.create_reply(&mut connections)?,
         Some(TcpHandler {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_FIN_BYTE,
@@ -655,7 +669,11 @@ fn fin_ack_with_data_in_established_echoes_data_and_starts_closing() -> Result {
          data and the FIN"
     );
 
-    cloned_state.tcp_state = TcpState::LastAck;
+    cloned_state.tcp_state = TcpState::LastAck(SyncedState::test_new(WindowState::test_new(
+        fin_ack_with_data.window,
+        fin_ack_with_data.seq_num,
+        fin_ack_with_data.ack_num,
+    )));
     cloned_state.snd_nxt += LOCAL_HELLO_LEN + LOCAL_FIN_BYTE;
     cloned_state.rcv_nxt += REMOTE_HELLO_LEN + REMOTE_FIN_BYTE;
 
@@ -677,27 +695,26 @@ fn fin_ack_with_data_in_established_buffers_the_untransmittable_remainder() -> R
 
     let mut connections = TcpConnections::default();
     let mut expected_state = ConnState {
-        window_state: Some(WindowState {
-            snd_wnd: SMALL_WINDOW,
-            snd_wl1: CLIENT_ISN + REMOTE_SYN_BYTE,
-            snd_wl2: SERVER_ISN + LOCAL_SYN_BYTE,
-        }),
+        tcp_state: TcpState::Established(SyncedState::test_new(WindowState::test_new(
+            SMALL_WINDOW,
+            CLIENT_ISN + REMOTE_SYN_BYTE,
+            SERVER_ISN + LOCAL_SYN_BYTE,
+        ))),
         ..AFTER_HANDSHAKE
     };
     connections.insert(expected_state.clone());
 
-    let reply = TcpHandler {
+    let fin_ack_with_data = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         window: SMALL_WINDOW,
         flags: TcpFlags::FinAck,
         payload: payload_from("Hello")?,
         ..CLIENT_PACKET
-    }
-    .create_reply(&mut connections)?;
+    };
 
     assert_eq!(
-        reply,
+        fin_ack_with_data.create_reply(&mut connections)?,
         Some(TcpHandler {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_FIN_BYTE,
@@ -708,7 +725,11 @@ fn fin_ack_with_data_in_established_buffers_the_untransmittable_remainder() -> R
         "Only the first 3 bytes fit in the advertised window of 3, piggybacked on the FIN-ACK"
     );
 
-    expected_state.tcp_state = TcpState::LastAck;
+    expected_state.tcp_state = TcpState::LastAck(SyncedState::test_new(WindowState::test_new(
+        fin_ack_with_data.window,
+        fin_ack_with_data.seq_num,
+        fin_ack_with_data.ack_num,
+    )));
     expected_state.snd_nxt += SeqOffset::<u32, Local>::from(SMALL_WINDOW) + LOCAL_FIN_BYTE;
     expected_state.rcv_nxt += REMOTE_HELLO_LEN + REMOTE_FIN_BYTE;
     expected_state.send_buffer.extend(b"lo");

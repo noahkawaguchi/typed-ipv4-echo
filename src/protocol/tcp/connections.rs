@@ -59,7 +59,7 @@ impl TcpConnections {
         key: ConnKey,
         state: ConnState,
     ) -> Result<(), &'static str> {
-        (state.tcp_state == TcpState::SynReceived)
+        matches!(state.tcp_state, TcpState::SynReceived(_))
             .then(|| {
                 self.table.insert(key, state);
             })
@@ -74,7 +74,10 @@ impl TcpConnections {
         self.table.values().any(|conn| {
             matches!(
                 conn.tcp_state,
-                TcpState::FinWait1 | TcpState::FinWait2 | TcpState::Closing | TcpState::LastAck,
+                TcpState::FinWait1(_)
+                    | TcpState::FinWait2(_)
+                    | TcpState::Closing(_)
+                    | TcpState::LastAck(_),
             )
         })
     }
@@ -140,9 +143,9 @@ impl TcpConnections {
         self.table
             .iter_mut()
             .filter_map(|(key, conn)| {
-                if conn.tcp_state != TcpState::Established {
+                let TcpState::Established(established) = conn.tcp_state else {
                     return None;
-                }
+                };
 
                 let send_info = SendInfo {
                     seq_num: conn.snd_nxt,
@@ -151,7 +154,7 @@ impl TcpConnections {
                     payload: None,
                 };
 
-                conn.tcp_state = TcpState::FinWait1;
+                conn.tcp_state = TcpState::FinWait1(established.close());
 
                 // Consume one sequence number in SND.NXT for the FIN about to be sent
                 conn.snd_nxt += LOCAL_FIN_BYTE;
@@ -199,6 +202,7 @@ impl TcpConnections {
         use {
             crate::protocol::tcp::{
                 LOCAL_SYN_BYTE, REMOTE_SYN_BYTE,
+                state::SynReceived,
                 tests::{CLIENT_ISN, KEY, SERVER_ISN},
             },
             std::collections::VecDeque,
@@ -207,11 +211,10 @@ impl TcpConnections {
         self.table.insert(
             KEY,
             ConnState {
-                tcp_state: TcpState::SynReceived,
+                tcp_state: TcpState::SynReceived(SynReceived),
                 snd_nxt: SERVER_ISN + LOCAL_SYN_BYTE,
                 rcv_nxt: CLIENT_ISN + REMOTE_SYN_BYTE,
                 snd_una: SERVER_ISN,
-                window_state: None,
                 pending: vec![PendingSegment::new(
                     SendInfo {
                         seq_num: SERVER_ISN,

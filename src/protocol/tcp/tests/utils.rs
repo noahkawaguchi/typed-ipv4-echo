@@ -32,19 +32,21 @@ pub const KEY: ConnKey = ConnKey {
     server_port: 80,
 };
 
+/// The window state after the initial three-way handshake.
+pub const WINDOW_AFTER_HANDSHAKE: WindowState = WindowState::test_new(
+    SeqOffset::new(u16::MAX),
+    CLIENT_ISN.const_add(REMOTE_SYN_BYTE),
+    SERVER_ISN.const_add(LOCAL_SYN_BYTE),
+);
+
 /// An ESTABLISHED connection as if the initial three-way handshake had just completed. Uses the
 /// test constants `CLIENT_ISN` and `SERVER_ISN`. Has the maximum SND.WND and empty
 /// `pending`/`send_buffer`.
 pub const AFTER_HANDSHAKE: ConnState = ConnState {
-    tcp_state: TcpState::Established,
+    tcp_state: TcpState::Established(SyncedState::test_new(WINDOW_AFTER_HANDSHAKE)),
     snd_nxt: SERVER_ISN.const_add(LOCAL_SYN_BYTE),
     rcv_nxt: CLIENT_ISN.const_add(REMOTE_SYN_BYTE),
     snd_una: SERVER_ISN.const_add(LOCAL_SYN_BYTE),
-    window_state: Some(WindowState {
-        snd_wnd: SeqOffset::new(u16::MAX),
-        snd_wl1: CLIENT_ISN.const_add(REMOTE_SYN_BYTE),
-        snd_wl2: SERVER_ISN.const_add(LOCAL_SYN_BYTE),
-    }),
     pending: Vec::new(),
     send_buffer: VecDeque::new(),
 };

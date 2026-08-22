@@ -10,8 +10,8 @@ use {
 
 /// An offset between two points in TCP sequence number space that are both from the stream
 /// originating from sender `S`.
-#[derive(Default)]
-#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
+#[derive(Default, PartialEq, Eq)]
+#[cfg_attr(test, derive(Debug))]
 pub(super) struct SeqOffset<T, S> {
     wrapping: Wrapping<T>,
     phantom: PhantomData<S>,
