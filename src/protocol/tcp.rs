@@ -172,17 +172,17 @@ impl TcpHandler<Remote> {
                 Some(SendInfo::pure_ack(snd_nxt, rcv_nxt))
             }
 
-            // ACK during SYN-RECEIVED with an unacceptable sequence number (regardless of whether
-            // it carries data) -> per RFC 9293, Section 3.10.7.4, "First, check sequence number,"
-            // reply with an ACK reflecting current state and drop the segment.
+            // ACK or FIN-ACK during SYN-RECEIVED with an unacceptable sequence number (regardless
+            // of whether it carries data) -> per RFC 9293, Section 3.10.7.4, "First, check sequence
+            // number," reply with an ACK reflecting current state and drop the segment.
             //
             // Due to the current simplification of not using a reassembly buffer, any SEG.SEQ other
-            // than exactly RCV.NXT is treated as unacceptable rather than held for later.
+            // than exactly RCV.NXT gets a current state ACK and is not held for later.
             (
                 Some(&mut ConnState {
                     tcp_state: TcpState::SynReceived(_), snd_nxt, rcv_nxt, ..
                 }),
-                TcpFlags::Ack,
+                TcpFlags::Ack | TcpFlags::FinAck,
                 _,
             ) if self.seq_num != rcv_nxt => Some(SendInfo::pure_ack(snd_nxt, rcv_nxt)),
 
