@@ -23,7 +23,7 @@ use {
                 payload::{LenOrDefault as _, TcpPayload},
                 pending_segment::PendingSegment,
                 seq_space::{SeqOffset, SeqPoint},
-                state::{ConnState, TcpState},
+                state::{ConnState, Established, SynReceived, SyncedState, TcpState},
             },
         },
         sys,
@@ -172,26 +172,22 @@ impl TcpHandler<Remote> {
                 Some(SendInfo::pure_ack(snd_nxt, rcv_nxt))
             }
 
-            // ACK during SYN-RECEIVED with an unacceptable sequence number (regardless of whether
-            // it carries data) -> per RFC 9293, Section 3.10.7.4, "First, check sequence number,"
-            // reply with an ACK reflecting current state and drop the segment.
+            // ACK or FIN-ACK during SYN-RECEIVED with an unacceptable sequence number (regardless
+            // of whether it carries data) -> per RFC 9293, Section 3.10.7.4, "First, check sequence
+            // number," reply with an ACK reflecting current state and drop the segment.
             //
             // Due to the current simplification of not using a reassembly buffer, any SEG.SEQ other
-            // than exactly RCV.NXT is treated as unacceptable rather than held for later.
+            // than exactly RCV.NXT gets a current state ACK and is not held for later.
             (
                 Some(&mut ConnState {
                     tcp_state: TcpState::SynReceived(_), snd_nxt, rcv_nxt, ..
                 }),
-                TcpFlags::Ack,
+                TcpFlags::Ack | TcpFlags::FinAck,
                 _,
             ) if self.seq_num != rcv_nxt => Some(SendInfo::pure_ack(snd_nxt, rcv_nxt)),
 
-            // Handshake ACK (step 3) -> transition to ESTABLISHED. If it also carries data, echo
-            // it, otherwise no reply is needed.
-            //
-            // As per RFC 9293, Section 3.10.7.4, "Fifth, check the ACK field," "SYN-RECEIVED
-            // STATE," if SND.UNA < SEG.ACK <= SND.NXT, enter ESTABLISHED and set SND.WND, SND.WL1,
-            // and SND.WL2 without the freshness check used for ESTABLISHED state ACKs.
+            // Acceptable handshake-completing ACK (step 3) -> transition to ESTABLISHED. If it also
+            // carries data, echo it, otherwise no reply is needed.
             (
                 Some(conn @ &mut ConnState { tcp_state: TcpState::SynReceived(syn_received), .. }),
                 TcpFlags::Ack,
@@ -200,12 +196,7 @@ impl TcpHandler<Remote> {
                 && conn.snd_una.precedes(self.ack_num)
                 && self.ack_num.precedes_or_eq(conn.snd_nxt) =>
             {
-                let established = syn_received.establish(self);
-
-                conn.tcp_state = TcpState::Established(established);
-                conn.rcv_nxt = self.seq_num;
-                conn.snd_una = self.ack_num;
-                conn.pending.clear(); // Only the SYN-ACK just acknowledged could have been pending
+                let established = self.complete_handshake(conn, syn_received);
 
                 maybe_payload
                     .as_ref()
@@ -221,6 +212,29 @@ impl TcpHandler<Remote> {
                         })
                     })
                     .transpose()?
+            }
+
+            // Handshake-completing FIN-ACK (step 3 combined with the peer's own close) -> as per
+            // RFC 9293, Section 3.10.7.4, complete the handshake, transitioning to ESTABLISHED
+            // ("Fifth, check the ACK field"), then immediately start closing ("Eighth, check the
+            // FIN bit"), skipping CLOSE-WAIT under the current simplification, the same as a
+            // FIN-ACK arriving on an ESTABLISHED connection. Also echo as much trailing data as
+            // possible, if any.
+            (
+                Some(conn @ &mut ConnState { tcp_state: TcpState::SynReceived(syn_received), .. }),
+                TcpFlags::FinAck,
+                maybe_payload,
+            ) if self.seq_num == conn.rcv_nxt
+                && conn.snd_una.precedes(self.ack_num)
+                && self.ack_num.precedes_or_eq(conn.snd_nxt) =>
+            {
+                let established = self.complete_handshake(conn, syn_received);
+
+                Some(self.begin_passive_close_without_close_wait(
+                    conn,
+                    maybe_payload.as_ref(),
+                    established,
+                )?)
             }
 
             // ACK acknowledging data the server has not yet sent (ack_num is past snd_nxt) ->
@@ -295,41 +309,15 @@ impl TcpHandler<Remote> {
             // FIN-WAIT-1/2, our own FIN hasn't gone out yet, so we can piggyback the data echo on
             // this same reply.
             (
-                Some(
-                    conn @ &mut ConnState {
-                        tcp_state: TcpState::Established(old_established), ..
-                    },
-                ),
+                Some(conn @ &mut ConnState { tcp_state: TcpState::Established(established), .. }),
                 TcpFlags::FinAck,
                 maybe_payload,
             ) if self.seq_num == conn.rcv_nxt => {
-                if let Some(payload) = maybe_payload {
-                    conn.rcv_nxt += payload.len().into();
-                    conn.send_buffer.extend(payload.as_bytes());
-                }
-
-                conn.rcv_nxt += REMOTE_FIN_BYTE; // Peer's FIN consumes one sequence number
-
-                let new_established = old_established.incoming_ack_update(conn, self);
-                let to_send = new_established.drain_transmittable(conn)?;
-                let send_len = to_send.len_or_default();
-
-                conn.tcp_state = TcpState::LastAck(new_established.skip_close_wait());
-
-                let send_info = SendInfo {
-                    seq_num: conn.snd_nxt,
-                    ack_num: conn.rcv_nxt,
-                    flags: TcpFlags::FinAck,
-                    payload: to_send,
-                };
-
-                conn.snd_nxt += send_len;
-                conn.snd_nxt += LOCAL_FIN_BYTE; // Our FIN consumes one sequence number
-
-                conn.pending
-                    .push(PendingSegment::new(send_info.clone(), Instant::now()));
-
-                Some(send_info)
+                Some(self.begin_passive_close_without_close_wait(
+                    conn,
+                    maybe_payload.as_ref(),
+                    established,
+                )?)
             }
 
             // Partial ACK in LAST-ACK, not yet covering our FIN -> update send-side state like a
@@ -503,6 +491,23 @@ impl TcpHandler<Remote> {
         }))
     }
 
+    /// Completes the initial three-way handshake, updating `conn` and returning a copy of the inner
+    /// struct that was placed inside `conn.tcp_state`.
+    fn complete_handshake(
+        &self,
+        conn: &mut ConnState,
+        syn_received: SynReceived,
+    ) -> SyncedState<Established> {
+        let established = syn_received.establish(self);
+
+        conn.tcp_state = TcpState::Established(established);
+        conn.rcv_nxt = self.seq_num;
+        conn.snd_una = self.ack_num;
+        conn.pending.clear(); // Only the SYN-ACK just acknowledged could have been pending
+
+        established
+    }
+
     /// Creates a `SendInfo` for the payload `to_send`, using and then updating the state of `conn`.
     fn data_payload(conn: &mut ConnState, to_send: TcpPayload) -> SendInfo {
         let send_len = to_send.len().into();
@@ -519,6 +524,44 @@ impl TcpHandler<Remote> {
             .push(PendingSegment::new(send_info.clone(), Instant::now()));
 
         send_info
+    }
+
+    /// Transitions from ESTABLISHED straight to LAST-ACK, skipping over CLOSE-WAIT (TODO: implement
+    /// CLOSE-WAIT), updating `conn` accordingly and returning a FIN-ACK `SendInfo` with as much
+    /// data as the window allows if there is anything to send.
+    fn begin_passive_close_without_close_wait(
+        &self,
+        conn: &mut ConnState,
+        maybe_payload: Option<&TcpPayload>,
+        old_established: SyncedState<Established>,
+    ) -> Result<SendInfo> {
+        if let Some(payload) = maybe_payload {
+            conn.rcv_nxt += payload.len().into();
+            conn.send_buffer.extend(payload.as_bytes());
+        }
+
+        conn.rcv_nxt += REMOTE_FIN_BYTE; // Peer's FIN consumes one sequence number
+
+        let new_established = old_established.incoming_ack_update(conn, self);
+        let to_send = new_established.drain_transmittable(conn)?;
+        let send_len = to_send.len_or_default();
+
+        conn.tcp_state = TcpState::LastAck(new_established.skip_close_wait());
+
+        let send_info = SendInfo {
+            seq_num: conn.snd_nxt,
+            ack_num: conn.rcv_nxt,
+            flags: TcpFlags::FinAck,
+            payload: to_send,
+        };
+
+        conn.snd_nxt += send_len;
+        conn.snd_nxt += LOCAL_FIN_BYTE; // Our FIN consumes one sequence number
+
+        conn.pending
+            .push(PendingSegment::new(send_info.clone(), Instant::now()));
+
+        Ok(send_info)
     }
 }
 

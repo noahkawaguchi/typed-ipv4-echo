@@ -162,6 +162,40 @@ fn handshake_ack_with_wrong_seq_and_no_data_gets_current_state_ack() -> Result {
 }
 
 #[test]
+fn fin_ack_in_syn_rcv_with_wrong_seq_gets_current_state_ack() -> Result {
+    // RFC 9293, Section 3.10.7.4, "First, check sequence number" applies regardless of which
+    // control bits are set. (For example, "Eighth, check the FIN bit" is never reached if the
+    // sequence number is not acceptable.) A FIN-ACK with an unacceptable SEG.SEQ during
+    // SYN-RECEIVED must get a challenge ACK reflecting current state.
+
+    let mut connections = TcpConnections::default().with_syn_rcv();
+    let initial_state = connections.try_get()?.clone();
+
+    // Correct ack_num, but seq_num doesn't match RCV.NXT = CLIENT_ISN + SYN_BYTE
+    let reply = TcpHandler {
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + SeqOffset::new(1),
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
+        flags: TcpFlags::FinAck,
+        ..CLIENT_PACKET
+    }
+    .create_reply(&mut connections)?;
+
+    assert_eq!(
+        reply,
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
+            ..SERVER_REPLY
+        }),
+        "FIN-ACK in SYN-RECEIVED with wrong SEG.SEQ must get current state ACK"
+    );
+
+    assert_eq!(connections.try_get()?, &initial_state, "Connection must remain SYN-RECEIVED");
+
+    Ok(())
+}
+
+#[test]
 fn handshake_ack_with_with_wrong_seq_and_data_gets_current_state_ack() -> Result {
     // A data-carrying segment arriving during SYN-RECEIVED with an unacceptable SEG.SEQ must still
     // just get a plain ACK reflecting current state (RFC 9293, Section 3.10.7.4, "First, check

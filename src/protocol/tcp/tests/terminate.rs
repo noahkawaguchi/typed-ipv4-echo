@@ -1,6 +1,54 @@
 use super::*;
 
 #[test]
+fn fin_ack_in_syn_received_establishes_and_closes_immediately() -> Result {
+    // A FIN-ACK arriving in SYN-RECEIVED can legitimately complete the handshake and initiate
+    // passive close in the same segment. RFC 9293, Section 3.10.7.4 processes "Fifth, check the ACK
+    // field" (in SYN-RECEIVED completing the handshake) before "Eighth, check the FIN bit", so this
+    // must establish the connection and then immediately start closing, skipping CLOSE-WAIT due to
+    // the current simplification the same way a FIN-ACK in ESTABLISHED does.
+
+    let mut connections = TcpConnections::default().with_syn_rcv();
+    let mut cloned_state = connections.try_get()?.clone();
+
+    let client_fin_ack = TcpHandler {
+        seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
+        ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
+        flags: TcpFlags::FinAck,
+        ..CLIENT_PACKET
+    };
+
+    assert_eq!(
+        client_fin_ack.create_reply(&mut connections)?,
+        Some(TcpHandler {
+            seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
+            ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_FIN_BYTE,
+            flags: TcpFlags::FinAck,
+            ..SERVER_REPLY
+        }),
+        "Handshake-completing FIN-ACK must establish the connection then get our own FIN-ACK"
+    );
+
+    cloned_state.tcp_state = TcpState::LastAck(SyncedState::test_new(WindowState::test_new(
+        client_fin_ack.window,
+        client_fin_ack.seq_num,
+        client_fin_ack.ack_num,
+    )));
+    cloned_state.snd_una += LOCAL_SYN_BYTE;
+    cloned_state.snd_nxt += LOCAL_FIN_BYTE;
+    cloned_state.rcv_nxt += REMOTE_FIN_BYTE;
+
+    assert_eq!(
+        connections.try_get()?,
+        &cloned_state,
+        "Connection should be established then immediately moved to LAST-ACK, not left in \
+         SYN-RECEIVED or reset"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn creates_valid_fin_ack() -> Result {
     // Simulate an established connection, FIN-ACK arrives at seq=CLIENT_ISN+1
     let mut connections = TcpConnections::default().after_handshake();
