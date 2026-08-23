@@ -1,6 +1,6 @@
 pub mod handler;
 
-pub use tcp::{TcpConnections, TcpHandler};
+pub use tcp::{RtoConfig, TcpConnections, TcpHandler};
 
 mod display;
 mod icmp_echo;

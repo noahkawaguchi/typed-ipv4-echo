@@ -1,9 +1,12 @@
 use {
     crate::{
         endpoint::Local,
-        protocol::tcp::{SendInfo, SeqOffset, SeqPoint, TcpFlags, payload::LenOrDefault as _},
+        protocol::tcp::{
+            SendInfo, SeqOffset, SeqPoint, TcpFlags, connections::RtoConfig,
+            payload::LenOrDefault as _,
+        },
     },
-    std::time::{Duration, Instant},
+    std::time::Instant,
 };
 
 /// A sent segment that consumed sequence numbers and hasn't yet been acknowledged.
@@ -43,15 +46,16 @@ impl PendingSegment {
 
     /// Returns the time at which the segment is due for retransmission using exponential backoff,
     /// or `Instant::now()` if `Instant` overflowed.
-    pub(super) fn time_due(&self, initial_rto: Duration) -> Instant {
+    pub(super) fn time_due(&self, rto_config: &RtoConfig) -> Instant {
         // Make the RTO saturate at `Duration::MAX`, or "about 584,942,417,355 years" (std library
-        // docs), leaving plenty of room for any real RTO.
-        let rto = initial_rto.saturating_mul(2u32.saturating_pow(self.retries.into()));
+        // docs), then clamp to the real acceptable range.
+        let rto = rto_config
+            .initial
+            .saturating_mul(2u32.saturating_pow(self.retries.into()))
+            .clamp(rto_config.min, rto_config.max);
 
-        // In practice, adding `Duration::MAX` should overflow any `Instant`, but this is not
-        // guaranteed since `Instant` is opaque. Therefore, check for overflow separately.
-        //
-        // Return due now on overflow so that a pending segment cannot get stuck never being due.
+        // Return due now on overflow so a pending segment cannot get stuck never being due (should
+        // be extremely unlikely in normal use)
         self.last_sent_at
             .checked_add(rto)
             .unwrap_or_else(Instant::now)
@@ -85,10 +89,46 @@ mod tests {
     use {
         super::*,
         crate::{Result, protocol::tcp::tests::payload_from},
+        std::time::Duration,
     };
 
     #[test]
-    fn reports_due_now_on_overflow() -> Result {
+    fn clamps_rto() -> Result<(), &'static str> {
+        let now = Instant::now();
+
+        let pending = PendingSegment::new(
+            SendInfo {
+                seq_num: SeqPoint::new(42),
+                ack_num: SeqPoint::new(24),
+                flags: TcpFlags::Ack,
+                payload: payload_from("Hello")?,
+            },
+            now,
+        );
+
+        assert_eq!(
+            pending.time_due(&RtoConfig {
+                initial: Duration::MAX,
+                min: Duration::ZERO,
+                max: Duration::from_secs(10)
+            },),
+            now + Duration::from_secs(10)
+        );
+
+        assert_eq!(
+            pending.time_due(&RtoConfig {
+                initial: Duration::ZERO,
+                min: Duration::from_secs(2),
+                max: Duration::MAX
+            }),
+            now + Duration::from_secs(2)
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn reports_due_now_on_overflow() -> Result<(), &'static str> {
         assert!(
             PendingSegment::new(
                 SendInfo {
@@ -99,8 +139,11 @@ mod tests {
                 },
                 Instant::now()
             )
-            .time_due(Duration::MAX)
-                <= Instant::now()
+            .time_due(&RtoConfig {
+                initial: Duration::MAX,
+                min: Duration::ZERO,
+                max: Duration::MAX
+            }) <= Instant::now()
         );
 
         Ok(())

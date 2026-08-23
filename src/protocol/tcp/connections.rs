@@ -24,14 +24,35 @@ pub(super) struct ConnKey {
     pub(super) server_port: u16,
 }
 
+/// The initial, minimum, and maximum retransmission timeouts.
+pub struct RtoConfig {
+    /// The initial RTO, i.e. how long to wait before retransmitting an unacked segment the first
+    /// time before exponential backoff.
+    pub initial: Duration,
+
+    /// The minimum allowed RTO, primarily used if the initial RTO is too small.
+    pub min: Duration,
+
+    /// The maximum allowed RTO, primarily used after many rounds of exponential backoff.
+    pub max: Duration,
+}
+
+#[cfg(test)]
+impl Default for RtoConfig {
+    /// Creates a default `Self` for testing purposes where the initial and min are `Duration::ZERO`
+    /// and the max is `Duration::MAX`.
+    fn default() -> Self {
+        Self { initial: Duration::ZERO, min: Duration::ZERO, max: Duration::MAX }
+    }
+}
+
 /// Tracks per-connection state keyed by the 4-tuple.
 #[cfg_attr(test, derive(Default))]
 pub struct TcpConnections {
     table: HashMap<ConnKey, ConnState>,
 
-    /// The initial retransmission timeout, i.e. how long to wait before retransmitting an unacked
-    /// segment the first time before exponential backoff.
-    initial_rto: Duration,
+    /// The initial, minimum, and maximum retransmission timeouts.
+    rto_config: RtoConfig,
 
     /// The number of times to retransmit an unacked segment before giving up and dropping the
     /// connection.
@@ -39,8 +60,8 @@ pub struct TcpConnections {
 }
 
 impl TcpConnections {
-    pub fn new(initial_rto: Duration, max_retries: u8) -> Self {
-        Self { table: HashMap::new(), initial_rto, max_retries }
+    pub fn new(rto_config: RtoConfig, max_retries: u8) -> Self {
+        Self { table: HashMap::new(), rto_config, max_retries }
     }
 
     pub fn len(&self) -> usize { self.table.len() }
@@ -88,7 +109,7 @@ impl TcpConnections {
         self.table
             .values()
             .flat_map(|conn| &conn.pending)
-            .map(|seg| seg.time_due(self.initial_rto))
+            .map(|seg| seg.time_due(&self.rto_config))
             .min()
     }
 
@@ -104,7 +125,7 @@ impl TcpConnections {
             .filter_map(|(&key, conn)| {
                 conn.pending
                     .iter()
-                    .any(|seg| seg.time_due(self.initial_rto) <= now)
+                    .any(|seg| seg.time_due(&self.rto_config) <= now)
                     .then_some(key)
             })
             .collect::<Vec<_>>();
@@ -115,14 +136,14 @@ impl TcpConnections {
             let Some(conn) = self.table.get_mut(&key) else { continue };
 
             if conn.pending.iter().any(|seg| {
-                seg.time_due(self.initial_rto) <= now && seg.exhausted_retries(self.max_retries)
+                seg.time_due(&self.rto_config) <= now && seg.exhausted_retries(self.max_retries)
             }) {
                 self.table.remove(&key);
                 continue;
             }
 
             retransmissions.extend(conn.pending.iter_mut().filter_map(|seg| {
-                (seg.time_due(self.initial_rto) <= now).then(|| {
+                (seg.time_due(&self.rto_config) <= now).then(|| {
                     TcpHandler::from_pairs_and_info(
                         Ipv4AddrPair::new(key.server_ip, key.client_ip),
                         PortPair::new(key.server_port, key.client_port),
