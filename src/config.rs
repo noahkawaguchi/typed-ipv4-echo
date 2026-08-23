@@ -39,7 +39,7 @@ impl Config {
                 "TYPENET_INIT_RTO_MILLIS",
             )?),
 
-            max_retries: Self::get_env_or_else(|| 5, "TYPENET_MAX_RETRANSMITS")?,
+            max_retries: Self::get_env_or_else(|| 15, "TYPENET_MAX_RETRANSMITS")?,
             grace_period: Duration::from_secs(Self::get_env_or_else(|| 5, "TYPENET_GRACE_SECS")?),
             log_level: Self::get_env_or_else(LogLevel::default, "TYPENET_LOG_LEVEL")?,
         })
