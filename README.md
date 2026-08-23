@@ -205,9 +205,9 @@ See `just --usage throughput` for further options.
 To emulate real-world networks with delay/loss/corruption/duplication/reordering, run the `loss` recipe and then try connecting to the server again.
 
 ```sh
-just loss        # Add the emulation to the device (uses sudo)
-just loss-show   # Show current network emulation and packet counters
-just loss-clear  # Remove emulated network conditions (uses sudo)
+just loss -d 100ms -l 5%  # Add 100 ms delay and 5% packet loss to the device (uses sudo)
+just loss-show            # Show current network emulation and packet counters
+just loss-clear           # Remove emulated network conditions (uses sudo)
 ```
 
 See `just --usage loss` for further options.
@@ -535,7 +535,7 @@ This example includes:
 
 <!--
 Commands used here for future reference:
-  just loss --loss 50% --corrupt 25% --duplicate 50%
+  just loss --delay 100ms --loss 50% --corrupt 25% --duplicate 50% --reorder 1%
   just throughput --input-file Cargo.toml
 -->
 

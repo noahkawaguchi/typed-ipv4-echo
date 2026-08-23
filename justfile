@@ -135,7 +135,7 @@ throughput input-file=justfile() echo-file=f'/tmp/{{ project-name }}-out' timeou
     arg('duplicate', short='u', long),
     arg('reorder', short, long)
 ]
-loss delay='100ms' loss='1%' corrupt='1%' duplicate='1%' reorder='1%': tun
+loss delay='1ms' loss='0%' corrupt='0%' duplicate='0%' reorder='0%': tun
     sudo tc qdisc replace dev {{ tun-name }} root netem \
         delay {{ delay }} 20ms 25% distribution paretonormal \
         loss random {{ loss }} 25% \
