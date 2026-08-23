@@ -118,8 +118,8 @@ You should then be able to capture traffic without `sudo` by running `just sniff
 
 ```sh
 just sniff          # Capture, log, and save to PCAP
-just sniff-inspect  # Read back the saved PCAP file
-just sniff-clean    # Remove the saved PCAP file
+just sniff-inspect  # Read back a saved PCAP file (defaults to most recent)
+just sniff-clean    # Remove `pcap` directory
 ```
 
 For each of these three recipes, see `just --usage <RECIPE>` for further options.

@@ -16,6 +16,8 @@ tun-cidr := env('TYPENET_TUN_CIDR', '10.0.0.1/24')
 
 logs-dir := justfile_dir() / 'logs'
 log-file := logs-dir / project-name + '_' + datetime('%F_%T') + '.log'
+pcap-dir := justfile_dir() / 'pcap'
+pcap-file := pcap-dir / project-name + '_' + datetime('%F_%T') + '.pcap'
 
 tshark-cmd := 'tshark -n --print' \
     + ' -o ip.check_checksum:true -o tcp.check_checksum:true -o udp.check_checksum:true'
@@ -86,28 +88,35 @@ icmp:
 ####################################################################################################
 
 # Capture and print TUN device traffic and save to PCAP
-[
-    arg('pcap', short, long, help='Name of PCAP file to write'),
-    arg('x', short, value='-x', help='Show hex and ASCII')
-]
+[arg('x', short, value='-x', help='Show hex and ASCII')]
 [continue]
-sniff pcap=f'{{ project-name }}.pcap' x='': tun
-    {{ tshark-cmd }} -i {{ tun-name }} -w {{ pcap }} {{ x }}
-    @echo 'Saved to {{ pcap }}'
+sniff x='': tun
+    mkdir -p '{{ pcap-dir }}'
+    {{ tshark-cmd }} -i {{ tun-name }} -w '{{ pcap-file }}' {{ x }}
+    @echo 'Saved to {{ pcap-file }}'
 
-# Read a PCAP file with TShark
+# Read a PCAP file with TShark (defaults to the most recent)
 [
     arg('pcap', short, long, help='Name of PCAP file to read'),
     arg('x', short, value='-x', help='Show hex and ASCII'),
     arg('V', short, value='-V', help='Show full packet dissection')
 ]
-sniff-inspect pcap=f'{{ project-name }}.pcap' x='' V='':
-    {{ tshark-cmd }} -r {{ pcap }} {{ x }} {{ V }} | "${PAGER:-less}"
+sniff-inspect pcap=`just most-recent-pcap` x='' V='':
+    @if [ -z "{{ pcap }}" ]; then \
+        echo 'No PCAP file to inspect' >&2; \
+        exit 1; \
+    fi
 
-# Remove the saved PCAP file
-[arg('pcap', short, long, help='Name of PCAP file to remove')]
-sniff-clean pcap=f'{{ project-name }}.pcap':
-    rm {{ pcap }}
+    {{ tshark-cmd }} -r '{{ pcap }}' {{ x }} {{ V }} | "${PAGER:-less}"
+
+# Internal helper for the `sniff-inspect` recipe's default PCAP file path
+[private]
+most-recent-pcap:
+    ls -t {{ pcap-dir / "*.pcap" }} | head -n 1
+
+# Remove the `pcap` directory
+sniff-clean:
+    rm -rf '{{ pcap-dir }}'
 
 # Send a file through the echo server using TCP and diff the reply against the original
 [
