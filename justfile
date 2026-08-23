@@ -31,9 +31,9 @@ serve *ARGS: tun
 
 # Run the server and save a log file to the `logs` directory
 [continue]
-serve-save:
+serve-save *ARGS:
     mkdir -p '{{ logs-dir }}'
-    just serve "--quiet 2>&1 | tee --ignore-interrupts --append '{{ log-file }}'"
+    just serve "{{ ARGS }} --quiet 2>&1 | tee --ignore-interrupts --append '{{ log-file }}'"
     @echo 'Saved to {{ log-file }}'
 
 # Remove the `logs` directory
