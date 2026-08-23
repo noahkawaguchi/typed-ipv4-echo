@@ -115,7 +115,7 @@ sniff-clean pcap=f'{{ project-name }}.pcap':
     arg('echo-file', short, long, help='Output location for echoed data'),
     arg('timeout-secs', short='s', long, help='Number of seconds to wait for echo')
 ]
-throughput input-file='README.md' echo-file=f'/tmp/{{ project-name }}-out' timeout-secs='60':
+throughput input-file=justfile() echo-file=f'/tmp/{{ project-name }}-out' timeout-secs='60':
     nc -Nnvw {{ timeout-secs }} {{ server-addr }} {{ server-port }} \
         < {{ input-file }} > {{ echo-file }}
 

@@ -194,7 +194,7 @@ just icmp
 To send a file through the echo server using TCP and diff the echoed reply against the original:
 
 ```sh
-just throughput                # Defaults to README.md
+just throughput                # Defaults to the justfile
 just throughput -f Cargo.toml  # Send Cargo.toml instead
 ```
 
