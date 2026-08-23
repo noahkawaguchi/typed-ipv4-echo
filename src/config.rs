@@ -35,7 +35,7 @@ impl Config {
             tun_name: Self::get_env_or_else(|| String::from("tun0"), "TYPENET_TUN_NAME")?,
 
             initial_rto: Duration::from_millis(Self::get_env_or_else(
-                || 500,
+                || if cfg!(debug_assertions) { 250 } else { 1000 },
                 "TYPENET_INIT_RTO_MILLIS",
             )?),
 
