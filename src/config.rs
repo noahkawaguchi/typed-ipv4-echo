@@ -40,7 +40,12 @@ impl Config {
             )?),
 
             max_retries: Self::get_env_or_else(|| 15, "TYPENET_MAX_RETRANSMITS")?,
-            grace_period: Duration::from_secs(Self::get_env_or_else(|| 5, "TYPENET_GRACE_SECS")?),
+
+            grace_period: Duration::from_secs(Self::get_env_or_else(
+                || if cfg!(debug_assertions) { 5 } else { 60 },
+                "TYPENET_GRACE_SECS",
+            )?),
+
             log_level: Self::get_env_or_else(LogLevel::default, "TYPENET_LOG_LEVEL")?,
         })
     }
