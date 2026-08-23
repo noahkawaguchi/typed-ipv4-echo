@@ -135,7 +135,7 @@ throughput input-file=justfile() echo-file=f'/tmp/{{ project-name }}-out' timeou
     arg('duplicate', short='u', long),
     arg('reorder', short, long)
 ]
-loss delay='1ms' loss='0%' corrupt='0%' duplicate='0%' reorder='0%': tun
+netem delay='1ms' loss='0%' corrupt='0%' duplicate='0%' reorder='0%': tun
     sudo tc qdisc replace dev {{ tun-name }} root netem \
         delay {{ delay }} 20ms 25% distribution paretonormal \
         loss random {{ loss }} 25% \
@@ -144,11 +144,11 @@ loss delay='1ms' loss='0%' corrupt='0%' duplicate='0%' reorder='0%': tun
         reorder {{ reorder }} 25%
 
 # Show current network emulation and packet counters
-loss-show:
+netem-show:
     tc -stats qdisc show dev {{ tun-name }}
 
 # Remove emulated network conditions (uses sudo)
-loss-clear:
+netem-clear:
     sudo tc qdisc del dev {{ tun-name }} root
 
 ####################################################################################################

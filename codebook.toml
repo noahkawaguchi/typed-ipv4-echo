@@ -39,6 +39,7 @@ words = [
     "lookups",
     "mins",
     "netcat",
+    "netem",
     "nicknovitski",
     "nixbuild",
     "nixos",
