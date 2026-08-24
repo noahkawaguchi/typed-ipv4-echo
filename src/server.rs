@@ -6,7 +6,7 @@ use {
         ipv4_header::Ipv4Header,
         logger::Logger,
         protocol::{
-            TcpConnections, TcpHandler,
+            RtoConfig, TcpConnections, TcpHandler,
             handler::{Encode, ProtocolHandler},
         },
         try_ops::{TryAdd as _, TryGet as _},
@@ -17,6 +17,14 @@ use {
         time::{Duration, Instant},
     },
 };
+
+/// The minimum allowed TCP retransmission timeout (same as the Linux kernel as defined in
+/// `include/net/tcp.h`).
+const TCP_RTO_MIN: Duration = Duration::from_millis(200);
+
+/// The maximum allowed TCP retransmission timeout (same as the Linux kernel as defined in
+/// `include/net/tcp.h`).
+const TCP_RTO_MAX: Duration = Duration::from_mins(2);
 
 /// The result of deciding how to react to a shutdown signal.
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
@@ -68,7 +76,10 @@ where
 
     Server {
         write_buf: [0u8; ETHERNET_MTU],
-        tcp_connections: TcpConnections::new(config.initial_rto, config.max_retries),
+        tcp_connections: TcpConnections::new(
+            RtoConfig { initial: config.initial_rto, min: TCP_RTO_MIN, max: TCP_RTO_MAX },
+            config.max_retries,
+        ),
         logger,
         device,
         poll_readable,

@@ -118,8 +118,8 @@ You should then be able to capture traffic without `sudo` by running `just sniff
 
 ```sh
 just sniff          # Capture, log, and save to PCAP
-just sniff-inspect  # Read back the saved PCAP file
-just sniff-clean    # Remove the saved PCAP file
+just sniff-inspect  # Read back a saved PCAP file (defaults to most recent)
+just sniff-clean    # Remove `pcap` directory
 ```
 
 For each of these three recipes, see `just --usage <RECIPE>` for further options.
@@ -140,10 +140,14 @@ The following environment variables can be used to configure the TUN device and 
 | ----------------------- | --------------------------------------------------------- | ----------- |
 | TYPENET_TUN_NAME        | Name of the TUN device to create and use                  | `tun0`      |
 | TYPENET_TUN_CIDR        | CIDR used when creating the TUN device                    | 10.0.0.1/24 |
-| TYPENET_INIT_RTO_MILLIS | Initial retransmission timeout before exponential backoff | 500         |
-| TYPENET_MAX_RETRANSMITS | Number of retransmissions before giving up                | 5           |
-| TYPENET_GRACE_SECS      | Wait time before shutdown when draining connections       | 5           |
+| TYPENET_INIT_RTO_MILLIS | Initial retransmission timeout before exponential backoff | 1000\*      |
+| TYPENET_MAX_RETRANSMITS | Number of retransmissions before giving up                | 15          |
+| TYPENET_GRACE_SECS      | Wait time before shutdown when draining connections       | 60\*\*      |
 | TYPENET_LOG_LEVEL       | Level of output for logging (see table below)             | 4           |
+
+\* 250 in debug builds. All RTOs are clamped to between 200 milliseconds and 2 minutes in all builds.
+<br />
+\*\* 5 in debug builds.
 
 | Log level | Meaning                                                                       |
 | --------- | ----------------------------------------------------------------------------- |
@@ -160,14 +164,16 @@ The following environment variables can be used to configure the TUN device and 
 You will be prompted to create the TUN device on first use, once per reboot, which requires `sudo` privileges. The server will attach to the TUN device, listen for and reply to packets, and log processed data until it receives SIGINT (Ctrl+C).
 
 ```sh
-just serve
+just serve     # Debug build
+just serve -r  # Release build
 ```
 
 The [`justfile`](justfile) also includes recipes for saving logs to file.
 
 ```sh
-just serve-save  # Run and save log file to `logs` directory
-just log-clean   # Remove `logs` directory
+just serve-save     # Run and save log file to `logs` directory
+just serve-save -r  # Same but with a release build
+just log-clean      # Remove `logs` directory
 ```
 
 ## Connecting as a Client
@@ -188,7 +194,7 @@ just icmp
 To send a file through the echo server using TCP and diff the echoed reply against the original:
 
 ```sh
-just throughput                # Defaults to README.md
+just throughput                # Defaults to the justfile
 just throughput -f Cargo.toml  # Send Cargo.toml instead
 ```
 
@@ -196,15 +202,15 @@ See `just --usage throughput` for further options.
 
 ### Network Emulation
 
-To emulate real-world networks with delay/loss/corruption/duplication/reordering, run the `loss` recipe and then try connecting to the server again.
+To emulate real-world networks with delay/loss/corruption/duplication/reordering, run the `netem` recipe and then try connecting to the server again.
 
 ```sh
-just loss        # Add the emulation to the device (uses sudo)
-just loss-show   # Show current network emulation and packet counters
-just loss-clear  # Remove emulated network conditions (uses sudo)
+just netem -d 100ms -l 5%  # Add 100 ms delay and 5% packet loss to the device (uses sudo)
+just netem-show            # Show current network emulation and packet counters
+just netem-clear           # Remove emulated network conditions (uses sudo)
 ```
 
-See `just --usage loss` for further options.
+See `just --usage netem` for further options.
 
 ## Testing
 
@@ -529,7 +535,7 @@ This example includes:
 
 <!--
 Commands used here for future reference:
-  just loss --loss 50% --corrupt 25% --duplicate 50%
+  just netem --delay 100ms --loss 50% --corrupt 25% --duplicate 50% --reorder 1%
   just throughput --input-file Cargo.toml
 -->
 

@@ -28,8 +28,11 @@ fn pending_retransmission_alone_gives_duration() {
 
     assert_eq!(
         Server {
-            tcp_connections: TcpConnections::new(INITIAL_RTO, 5)
-                .with_syn_rcv_and_packet_last_sent(now),
+            tcp_connections: TcpConnections::new(
+                RtoConfig { initial: INITIAL_RTO, ..Default::default() },
+                5
+            )
+            .with_syn_rcv_and_packet_last_sent(now),
             ..decision_test_server()
         }
         .poll_timeout(now),
@@ -45,8 +48,11 @@ fn earlier_retransmit_deadline_taken_over_later_shutdown_deadline() -> Result {
 
     assert_eq!(
         Server {
-            tcp_connections: TcpConnections::new(INITIAL_RTO, 5)
-                .with_syn_rcv_and_packet_last_sent(now),
+            tcp_connections: TcpConnections::new(
+                RtoConfig { initial: INITIAL_RTO, ..Default::default() },
+                5
+            )
+            .with_syn_rcv_and_packet_last_sent(now),
             shutdown_deadline: Some(now.try_add(Duration::from_secs(30))?),
             ..decision_test_server()
         }
@@ -67,7 +73,11 @@ fn earlier_shutdown_deadline_taken_over_later_retransmit_deadline() -> Result {
 
     assert_eq!(
         Server {
-            tcp_connections: TcpConnections::new(Duration::from_secs(30), 5).with_syn_rcv(),
+            tcp_connections: TcpConnections::new(
+                RtoConfig { initial: Duration::from_secs(30), ..Default::default() },
+                5
+            )
+            .with_syn_rcv(),
             shutdown_deadline: Some(now.try_add(GRACE_PERIOD)?),
             ..decision_test_server()
         }

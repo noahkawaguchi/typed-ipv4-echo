@@ -35,12 +35,17 @@ impl Config {
             tun_name: Self::get_env_or_else(|| String::from("tun0"), "TYPENET_TUN_NAME")?,
 
             initial_rto: Duration::from_millis(Self::get_env_or_else(
-                || 500,
+                || if cfg!(debug_assertions) { 250 } else { 1000 },
                 "TYPENET_INIT_RTO_MILLIS",
             )?),
 
-            max_retries: Self::get_env_or_else(|| 5, "TYPENET_MAX_RETRANSMITS")?,
-            grace_period: Duration::from_secs(Self::get_env_or_else(|| 5, "TYPENET_GRACE_SECS")?),
+            max_retries: Self::get_env_or_else(|| 15, "TYPENET_MAX_RETRANSMITS")?,
+
+            grace_period: Duration::from_secs(Self::get_env_or_else(
+                || if cfg!(debug_assertions) { 5 } else { 60 },
+                "TYPENET_GRACE_SECS",
+            )?),
+
             log_level: Self::get_env_or_else(LogLevel::default, "TYPENET_LOG_LEVEL")?,
         })
     }
