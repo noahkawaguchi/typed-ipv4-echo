@@ -6,6 +6,9 @@ edition = "2024"
 [dependencies]
 libc = "0.2.189"
 
+[dev-dependencies]
+criterion = { version = "0.8.2", features = ["html_reports"] }
+
 [lints.clippy]
 # All lint groups except restriction and cargo
 nursery  = { level = "warn", priority = -1 }
