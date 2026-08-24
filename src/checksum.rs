@@ -1,5 +1,6 @@
 /// Computes the Internet checksum from data of arbitrary length (16-bit one's complement of the
 /// one's complement sum, RFC 1071).
+#[must_use]
 pub fn calculate(data: &[u8]) -> u16 {
     /// Folds the high half of a 32-bit accumulator back into the low half one time.
     const fn one_carry_fold(x: u32) -> u32 { (x & 0xFFFF).wrapping_add(x >> 16) }
