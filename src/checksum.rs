@@ -40,6 +40,51 @@ pub fn calculate(data: &[u8]) -> u16 {
     !(one_carry_fold(one_carry_fold(sum)) as u16)
 }
 
+/// Internet checksum implementation that uses a 16-bit accumulator and checks for overflow on
+/// every iteration. Correct, but does not take advantage of the deferred carries method.
+///
+/// Exposed only for benchmark comparison against the production implementation. Do not use for real
+/// checksum calculation.
+#[cfg(any(test, feature = "bench-internals"))]
+#[must_use]
+pub fn always_folded_checksum(data: &[u8]) -> u16 {
+    let (byte_pairs, maybe_odd_byte) = data.as_chunks::<2>();
+
+    !byte_pairs.iter().fold(
+        maybe_odd_byte
+            .first()
+            .map_or(0, |&b| u16::from_be_bytes([b, 0])),
+        |sum, &byte_pair| {
+            let (new_sum, overflowed) = sum.overflowing_add(u16::from_be_bytes(byte_pair));
+            new_sum.wrapping_add(u16::from(overflowed))
+        },
+    )
+}
+
+/// Internet checksum implementation that uses a 32-bit accumulator without an overflow check. Takes
+/// advantage of the deferred carries method, but produces incorrect results for very large input
+/// sizes.
+///
+/// Exposed only for benchmark comparison against the production implementation. Do not use for real
+/// checksum calculation.
+#[cfg(any(test, feature = "bench-internals"))]
+#[must_use]
+pub fn overflowing_checksum(data: &[u8]) -> u16 {
+    let (byte_pairs, maybe_odd_byte) = data.as_chunks::<2>();
+
+    let sum = byte_pairs.iter().fold(
+        maybe_odd_byte
+            .first()
+            .map_or(0, |&b| u32::from_be_bytes([0, 0, b, 0])),
+        |sum, &[high_byte, low_byte]| {
+            sum.wrapping_add(u32::from_be_bytes([0, 0, high_byte, low_byte]))
+        },
+    );
+
+    let folded = (sum & 0xFFFF).wrapping_add(sum >> 16);
+    !((folded & 0xFFFF).wrapping_add(folded >> 16) as u16)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,41 +213,6 @@ mod tests {
             / u16::MAX as usize
             // Number of bytes per 16-bit word
             * 2;
-
-        /// Internet checksum implementation that uses a 16-bit accumulator and checks for overflow
-        /// on every iteration. Correct, but does not take advantage of the deferred carries method.
-        fn always_folded_checksum(data: &[u8]) -> u16 {
-            let (byte_pairs, maybe_odd_byte) = data.as_chunks::<2>();
-
-            !byte_pairs.iter().fold(
-                maybe_odd_byte
-                    .first()
-                    .map_or(0, |&b| u16::from_be_bytes([b, 0])),
-                |sum, &byte_pair| {
-                    let (new_sum, overflowed) = sum.overflowing_add(u16::from_be_bytes(byte_pair));
-                    new_sum.wrapping_add(u16::from(overflowed))
-                },
-            )
-        }
-
-        /// Internet checksum implementation that uses a 32-bit accumulator, but does not check for
-        /// overflow. Takes advantage of the deferred carries method, but produces incorrect results
-        /// for very large input sizes.
-        fn overflowing_checksum(data: &[u8]) -> u16 {
-            let (byte_pairs, maybe_odd_byte) = data.as_chunks::<2>();
-
-            let sum = byte_pairs.iter().fold(
-                maybe_odd_byte
-                    .first()
-                    .map_or(0, |&b| u32::from_be_bytes([0, 0, b, 0])),
-                |sum, &[high_byte, low_byte]| {
-                    sum.wrapping_add(u32::from_be_bytes([0, 0, high_byte, low_byte]))
-                },
-            );
-
-            let folded = (sum & 0xFFFF).wrapping_add(sum >> 16);
-            !((folded & 0xFFFF).wrapping_add(folded >> 16) as u16)
-        }
 
         // All implementations should be correct for input sizes up until the threshold of
         // overflowing `u32`
