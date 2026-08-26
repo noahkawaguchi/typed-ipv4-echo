@@ -4,26 +4,38 @@ use {
     typenet::checksum,
 };
 
-/// Input sizes representative of real traffic through the server: a bare IPv4/TCP header, a
-/// standard Ethernet MTU payload, and the largest possible IPv4 packet.
-const SIZES: [(&str, usize); 4] =
-    [("header_20B", 20), ("mtu_1500B", 1500), ("max_ipv4_65535B", 65_535), ("odd_1501B", 1501)];
+/// A range of input sizes representative of real traffic: a bare IPv4/TCP header, a standard
+/// Ethernet MTU payload, and the largest possible IPv4 packet.
+const INPUT_SIZES: [usize; 3] = [20, 1500, 65_535];
 
-fn bench_calculate(c: &mut Criterion) {
-    let mut group = c.benchmark_group("checksum::calculate");
+type LabeledImplementation = (&'static str, fn(&[u8]) -> u16);
 
-    for (label, size) in SIZES {
+/// The set of checksum implementations to compare.
+const IMPLEMENTATIONS: [LabeledImplementation; 3] = [
+    ("production", checksum::calculate),
+    ("always_folded", checksum::always_folded_checksum),
+    ("overflowing", checksum::overflowing_checksum),
+];
+
+/// Compares the production checksum implementation against alternative implementations only exposed
+/// for benchmarking purposes.
+fn bench_checksum(c: &mut Criterion) {
+    let mut group = c.benchmark_group("checksum");
+
+    for size in INPUT_SIZES {
         let input = vec![0xABu8; size];
 
         group.throughput(Throughput::Bytes(size as u64)); // Report throughput in bytes/sec
 
-        group.bench_with_input(BenchmarkId::from_parameter(label), &input, |b, data| {
-            b.iter(|| checksum::calculate(black_box(data)));
-        });
+        for (label, checksum_fn) in IMPLEMENTATIONS {
+            group.bench_with_input(BenchmarkId::new(label, size), &input, |b, data| {
+                b.iter(|| checksum_fn(black_box(data)));
+            });
+        }
     }
 
     group.finish();
 }
 
-criterion_group!(benches, bench_calculate);
+criterion_group!(benches, bench_checksum);
 criterion_main!(benches);
