@@ -4,17 +4,19 @@ use {
     typenet::checksum,
 };
 
-/// A range of input sizes representative of real traffic: a bare IPv4/TCP header, a standard
-/// Ethernet MTU payload, and the largest possible IPv4 packet.
-const INPUT_SIZES: [usize; 3] = [20, 1500, 65_535];
+/// A representative range of input sizes: a bare IPv4/TCP header, a standard Ethernet MTU payload,
+/// the largest possible IPv4 packet, and an even larger packet that could overflow a 32-bit
+/// accumulator.
+const INPUT_SIZES: [usize; 4] = [20, 1500, 65_535, checksum::NAIVE_INPUT_CEILING + 16];
 
 type LabeledImplementation = (&'static str, fn(&[u8]) -> u16);
 
 /// The set of checksum implementations to compare.
-const IMPLEMENTATIONS: [LabeledImplementation; 3] = [
+const IMPLEMENTATIONS: [LabeledImplementation; 4] = [
     ("production", checksum::calculate),
     ("always_folded", checksum::always_folded_checksum),
-    ("overflowing", checksum::overflowing_checksum),
+    ("naive_wrapping", checksum::naive_wrapping_checksum),
+    ("range_checked", checksum::range_checked_checksum),
 ];
 
 /// Compares the production checksum implementation against alternative implementations only exposed
