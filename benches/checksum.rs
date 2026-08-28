@@ -7,7 +7,7 @@ use {
 /// A representative range of input sizes: a bare IPv4/TCP header, a standard Ethernet MTU payload,
 /// the largest possible IPv4 packet, and an even larger packet that could overflow a 32-bit
 /// accumulator.
-const INPUT_SIZES: [usize; 4] = [20, 1500, 65_535, checksum::NAIVE_INPUT_CEILING + 16];
+const INPUT_SIZES: [usize; 4] = [20, 1500, 65_535, checksum::DEFERRED_CARRIES_MAX_BYTES + 16];
 
 type LabeledImplementation = (&'static str, fn(&[u8]) -> u16);
 

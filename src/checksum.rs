@@ -1,6 +1,53 @@
-/// The largest number of worst case 0xFF bytes that the deferred carries method using a `u32`
+/// Computes the Internet checksum from data of arbitrary length (16-bit one's complement of the
+/// one's complement sum, RFC 1071).
+#[must_use]
+pub fn calculate(data: &[u8]) -> u16 {
+    /// As stated [in the Rust Reference](https://doc.rust-lang.org/reference/behavior-considered-undefined.html#r-undefined.dangling.alloc-limit),
+    /// the dynamic size of a Rust value cannot exceed `isize::MAX`. The worst case input would be
+    /// `0xFF` repeated `isize::MAX` times. By using a 128-bit accumulator and 64-bit addends,
+    /// accumulator overflow is impossible.
+    #[cfg(test)]
+    const _: () = {
+        let max_u64_count = (isize::MAX / 8) as u128 + (isize::MAX % 8 > 0) as u128;
+        let (max_sum, overflowed) = max_u64_count.overflowing_mul(u64::MAX as u128);
+        assert!(!overflowed);
+        assert!(max_sum < u128::MAX);
+    };
+
+    /// Folds 128 bits (eight 16-bit lanes) into 16 bits and returns one's complement.
+    const fn fold_and_flip(x: u128) -> u16 {
+        /// Folds the bottom two 16-bit lanes together.
+        const fn fold(y: u128) -> u128 { (y & 0xFFFF).wrapping_add(y >> 16) }
+
+        /// Confirms that there can be at most eight function calls in the worst case, so stack
+        /// overflow is not a concern here despite the recursion.
+        #[cfg(test)]
+        const _: () = assert!(fold(fold(fold(fold(fold(fold(fold(fold(u128::MAX)))))))) == 0xFFFF);
+
+        #[expect(clippy::cast_possible_truncation, reason = "Truncation desired after folding")]
+        if x > 0xFFFF { fold_and_flip(fold(x)) } else { !x as u16 }
+    }
+
+    let (byte_groups, remainder_bytes) = data.as_chunks::<8>();
+
+    let sum = byte_groups.iter().fold(
+        // Put an odd byte in the high byte of its 16-bit lane
+        u128::from(u64::from_be_bytes(std::array::from_fn(|i| {
+            remainder_bytes.get(i).copied().unwrap_or_default()
+        }))),
+        // Sum 64-bit addends (four 16-bit lanes each) using a 128-bit accumulator (eight 16-bit
+        // lanes) to defer carries in bits 64-127. Carries that propagate internally across lane
+        // boundaries correctly land in congruent positions.
+        |acc, &chunk| acc.wrapping_add(u128::from(u64::from_be_bytes(chunk))),
+    );
+
+    fold_and_flip(sum)
+}
+
+/// The largest number of worst case `0xFF` bytes that the deferred carries method using a `u32`
 /// accumulator can correctly compute a checksum for before the accumulator overflows.
-const DEFERRED_CARRIES_MAX_BYTES: usize =
+#[cfg(any(test, feature = "bench-internals"))]
+pub const DEFERRED_CARRIES_MAX_BYTES: usize =
     // Largest valid accumulator value before overflow
     u32::MAX as usize
         // Worst case 16-bit word value of all ones
@@ -8,52 +55,15 @@ const DEFERRED_CARRIES_MAX_BYTES: usize =
         // Number of bytes per 16-bit word
         * 2;
 
-/// The input size in bytes after which the naive overflowing implementation produces incorrect
-/// results.
-#[cfg(feature = "bench-internals")]
-pub const NAIVE_INPUT_CEILING: usize = DEFERRED_CARRIES_MAX_BYTES;
-
-/// Computes the Internet checksum from data of arbitrary length (16-bit one's complement of the
-/// one's complement sum, RFC 1071).
-#[must_use]
-pub fn calculate(data: &[u8]) -> u16 {
-    let sum = data
-        // Split the input into chunks that individually cannot overflow a 32-bit accumulator.
-        // Most real-world input sizes such as 1500 or 65,535 bytes fit entirely in one chunk.
-        .chunks(DEFERRED_CARRIES_MAX_BYTES)
-        .map(|safe_len_chunk| {
-            let (byte_pairs, maybe_odd_byte) = safe_len_chunk.as_chunks::<2>();
-
-            byte_pairs.iter().fold(
-                // Treat an odd byte as the high byte of a 16-bit word
-                maybe_odd_byte
-                    .first()
-                    .map_or(0, |&b| u32::from_be_bytes([0, 0, b, 0])),
-                // Sum 16-bit words using a 32-bit accumulator to defer carries in bits 16-31
-                |sum, &[high_byte, low_byte]| {
-                    sum.wrapping_add(u32::from_be_bytes([0, 0, high_byte, low_byte]))
-                },
-            )
-        })
-        // In the rare case of more than one chunk, combine their sums, directly checking for
-        // overflow and folding back into 32 bits on every iteration
-        .reduce(|total_sum, partial_sum| {
-            let (new_sum, overflowed) = total_sum.overflowing_add(partial_sum);
-            new_sum.wrapping_add(u32::from(overflowed))
-        })
-        .unwrap_or_default();
-
-    // Fold 32 bits into 16 and return one's complement.
-    //
-    // No more than two folds are necessary because in the worst case, `u32::MAX` or 0xFFFF_FFFF,
-    // folding once results in 0x1_FFFE and folding twice results in 0xFFFF, fitting exactly into a
-    // `u16`.
-    #[expect(clippy::cast_possible_truncation, reason = "Truncation desired after folding")]
-    !(one_carry_fold(one_carry_fold(sum)) as u16)
-}
-
 /// Folds the high half of a 32-bit accumulator back into the low half one time.
+#[cfg(any(test, feature = "bench-internals"))]
 const fn one_carry_fold(x: u32) -> u32 { (x & 0xFFFF).wrapping_add(x >> 16) }
+
+/// Confirms that no more than two folds are necessary for a 32-bit accumulator because in the worst
+/// case, `0xFFFF_FFFF`, folding once results in `0x1_FFFE` and folding twice results in `0xFFFF`,
+/// fitting exactly into 16 bits.
+#[cfg(test)]
+const _: () = assert!(one_carry_fold(one_carry_fold(u32::MAX)) == 0xFFFF);
 
 /// Internet checksum implementation that uses a 16-bit accumulator, detecting any overflow and
 /// folding on every iteration. Correct, but does not take advantage of the deferred carries method.
