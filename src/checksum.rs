@@ -2,13 +2,15 @@
 /// one's complement sum, RFC 1071).
 #[must_use]
 pub fn calculate(data: &[u8]) -> u16 {
+    const BYTES_PER_U64: usize = 64 / 8;
+
     /// As stated [in the Rust Reference](https://doc.rust-lang.org/reference/behavior-considered-undefined.html#r-undefined.dangling.alloc-limit),
     /// the dynamic size of a Rust value cannot exceed `isize::MAX`. The worst case input would be
     /// `0xFF` repeated `isize::MAX` times. By using a 128-bit accumulator and 64-bit addends,
     /// accumulator overflow is impossible.
     #[cfg(test)]
     const _: () = {
-        let max_u64_count = (isize::MAX / 8) as u128 + (isize::MAX % 8 > 0) as u128;
+        let max_u64_count = (isize::MAX as u128).div_ceil(BYTES_PER_U64 as u128);
         let (max_sum, overflowed) = max_u64_count.overflowing_mul(u64::MAX as u128);
         assert!(!overflowed);
         assert!(max_sum < u128::MAX);
@@ -28,7 +30,7 @@ pub fn calculate(data: &[u8]) -> u16 {
         if x > 0xFFFF { fold_and_flip(fold(x)) } else { !x as u16 }
     }
 
-    let (byte_groups, remainder_bytes) = data.as_chunks::<8>();
+    let (byte_groups, remainder_bytes) = data.as_chunks::<BYTES_PER_U64>();
 
     let sum = byte_groups.iter().fold(
         // Put an odd byte in the high byte of its 16-bit lane
