@@ -151,6 +151,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn checksum_of_empty_input_is_negative_zero() {
+        // Empty input should produce 0xFFFF (one's complement of 0x0000)
+        assert_eq!(calculate(&[]), 0xFFFF);
+    }
+
+    #[test]
     fn checksum_of_zeros_is_all_ones() {
         // All zeros should produce 0xFFFF (one's complement of 0x0000)
         assert_eq!(calculate(&[0u8; 20]), 0xFFFF);
