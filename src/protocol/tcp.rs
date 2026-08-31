@@ -607,9 +607,9 @@ impl<S: Endpoint> TcpHandler<S> {
     /// local. The local to remote direction is for tests only. Only the remote to local direction
     /// should be exposed in production code.
     fn inner_parse(data: &[u8], ip_pair: Ipv4AddrPair<S>) -> Result<Self> {
-        let Some(tcp_header) = data.first_chunk::<{ TCP_HDR_MIN_LEN as usize }>() else {
-            return Err(format!("Too short for TCP header ({} bytes)", data.len()).into());
-        };
+        let tcp_header = data
+            .first_chunk::<{ TCP_HDR_MIN_LEN as usize }>()
+            .ok_or_else(|| format!("Too short for TCP header ({} bytes)", data.len()))?;
 
         if pseudo_header_checksum(data, ip_pair, Protocol::Tcp)? != 0 {
             return Err("Invalid TCP checksum".into());

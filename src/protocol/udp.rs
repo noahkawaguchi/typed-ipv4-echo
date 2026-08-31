@@ -30,10 +30,9 @@ pub struct UdpHandler<'a, S: Endpoint> {
 impl<'a> UdpHandler<'a, Remote> {
     /// Parses `data` as a UDP header and payload.
     pub(super) fn parse(data: &'a [u8], ip_pair: Ipv4AddrPair<Remote>) -> Result<Self> {
-        let Some((udp_header, payload)) = data.split_first_chunk::<{ UDP_HDR_LEN as usize }>()
-        else {
-            return Err(format!("Too short for UDP header ({} bytes)", data.len()).into());
-        };
+        let (udp_header, payload) = data
+            .split_first_chunk::<{ UDP_HDR_LEN as usize }>()
+            .ok_or_else(|| format!("Too short for UDP header ({} bytes)", data.len()))?;
 
         // A receiver should not treat a checksum field of all zeros as invalid because it means the
         // sender chose not to compute one (RFC 768, RFC 1122, Section 4.1.3.4).

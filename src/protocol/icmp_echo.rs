@@ -40,10 +40,9 @@ impl<S: Endpoint> IcmpEchoHandler<'_, S> {
 impl<'a> IcmpEchoHandler<'a, Remote> {
     /// Parses `data` as an ICMP Echo Request header and payload.
     pub(super) fn parse(data: &'a [u8], ip_pair: Ipv4AddrPair<Remote>) -> Result<Self, String> {
-        let Some((icmp_header, payload)) = data.split_first_chunk::<{ ICMP_HDR_LEN as usize }>()
-        else {
-            return Err(format!("Too short for ICMP header ({} bytes)", data.len()));
-        };
+        let (icmp_header, payload) = data
+            .split_first_chunk::<{ ICMP_HDR_LEN as usize }>()
+            .ok_or_else(|| format!("Too short for ICMP header ({} bytes)", data.len()))?;
 
         if checksum::calculate(data) != 0 {
             return Err(String::from("Invalid ICMP checksum"));

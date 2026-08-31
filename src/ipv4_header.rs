@@ -60,9 +60,9 @@ impl<S: Endpoint> Ipv4Header<S> {
     /// The local to remote direction is for tests only. Only the remote to local direction should
     /// be exposed in production code.
     fn inner_parse(data: &[u8]) -> Result<(Self, &[u8]), String> {
-        let Some(ip_header) = data.first_chunk::<IPV4_HDR_MIN_LEN_USIZE>() else {
-            return Err(format!("Too short for IPv4 header ({} bytes)", data.len()));
-        };
+        let ip_header = data
+            .first_chunk::<IPV4_HDR_MIN_LEN_USIZE>()
+            .ok_or_else(|| format!("Too short for IPv4 header ({} bytes)", data.len()))?;
 
         // Must be IPv4
         match ip_header[0] >> 4 {
