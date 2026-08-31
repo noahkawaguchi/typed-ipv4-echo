@@ -98,7 +98,7 @@ impl Logger {
     /// Logs receipt or transmission of a packet to stdout if and how the log level allows.
     pub(crate) fn pkt_io<S: Endpoint>(
         &self,
-        ipv4_header: &Ipv4Header<S>,
+        ipv4_hdr: &Ipv4Header<S>,
         pretty_proto: &impl PrettyProtocol,
     ) -> io::Result<()> {
         match self.level {
@@ -111,7 +111,7 @@ impl Logger {
 
             level @ (LogLevel::PktDetails | LogLevel::PktFull) => {
                 println!(
-                    "{}\n{ipv4_header}\n{pretty_proto}\n{}",
+                    "{}\n{ipv4_hdr}\n{pretty_proto}\n{}",
                     Timestamp(self.birth),
                     pretty_proto.pretty_payload(level == LogLevel::PktFull)
                 );

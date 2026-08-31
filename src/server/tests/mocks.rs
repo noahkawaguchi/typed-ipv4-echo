@@ -95,15 +95,15 @@ pub fn encode_mock_pkt(seg: &TcpSegment<Remote>) -> Result<Vec<u8>> {
     let mut buf = [0u8; ETHERNET_MTU];
     let proto_len = seg.write_into(&mut buf[Ipv4Header::REPLY_HDR_LEN..])?;
 
-    let ipv4_header = Ipv4Header::test_try_new_remote(seg.proto(), seg.get_ip_pair(), proto_len)?;
-    ipv4_header.test_write_into_remote(&mut buf);
+    let ipv4_hdr = Ipv4Header::test_try_new_remote(seg.proto(), seg.get_ip_pair(), proto_len)?;
+    ipv4_hdr.test_write_into_remote(&mut buf);
 
-    Ok(buf.try_get(..ipv4_header.total_len.into())?.to_vec())
+    Ok(buf.try_get(..ipv4_hdr.total_len.into())?.to_vec())
 }
 
 /// Decodes a full IPv4 packet in the local to remote direction into a `TcpSegment` so tests can
 /// assert on structs instead of raw bytes.
 pub fn decode_mock_pkt(bytes: &[u8]) -> Result<TcpSegment<Local>> {
-    let (ipv4_header, payload) = Ipv4Header::test_parse_local(bytes)?;
-    TcpSegment::test_parse_local(payload, ipv4_header.ip_pair)
+    let (ipv4_hdr, payload) = Ipv4Header::test_parse_local(bytes)?;
+    TcpSegment::test_parse_local(payload, ipv4_hdr.ip_pair)
 }

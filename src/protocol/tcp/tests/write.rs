@@ -27,7 +27,7 @@ fn write_into_produces_correct_bytes_with_no_payload() -> Result {
     assert_eq!(&reply[34..36], &[0x72, 0x10]); // Window size: 29,200
     assert_eq!(&reply[38..40], &[0x00, 0x00]); // Urgent pointer
 
-    assert_eq!(pseudo_header_checksum(&reply[20..40], REMOTE_TO_LOCAL_IP_PAIR, Protocol::Tcp)?, 0);
+    assert_eq!(pseudo_hdr_checksum(&reply[20..40], REMOTE_TO_LOCAL_IP_PAIR, Protocol::Tcp)?, 0);
 
     Ok(())
 }
@@ -53,7 +53,7 @@ fn write_into_produces_correct_bytes_with_payload() -> Result {
     // Payload copied immediately after the 20-byte header
     assert_eq!(&reply[40..45], b"Hello");
 
-    assert_eq!(pseudo_header_checksum(&reply[20..45], REMOTE_TO_LOCAL_IP_PAIR, Protocol::Tcp)?, 0);
+    assert_eq!(pseudo_hdr_checksum(&reply[20..45], REMOTE_TO_LOCAL_IP_PAIR, Protocol::Tcp)?, 0);
 
     Ok(())
 }

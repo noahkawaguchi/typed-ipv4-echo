@@ -6,7 +6,7 @@ use {
         protocol::{
             Protocol,
             display::PrettyPayload,
-            pseudo_header_checksum,
+            pseudo_hdr_checksum,
             router::{Encode, PrettyProtocol},
         },
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
@@ -30,14 +30,14 @@ pub struct UdpDatagram<'a, S: Endpoint> {
 impl<'a> UdpDatagram<'a, Remote> {
     /// Parses `data` as a UDP header and payload.
     pub(super) fn parse(data: &'a [u8], ip_pair: Ipv4AddrPair<Remote>) -> Result<Self> {
-        let (udp_header, payload) = data
+        let (udp_hdr, payload) = data
             .split_first_chunk::<{ UDP_HDR_LEN as usize }>()
             .ok_or_else(|| format!("Too short for UDP header ({} bytes)", data.len()))?;
 
         // A receiver should not treat a checksum field of all zeros as invalid because it means the
         // sender chose not to compute one (RFC 768, RFC 1122, Section 4.1.3.4).
-        if u16::from_be_bytes([udp_header[6], udp_header[7]]) != 0
-            && pseudo_header_checksum(data, ip_pair, Protocol::Udp)? != 0
+        if u16::from_be_bytes([udp_hdr[6], udp_hdr[7]]) != 0
+            && pseudo_hdr_checksum(data, ip_pair, Protocol::Udp)? != 0
         {
             return Err("Invalid UDP checksum".into());
         }
@@ -45,8 +45,8 @@ impl<'a> UdpDatagram<'a, Remote> {
         Ok(Self {
             ip_pair,
             ports: PortPair::new(
-                u16::from_be_bytes([udp_header[0], udp_header[1]]),
-                u16::from_be_bytes([udp_header[2], udp_header[3]]),
+                u16::from_be_bytes([udp_hdr[0], udp_hdr[1]]),
+                u16::from_be_bytes([udp_hdr[2], udp_hdr[3]]),
             ),
             payload,
         })
@@ -86,11 +86,8 @@ impl Encode<Local> for UdpDatagram<'_, Local> {
         // Zero out checksum field before calculating checksum
         buf.try_get_mut(6..8)?.copy_from_slice(&[0x00, 0x00]);
 
-        let udp_checksum = pseudo_header_checksum(
-            buf.try_get(..usize::from(udp_len))?,
-            self.ip_pair,
-            self.proto(),
-        )?;
+        let udp_checksum =
+            pseudo_hdr_checksum(buf.try_get(..usize::from(udp_len))?, self.ip_pair, self.proto())?;
 
         // A computed checksum of 0 must be transmitted as 0xFFFF because a checksum field of all
         // zeros means the sender chose not to compute one (RFC 768, RFC 1122, Section 4.1.3.4).
@@ -282,7 +279,7 @@ mod tests {
 
         // Verify checksum
         assert_eq!(
-            pseudo_header_checksum(&reply_buf[20..36], REMOTE_TO_LOCAL_IP_PAIR, Protocol::Udp)?,
+            pseudo_hdr_checksum(&reply_buf[20..36], REMOTE_TO_LOCAL_IP_PAIR, Protocol::Udp)?,
             0
         );
 

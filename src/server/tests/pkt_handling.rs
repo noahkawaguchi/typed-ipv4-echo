@@ -16,11 +16,11 @@ fn ipv4_ok_but_tcp_parse_error_is_skipped() -> Result {
     let fixture = TcpSegment::CLIENT_SYN;
     let mut buf = [0u8; ETHERNET_MTU];
 
-    let ipv4_header = Ipv4Header::test_try_new_remote(fixture.proto(), fixture.get_ip_pair(), 4)?;
-    ipv4_header.test_write_into_remote(&mut buf);
+    let ipv4_hdr = Ipv4Header::test_try_new_remote(fixture.proto(), fixture.get_ip_pair(), 4)?;
+    ipv4_hdr.test_write_into_remote(&mut buf);
 
     assert_matches!(
-        decision_test_server().parse_incoming(buf.try_get(..ipv4_header.total_len.into())?),
+        decision_test_server().parse_incoming(buf.try_get(..ipv4_hdr.total_len.into())?),
         Err(e) if e.contains("Skipping packet") && e.contains("TCP")
     );
 
@@ -35,7 +35,7 @@ fn syn_parses_and_produces_a_reply() -> Result {
         Server { tcp_connections: TcpConnections::default(), ..decision_test_server() }
             .parse_incoming(&bytes),
         Ok(ParsedExchange {
-            ipv4_header: _,
+            ipv4_hdr: _,
             incoming_router: ProtocolRouter::Tcp(_),
             reply_router: Some(ProtocolRouter::Tcp(_)),
         })
@@ -55,7 +55,7 @@ fn handshake_ack_parses_and_produces_no_reply() -> Result {
         }
         .parse_incoming(&bytes),
         Ok(ParsedExchange {
-            ipv4_header: _,
+            ipv4_hdr: _,
             incoming_router: ProtocolRouter::Tcp(_),
             reply_router: None
         })

@@ -193,11 +193,11 @@ mod tests {
     }
 
     #[test]
-    fn known_ipv4_header_without_folding() {
+    fn known_ipv4_hdr_without_folding() {
         // IPv4 header with simple values for manual verification
         // Version=4, IHL=5, TOS=0, Total Length=32, ID=1, Flags=0, TTL=64, Protocol=17 (UDP)
         #[rustfmt::skip]
-        const HEADER: [u8; 20] = [
+        const HDR: [u8; 20] = [
             0x45, 0x00,  // Version/IHL, TOS           = 0x4500
             0x00, 0x20,  // Total Length               = 0x0020
             0x00, 0x01,  // Identification             = 0x0001
@@ -214,15 +214,15 @@ mod tests {
         //      0x0002 = 0x9935
         // No carry to fold (sum fits in 16 bits)
         // One's complement: ~0x9935 = 0x66CA
-        assert_eq!(calculate(&HEADER), 0x66CA);
+        assert_eq!(calculate(&HDR), 0x66CA);
     }
 
     #[test]
-    fn known_ipv4_header_with_folding() {
+    fn known_ipv4_hdr_with_folding() {
         // IPv4 header with values that require carry folding
         // Using large IP addresses to force carries
         #[rustfmt::skip]
-        const HEADER: [u8; 20] = [
+        const HDR: [u8; 20] = [
             0x45, 0x00,  // Version/IHL, TOS           = 0x4500
             0x00, 0x54,  // Total Length               = 0x0054
             0xAB, 0xCD,  // Identification             = 0xABCD
@@ -239,7 +239,7 @@ mod tests {
         //      0xFFC8 = 0x4_B1A3
         // Fold carry: 0xB1A3 + 0x4 = 0xB1A7
         // One's complement: ~0xB1A7 = 0x4E58
-        assert_eq!(calculate(&HEADER), 0x4E58);
+        assert_eq!(calculate(&HDR), 0x4E58);
     }
 
     #[test]

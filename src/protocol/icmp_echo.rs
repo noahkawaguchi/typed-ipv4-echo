@@ -40,7 +40,7 @@ impl<S: Endpoint> IcmpEchoMsg<'_, S> {
 impl<'a> IcmpEchoMsg<'a, Remote> {
     /// Parses `data` as an ICMP Echo Request header and payload.
     pub(super) fn parse(data: &'a [u8], ip_pair: Ipv4AddrPair<Remote>) -> Result<Self, String> {
-        let (icmp_header, payload) = data
+        let (icmp_hdr, payload) = data
             .split_first_chunk::<{ ICMP_HDR_LEN as usize }>()
             .ok_or_else(|| format!("Too short for ICMP header ({} bytes)", data.len()))?;
 
@@ -48,8 +48,8 @@ impl<'a> IcmpEchoMsg<'a, Remote> {
             return Err(String::from("Invalid ICMP checksum"));
         }
 
-        let icmp_type = icmp_header[0];
-        let icmp_code = icmp_header[1];
+        let icmp_type = icmp_hdr[0];
+        let icmp_code = icmp_hdr[1];
 
         // ICMP Echo Request (ping): type=8, code=0
         if icmp_type != Self::ICMP_TYPE_ECHO_REQUEST || icmp_code != Self::ICMP_CODE_ECHO {
@@ -59,8 +59,8 @@ impl<'a> IcmpEchoMsg<'a, Remote> {
         Ok(Self {
             ip_pair,
             icmp_type,
-            identifier: u16::from_be_bytes([icmp_header[4], icmp_header[5]]),
-            sequence: u16::from_be_bytes([icmp_header[6], icmp_header[7]]),
+            identifier: u16::from_be_bytes([icmp_hdr[4], icmp_hdr[5]]),
+            sequence: u16::from_be_bytes([icmp_hdr[6], icmp_hdr[7]]),
             payload,
         })
     }

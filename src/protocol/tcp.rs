@@ -15,7 +15,7 @@ use {
         protocol::{
             Protocol,
             display::{PrettyPayload, WithThousandsSeparators as _},
-            pseudo_header_checksum,
+            pseudo_hdr_checksum,
             router::{Encode, PrettyProtocol},
             tcp::{
                 connections::ConnKey,
@@ -607,38 +607,35 @@ impl<S: Endpoint> TcpSegment<S> {
     /// local. The local to remote direction is for tests only. Only the remote to local direction
     /// should be exposed in production code.
     fn inner_parse(data: &[u8], ip_pair: Ipv4AddrPair<S>) -> Result<Self> {
-        let tcp_header = data
+        let tcp_hdr = data
             .first_chunk::<{ TCP_HDR_MIN_LEN as usize }>()
             .ok_or_else(|| format!("Too short for TCP header ({} bytes)", data.len()))?;
 
-        if pseudo_header_checksum(data, ip_pair, Protocol::Tcp)? != 0 {
+        if pseudo_hdr_checksum(data, ip_pair, Protocol::Tcp)? != 0 {
             return Err("Invalid TCP checksum".into());
         }
 
         // Convert length in 32-bit words in the upper 4 bits to length in bytes in the full 8 bits
-        let offset_bytes = tcp_header[12] >> 4 << 2;
+        let offset_bytes = tcp_hdr[12] >> 4 << 2;
 
         Ok(Self {
             ip_pair,
             ports: PortPair::new(
-                u16::from_be_bytes([tcp_header[0], tcp_header[1]]),
-                u16::from_be_bytes([tcp_header[2], tcp_header[3]]),
+                u16::from_be_bytes([tcp_hdr[0], tcp_hdr[1]]),
+                u16::from_be_bytes([tcp_hdr[2], tcp_hdr[3]]),
             ),
             seq_num: SeqPoint::new(u32::from_be_bytes([
-                tcp_header[4],
-                tcp_header[5],
-                tcp_header[6],
-                tcp_header[7],
+                tcp_hdr[4], tcp_hdr[5], tcp_hdr[6], tcp_hdr[7],
             ])),
             ack_num: SeqPoint::new(u32::from_be_bytes([
-                tcp_header[8],
-                tcp_header[9],
-                tcp_header[10],
-                tcp_header[11],
+                tcp_hdr[8],
+                tcp_hdr[9],
+                tcp_hdr[10],
+                tcp_hdr[11],
             ])),
             offset_bytes,
-            flags: tcp_header[13].try_into()?,
-            window: SeqOffset::new(u16::from_be_bytes([tcp_header[14], tcp_header[15]])),
+            flags: tcp_hdr[13].try_into()?,
+            window: SeqOffset::new(u16::from_be_bytes([tcp_hdr[14], tcp_hdr[15]])),
             payload: TcpPayload::try_from_iter(
                 data.get(offset_bytes.into()..)
                     .into_iter()
@@ -706,7 +703,7 @@ impl<S: Endpoint> TcpSegment<S> {
         // Zero out checksum field before calculating checksum
         buf.try_get_mut(16..18)?.copy_from_slice(&[0x00, 0x00]);
 
-        let tcp_checksum = pseudo_header_checksum(
+        let tcp_checksum = pseudo_hdr_checksum(
             buf.try_get(..usize::from(tcp_seg_len))?,
             self.ip_pair,
             Protocol::Tcp,

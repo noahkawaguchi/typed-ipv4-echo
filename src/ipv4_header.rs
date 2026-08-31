@@ -60,30 +60,30 @@ impl<S: Endpoint> Ipv4Header<S> {
     /// The local to remote direction is for tests only. Only the remote to local direction should
     /// be exposed in production code.
     fn inner_parse(data: &[u8]) -> Result<(Self, &[u8]), String> {
-        let ip_header = data
+        let ip_hdr = data
             .first_chunk::<IPV4_HDR_MIN_LEN_USIZE>()
             .ok_or_else(|| format!("Too short for IPv4 header ({} bytes)", data.len()))?;
 
         // Must be IPv4
-        match ip_header[0] >> 4 {
+        match ip_hdr[0] >> 4 {
             4 => {}
             6 => return Err(String::from("IPv6 packet")),
             version => return Err(format!("Unexpected IP version {version}")),
         }
 
-        if checksum::calculate(ip_header) != 0 {
+        if checksum::calculate(ip_hdr) != 0 {
             return Err(String::from("Invalid IPv4 header checksum"));
         }
 
-        let ihl_bytes = usize::from(ip_header[0] & 0xF) * 4; // Convert 32-bit words to bytes
+        let ihl_bytes = usize::from(ip_hdr[0] & 0xF) * 4; // Convert 32-bit words to bytes
 
         Ok((
             Self {
-                total_len: u16::from_be_bytes([ip_header[2], ip_header[3]]),
-                protocol: ip_header[9].try_into()?,
+                total_len: u16::from_be_bytes([ip_hdr[2], ip_hdr[3]]),
+                protocol: ip_hdr[9].try_into()?,
                 ip_pair: Ipv4AddrPair::new(
-                    Ipv4Addr::new(ip_header[12], ip_header[13], ip_header[14], ip_header[15]),
-                    Ipv4Addr::new(ip_header[16], ip_header[17], ip_header[18], ip_header[19]),
+                    Ipv4Addr::new(ip_hdr[12], ip_hdr[13], ip_hdr[14], ip_hdr[15]),
+                    Ipv4Addr::new(ip_hdr[16], ip_hdr[17], ip_hdr[18], ip_hdr[19]),
                 ),
             },
             data.get(ihl_bytes..)
@@ -197,12 +197,12 @@ mod tests {
             172, 16, 10, 12,         // Dest IP: 172.16.10.12
         ];
 
-        let (header, payload) = Ipv4Header::parse(&DATA)?;
+        let (hdr, payload) = Ipv4Header::parse(&DATA)?;
 
-        assert_eq!(header.total_len, 60);
-        assert_eq!(header.protocol, Protocol::Tcp);
-        assert_eq!(header.ip_pair.src, Ipv4Addr::new(192, 168, 1, 100));
-        assert_eq!(header.ip_pair.dst, Ipv4Addr::new(172, 16, 10, 12));
+        assert_eq!(hdr.total_len, 60);
+        assert_eq!(hdr.protocol, Protocol::Tcp);
+        assert_eq!(hdr.ip_pair.src, Ipv4Addr::new(192, 168, 1, 100));
+        assert_eq!(hdr.ip_pair.dst, Ipv4Addr::new(172, 16, 10, 12));
         assert_eq!(payload, &DATA[20..]);
 
         Ok(())
@@ -244,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn creates_valid_ipv4_header_for_reply() -> Result<(), String> {
+    fn creates_valid_ipv4_hdr_for_reply() -> Result<(), String> {
         #[rustfmt::skip]
         const REQUEST: [u8; 20] = [
             0x45, 0x00, 0x00, 0x3C,  // Version 4, IHL 5, TOS 0, Total Length 60
@@ -254,13 +254,12 @@ mod tests {
             172, 16, 10, 12,         // Dest IP: 172.16.10.12
         ];
 
-        let (header, _) = Ipv4Header::parse(&REQUEST)?;
+        let (hdr, _) = Ipv4Header::parse(&REQUEST)?;
         let mut reply = [0u8; ETHERNET_MTU];
         let proto_len = 48 - 20; // Total length - IPv4 reply header length
-        let reply_header =
-            Ipv4Header::try_new(header.protocol, header.ip_pair.swapped(), proto_len)?;
-        reply_header.write_into(&mut reply);
-        assert_eq!(reply_header.total_len, 48);
+        let reply_hdr = Ipv4Header::try_new(hdr.protocol, hdr.ip_pair.swapped(), proto_len)?;
+        reply_hdr.write_into(&mut reply);
+        assert_eq!(reply_hdr.total_len, 48);
 
         // Verify IPv4 header fields
         assert_eq!(reply[0], 0x45); // Version 4, IHL 5
