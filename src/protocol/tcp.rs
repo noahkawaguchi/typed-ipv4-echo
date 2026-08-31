@@ -749,6 +749,7 @@ impl<S: Endpoint> fmt::Display for TcpHandler<S> {
 #[cfg(test)]
 mod tests {
     mod abort;
+    mod consts;
     mod echo;
     mod establish;
     mod flow_control;
@@ -756,11 +757,10 @@ mod tests {
     mod retransmit;
     mod stray_syn;
     mod terminate;
-    mod utils;
     mod window;
     mod write;
 
-    pub(super) use utils::*;
+    pub(super) use consts::*;
     use {
         super::*,
         crate::{
