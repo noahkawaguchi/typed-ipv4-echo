@@ -272,9 +272,8 @@ fn duplicate_data_packet_gets_duplicate_ack_without_echo() -> Result {
 
     // First packet: "Hello" (seq=CLIENT_ISN+1) -> rcv_nxt advances to CLIENT_ISN+6, snd_nxt
     // advances to SERVER_ISN+6
-    let reply1 = hello.clone().create_reply(&mut connections)?;
     assert_eq!(
-        reply1,
+        hello.create_reply(&mut connections)?,
         Some(TcpHandler {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
@@ -286,9 +285,8 @@ fn duplicate_data_packet_gets_duplicate_ack_without_echo() -> Result {
 
     // Second packet: "Hi" (seq=CLIENT_ISN+6) -> rcv_nxt advances to CLIENT_ISN+8, snd_nxt advances
     // to SERVER_ISN+8
-    let reply2 = hi.create_reply(&mut connections)?;
     assert_eq!(
-        reply2,
+        hi.create_reply(&mut connections)?,
         Some(TcpHandler {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_HI_LEN,
@@ -299,10 +297,8 @@ fn duplicate_data_packet_gets_duplicate_ack_without_echo() -> Result {
     );
 
     // Retransmit of "Hello": seq=CLIENT_ISN+1, but rcv_nxt is now CLIENT_ISN+8
-    let reply3 = hello.create_reply(&mut connections)?;
-
     assert_eq!(
-        reply3,
+        hello.create_reply(&mut connections)?,
         Some(TcpHandler {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN + LOCAL_HI_LEN,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_HI_LEN,
