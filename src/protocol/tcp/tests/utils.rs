@@ -76,9 +76,3 @@ pub const SERVER_REPLY: TcpHandler<Local> = TcpHandler {
     window: SeqOffset::new(u16::MAX),
     payload: None,
 };
-
-/// Attempts to convert a `&str` into an `Option<TcpPayload>`, with an empty string mapping to
-/// `Ok(None)`.
-pub fn payload_from(s: &str) -> Result<Option<TcpPayload>, &'static str> {
-    TcpPayload::try_from_iter(s.as_bytes().iter().copied())
-}

@@ -22,7 +22,7 @@ fn new_ack_adopts_window_from_segment() -> Result {
     TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -74,7 +74,7 @@ fn stale_segment_does_not_clobber_send_window() -> Result {
     TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -144,7 +144,7 @@ fn same_seq_but_fresher_ack_updates_window() -> Result {
     TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -156,7 +156,7 @@ fn same_seq_but_fresher_ack_updates_window() -> Result {
     let hi_packet = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
-        payload: payload_from("Hi")?,
+        payload: TcpPayload::from_test_str("Hi")?,
         ..CLIENT_PACKET
     };
 
@@ -243,7 +243,7 @@ fn duplicate_ack_updates_window() -> Result {
     TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;

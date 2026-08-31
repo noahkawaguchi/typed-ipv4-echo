@@ -62,7 +62,7 @@ fn data_echo_is_resent_unchanged() -> Result {
     TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -76,7 +76,7 @@ fn data_echo_is_resent_unchanged() -> Result {
         TcpHandler {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
-            payload: payload_from("Hello")?,
+            payload: TcpPayload::from_test_str("Hello")?,
             ..SERVER_REPLY
         }
     );
@@ -118,7 +118,7 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result {
     TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -128,7 +128,7 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result {
     TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
-        payload: payload_from("Hi")?,
+        payload: TcpPayload::from_test_str("Hi")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -143,7 +143,7 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result {
         TcpHandler {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
-            payload: payload_from("Hello")?,
+            payload: TcpPayload::from_test_str("Hello")?,
             ..SERVER_REPLY
         }
     );
@@ -153,7 +153,7 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result {
         TcpHandler {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_HI_LEN,
-            payload: payload_from("Hi")?,
+            payload: TcpPayload::from_test_str("Hi")?,
             ..SERVER_REPLY
         }
     );
@@ -197,7 +197,7 @@ fn retransmissions_back_off_exponentially() -> Result {
     TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;

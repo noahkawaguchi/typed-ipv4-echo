@@ -24,7 +24,7 @@ fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         window: WINDOW,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -34,7 +34,7 @@ fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result {
         Some(TcpHandler {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
-            payload: payload_from("Hel")?,
+            payload: TcpPayload::from_test_str("Hel")?,
             ..SERVER_REPLY
         }),
         "Only the first 3 bytes fit in the advertised window of 3"
@@ -72,7 +72,7 @@ fn unacked_bytes_count_toward_room_left_in_send_window() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         window: WINDOW,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -138,7 +138,7 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         window: INITIAL_WINDOW,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -164,7 +164,7 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
         Some(TcpHandler {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE + HEL_LEN,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
-            payload: payload_from("lo")?,
+            payload: TcpPayload::from_test_str("lo")?,
             ..SERVER_REPLY
         }),
         "The buffered remainder should drain once the window opens, piggybacked on the next ACK"
@@ -200,7 +200,7 @@ fn zero_window_buffers_entire_payload_and_gets_bare_ack() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         window: ZERO_WINDOW,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;

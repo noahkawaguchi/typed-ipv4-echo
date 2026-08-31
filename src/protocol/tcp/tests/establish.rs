@@ -93,7 +93,7 @@ fn handshake_ack_with_data_establishes_and_echoes() -> Result {
     let handshake_ack_with_data = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     };
 
@@ -102,7 +102,7 @@ fn handshake_ack_with_data_establishes_and_echoes() -> Result {
         Some(TcpHandler {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
-            payload: payload_from("Hello")?,
+            payload: TcpPayload::from_test_str("Hello")?,
             ..SERVER_REPLY
         }),
         "Handshake-completing ACK with data should establish the connection and echo the data"
@@ -208,7 +208,7 @@ fn handshake_ack_with_with_wrong_seq_and_data_gets_current_state_ack() -> Result
     let reply = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + SeqOffset::new(1),
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;

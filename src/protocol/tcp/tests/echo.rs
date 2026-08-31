@@ -8,7 +8,7 @@ fn creates_valid_data_echo() -> Result {
     let reply = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -18,7 +18,7 @@ fn creates_valid_data_echo() -> Result {
         Some(TcpHandler {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
-            payload: payload_from("Hello")?,
+            payload: TcpPayload::from_test_str("Hello")?,
             ..SERVER_REPLY
         })
     );
@@ -37,7 +37,7 @@ fn pure_ack_on_established_connection_returns_none() -> Result {
     TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -84,7 +84,7 @@ fn consecutive_replies_use_snd_nxt_for_seq_num() -> Result {
     let reply1 = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -94,7 +94,7 @@ fn consecutive_replies_use_snd_nxt_for_seq_num() -> Result {
         Some(TcpHandler {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
-            payload: payload_from("Hello")?,
+            payload: TcpPayload::from_test_str("Hello")?,
             ..SERVER_REPLY
         }),
         "Standard reply to the first data packet"
@@ -113,7 +113,7 @@ fn consecutive_replies_use_snd_nxt_for_seq_num() -> Result {
     let reply2 = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
-        payload: payload_from("Hi")?,
+        payload: TcpPayload::from_test_str("Hi")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -123,7 +123,7 @@ fn consecutive_replies_use_snd_nxt_for_seq_num() -> Result {
         Some(TcpHandler {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_HI_LEN,
-            payload: payload_from("Hi")?,
+            payload: TcpPayload::from_test_str("Hi")?,
             ..SERVER_REPLY
         }),
         "Server's seq_num should be snd_nxt=SERVER_ISN+6, not client's stale ack_num=SERVER_ISN+1"
@@ -149,7 +149,7 @@ fn old_ack_num_does_not_regress_snd_una() -> Result {
     let reply1 = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -159,7 +159,7 @@ fn old_ack_num_does_not_regress_snd_una() -> Result {
         Some(TcpHandler {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
-            payload: payload_from("Hello")?,
+            payload: TcpPayload::from_test_str("Hello")?,
             ..SERVER_REPLY
         }),
         "Standard reply to the first data packet"
@@ -178,7 +178,7 @@ fn old_ack_num_does_not_regress_snd_una() -> Result {
     let hi_packet = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN,
-        payload: payload_from("Hi")?,
+        payload: TcpPayload::from_test_str("Hi")?,
         ..CLIENT_PACKET
     };
 
@@ -189,7 +189,7 @@ fn old_ack_num_does_not_regress_snd_una() -> Result {
         Some(TcpHandler {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_HI_LEN,
-            payload: payload_from("Hi")?,
+            payload: TcpPayload::from_test_str("Hi")?,
             ..SERVER_REPLY
         }),
         "Standard reply to the second data packet"
@@ -214,7 +214,7 @@ fn old_ack_num_does_not_regress_snd_una() -> Result {
     let reply3 = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_HI_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
-        payload: payload_from("Hey")?,
+        payload: TcpPayload::from_test_str("Hey")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -230,7 +230,7 @@ fn old_ack_num_does_not_regress_snd_una() -> Result {
                 + REMOTE_HELLO_LEN
                 + REMOTE_HI_LEN
                 + REMOTE_HEY_LEN,
-            payload: payload_from("Hey")?,
+            payload: TcpPayload::from_test_str("Hey")?,
             ..SERVER_REPLY
         }),
         "Stale ack_num shouldn't prevent normal processing"
@@ -259,14 +259,14 @@ fn duplicate_data_packet_gets_duplicate_ack_without_echo() -> Result {
     let hello = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     };
 
     let hi = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN,
-        payload: payload_from("Hi")?,
+        payload: TcpPayload::from_test_str("Hi")?,
         ..CLIENT_PACKET
     };
 
@@ -278,7 +278,7 @@ fn duplicate_data_packet_gets_duplicate_ack_without_echo() -> Result {
         Some(TcpHandler {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
-            payload: payload_from("Hello")?,
+            payload: TcpPayload::from_test_str("Hello")?,
             ..SERVER_REPLY
         }),
         "Standard reply to the first data packet"
@@ -292,7 +292,7 @@ fn duplicate_data_packet_gets_duplicate_ack_without_echo() -> Result {
         Some(TcpHandler {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_HI_LEN,
-            payload: payload_from("Hi")?,
+            payload: TcpPayload::from_test_str("Hi")?,
             ..SERVER_REPLY
         }),
         "Standard reply to the second data packet"
@@ -330,7 +330,7 @@ fn ack_for_unsent_data_is_dropped_and_gets_current_state_reply() -> Result {
     let reply = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + SeqOffset::new(20),
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -396,7 +396,7 @@ fn data_packet_for_unknown_connection_gets_rst() -> Result {
     let reply = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;

@@ -88,7 +88,7 @@ impl PendingSegment {
 mod tests {
     use {
         super::*,
-        crate::{Result, protocol::tcp::tests::payload_from},
+        crate::{Result, protocol::tcp::TcpPayload},
         std::time::Duration,
     };
 
@@ -101,7 +101,7 @@ mod tests {
                 seq_num: SeqPoint::new(42),
                 ack_num: SeqPoint::new(24),
                 flags: TcpFlags::Ack,
-                payload: payload_from("Hello")?,
+                payload: TcpPayload::from_test_str("Hello")?,
             },
             now,
         );
@@ -135,7 +135,7 @@ mod tests {
                     seq_num: SeqPoint::new(42),
                     ack_num: SeqPoint::new(24),
                     flags: TcpFlags::Ack,
-                    payload: payload_from("Hello")?
+                    payload: TcpPayload::from_test_str("Hello")?
                 },
                 Instant::now()
             )

@@ -42,7 +42,7 @@ fn write_into_produces_correct_bytes_with_payload() -> Result {
         offset_bytes: 20,
         flags: TcpFlags::Ack,
         window: SeqOffset::new(u16::MAX),
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
     };
 
     let mut reply = [0u8; ETHERNET_MTU];

@@ -99,7 +99,7 @@ fn fin_ack_acks_prior_data_and_advances_snd_una() -> Result {
     TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -217,7 +217,7 @@ fn partial_ack_in_last_ack_does_not_close_connection() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     };
 
@@ -454,7 +454,7 @@ fn data_after_our_fin_in_fin_wait_1_is_acked_without_echo() -> Result {
     let reply = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -502,7 +502,7 @@ fn data_after_our_fin_in_fin_wait_2_is_acked_without_echo() -> Result {
     let reply = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -586,7 +586,7 @@ fn fin_ack_with_data_in_fin_wait_1_advances_rcv_nxt_past_data_and_fin() -> Resul
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     };
 
@@ -623,7 +623,7 @@ fn fin_ack_with_data_in_fin_wait_1_acking_our_fin_closes_immediately() -> Result
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
         flags: TcpFlags::FinAck,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -667,7 +667,7 @@ fn fin_ack_with_data_in_fin_wait_2_advances_rcv_nxt_past_data_and_fin() -> Resul
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
         flags: TcpFlags::FinAck,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     }
     .create_reply(&mut connections)?;
@@ -700,7 +700,7 @@ fn fin_ack_with_data_in_established_echoes_data_and_starts_closing() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     };
 
@@ -710,7 +710,7 @@ fn fin_ack_with_data_in_established_echoes_data_and_starts_closing() -> Result {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_FIN_BYTE,
             flags: TcpFlags::FinAck,
-            payload: payload_from("Hello")?,
+            payload: TcpPayload::from_test_str("Hello")?,
             ..SERVER_REPLY
         }),
         "Data should be echoed and piggybacked on the FIN-ACK, with the ACK covering both the \
@@ -757,7 +757,7 @@ fn fin_ack_with_data_in_established_buffers_the_untransmittable_remainder() -> R
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         window: SMALL_WINDOW,
         flags: TcpFlags::FinAck,
-        payload: payload_from("Hello")?,
+        payload: TcpPayload::from_test_str("Hello")?,
         ..CLIENT_PACKET
     };
 
@@ -767,7 +767,7 @@ fn fin_ack_with_data_in_established_buffers_the_untransmittable_remainder() -> R
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_FIN_BYTE,
             flags: TcpFlags::FinAck,
-            payload: payload_from("Hel")?,
+            payload: TcpPayload::from_test_str("Hel")?,
             ..SERVER_REPLY
         }),
         "Only the first 3 bytes fit in the advertised window of 3, piggybacked on the FIN-ACK"
