@@ -14,9 +14,9 @@ type LabeledImplementation = (&'static str, fn(&[u8]) -> u16);
 /// The set of checksum implementations to compare.
 const IMPLEMENTATIONS: [LabeledImplementation; 4] = [
     ("production", checksum::calculate),
-    ("always_folded", checksum::always_folded_checksum),
-    ("naive_wrapping", checksum::naive_wrapping_checksum),
-    ("range_checked", checksum::range_checked_checksum),
+    ("always_folded", checksum::always_folded_cksum),
+    ("naive_wrapping", checksum::naive_wrapping_cksum),
+    ("range_checked", checksum::range_checked_cksum),
 ];
 
 /// Compares the production checksum implementation against alternative implementations only exposed
@@ -29,9 +29,9 @@ fn bench_checksum(c: &mut Criterion) {
 
         group.throughput(Throughput::Bytes(size as u64)); // Report throughput in bytes/sec
 
-        for (label, checksum_fn) in IMPLEMENTATIONS {
+        for (label, cksum_fn) in IMPLEMENTATIONS {
             group.bench_with_input(BenchmarkId::new(label, size), &input, |b, data| {
-                b.iter(|| checksum_fn(black_box(data)));
+                b.iter(|| cksum_fn(black_box(data)));
             });
         }
     }

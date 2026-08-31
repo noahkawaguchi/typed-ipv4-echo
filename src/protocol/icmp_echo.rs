@@ -105,9 +105,9 @@ impl Encode<Local> for IcmpEchoMsg<'_, Local> {
         let icmp_len = ICMP_HDR_LEN.try_add(self.payload.len().try_into()?)?;
 
         // Calculate ICMP checksum (covers the entire ICMP message: header + payload)
-        let icmp_checksum = checksum::calculate(buf.try_get(..usize::from(icmp_len))?);
+        let icmp_cksum = checksum::calculate(buf.try_get(..usize::from(icmp_len))?);
         buf.try_get_mut(2..4)?
-            .copy_from_slice(&icmp_checksum.to_be_bytes());
+            .copy_from_slice(&icmp_cksum.to_be_bytes());
 
         Ok(icmp_len)
     }
@@ -212,7 +212,7 @@ mod tests {
     }
 
     #[test]
-    fn parsing_fails_on_invalid_checksum() {
+    fn parsing_fails_on_invalid_cksum() {
         #[rustfmt::skip]
         const DATA: [u8; 11] = [
             8, 0,              // Type 8 (Echo Request), Code 0
@@ -279,8 +279,7 @@ mod tests {
         assert_eq!(icmp_len, 8 + 5);
 
         // Verify checksum is valid (checksum of ICMP message should be 0)
-        let checksum = checksum::calculate(reply_buf.try_get(20..20 + usize::from(icmp_len))?);
-        assert_eq!(checksum, 0x0000);
+        assert_eq!(checksum::calculate(reply_buf.try_get(20..20 + usize::from(icmp_len))?), 0);
 
         Ok(())
     }

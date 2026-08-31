@@ -132,8 +132,8 @@ impl<S: Endpoint> Ipv4Header<S> {
         buf[16..20].copy_from_slice(&self.ip_pair.dst.octets());
 
         // Recalculate IP header checksum (covers only the IP header, always 20 bytes for replies)
-        let ip_checksum = checksum::calculate(&buf[..IPV4_HDR_MIN_LEN_USIZE]);
-        buf[10..12].copy_from_slice(&ip_checksum.to_be_bytes());
+        let ip_cksum = checksum::calculate(&buf[..IPV4_HDR_MIN_LEN_USIZE]);
+        buf[10..12].copy_from_slice(&ip_cksum.to_be_bytes());
     }
 }
 
@@ -215,7 +215,7 @@ mod tests {
     }
 
     #[test]
-    fn parsing_fails_on_invalid_checksum() {
+    fn parsing_fails_on_invalid_cksum() {
         #[rustfmt::skip]
         const DATA: [u8; 20] = [
             0x45, 0x00, 0x00, 0x3C,  // Version 4, IHL 5, TOS 0, Total Length 60
@@ -275,8 +275,7 @@ mod tests {
         assert_eq!(&reply[16..20], &[192, 168, 1, 100]); // Dest (was source)
 
         // Verify IP header checksum is valid
-        let ip_checksum = checksum::calculate(&reply[..20]);
-        assert_eq!(ip_checksum, 0x0000);
+        assert_eq!(checksum::calculate(&reply[..20]), 0);
 
         Ok(())
     }

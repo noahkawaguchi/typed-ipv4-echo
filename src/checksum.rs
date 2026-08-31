@@ -74,7 +74,7 @@ const _: () = assert!(one_carry_fold(one_carry_fold(u32::MAX)) == 0xFFFF);
 /// checksum calculation.
 #[cfg(any(test, feature = "bench-internals"))]
 #[must_use]
-pub fn always_folded_checksum(data: &[u8]) -> u16 {
+pub fn always_folded_cksum(data: &[u8]) -> u16 {
     let (byte_pairs, maybe_odd_byte) = data.as_chunks::<2>();
 
     !byte_pairs.iter().fold(
@@ -96,7 +96,7 @@ pub fn always_folded_checksum(data: &[u8]) -> u16 {
 /// checksum calculation.
 #[cfg(any(test, feature = "bench-internals"))]
 #[must_use]
-pub fn naive_wrapping_checksum(data: &[u8]) -> u16 {
+pub fn naive_wrapping_cksum(data: &[u8]) -> u16 {
     let (byte_pairs, maybe_odd_byte) = data.as_chunks::<2>();
 
     let sum = byte_pairs.iter().fold(
@@ -120,7 +120,7 @@ pub fn naive_wrapping_checksum(data: &[u8]) -> u16 {
 /// checksum calculation.
 #[cfg(any(test, feature = "bench-internals"))]
 #[must_use]
-pub fn range_checked_checksum(data: &[u8]) -> u16 {
+pub fn range_checked_cksum(data: &[u8]) -> u16 {
     let (byte_pairs, maybe_odd_byte) = data.as_chunks::<2>();
 
     let sum = byte_pairs.iter().fold(
@@ -277,9 +277,9 @@ mod tests {
             let data = vec![0xFFu8; num_bytes];
             let expected = if num_bytes & 1 == 1 { 0xFF } else { 0 };
 
-            assert_eq!(expected, naive_wrapping_checksum(&data));
-            assert_eq!(expected, range_checked_checksum(&data));
-            assert_eq!(expected, always_folded_checksum(&data));
+            assert_eq!(expected, naive_wrapping_cksum(&data));
+            assert_eq!(expected, range_checked_cksum(&data));
+            assert_eq!(expected, always_folded_cksum(&data));
             assert_eq!(expected, calculate(&data));
         }
 
@@ -291,10 +291,10 @@ mod tests {
             let expected = if num_bytes & 1 == 1 { 0xFF } else { 0 };
 
             // Incorrect now
-            assert_ne!(expected, naive_wrapping_checksum(&data));
+            assert_ne!(expected, naive_wrapping_cksum(&data));
             // Still correct
-            assert_eq!(expected, range_checked_checksum(&data));
-            assert_eq!(expected, always_folded_checksum(&data));
+            assert_eq!(expected, range_checked_cksum(&data));
+            assert_eq!(expected, always_folded_cksum(&data));
             assert_eq!(expected, calculate(&data));
         }
     }

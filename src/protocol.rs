@@ -21,7 +21,7 @@ use {
 /// Calculates the TCP/UDP checksum of the pseudo-header + `data`. `data` should cover the TCP/UDP
 /// header and payload. Does not zero out the checksum field inside the header of `data` before
 /// calculating.
-fn pseudo_hdr_checksum<S: Endpoint>(
+fn pseudo_hdr_cksum<S: Endpoint>(
     data: &[u8],
     ip_pair: Ipv4AddrPair<S>,
     protocol: Protocol,
@@ -30,19 +30,19 @@ fn pseudo_hdr_checksum<S: Endpoint>(
     const PSEUDO_HDR_LEN: usize = 12;
 
     let proto_len = u16::try_from(data.len())?;
-    let checksum_len = PSEUDO_HDR_LEN + usize::from(proto_len);
+    let cksum_len = PSEUDO_HDR_LEN + usize::from(proto_len);
 
-    let mut checksum_data = [0u8; PSEUDO_HDR_LEN + ETHERNET_MTU];
-    checksum_data[0..4].copy_from_slice(&ip_pair.src.octets());
-    checksum_data[4..8].copy_from_slice(&ip_pair.dst.octets());
+    let mut cksum_data = [0u8; PSEUDO_HDR_LEN + ETHERNET_MTU];
+    cksum_data[0..4].copy_from_slice(&ip_pair.src.octets());
+    cksum_data[4..8].copy_from_slice(&ip_pair.dst.octets());
     // Byte 8 is reserved padding for alignment
-    checksum_data[9] = protocol.into();
-    checksum_data[10..12].copy_from_slice(&proto_len.to_be_bytes());
-    checksum_data
-        .try_get_mut(PSEUDO_HDR_LEN..checksum_len)?
+    cksum_data[9] = protocol.into();
+    cksum_data[10..12].copy_from_slice(&proto_len.to_be_bytes());
+    cksum_data
+        .try_get_mut(PSEUDO_HDR_LEN..cksum_len)?
         .copy_from_slice(data);
 
-    Ok(checksum::calculate(checksum_data.try_get(..checksum_len)?))
+    Ok(checksum::calculate(cksum_data.try_get(..cksum_len)?))
 }
 
 #[derive(Clone, Copy)]

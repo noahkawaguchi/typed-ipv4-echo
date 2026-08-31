@@ -15,7 +15,7 @@ use {
         protocol::{
             Protocol,
             display::{PrettyPayload, WithThousandsSeparators as _},
-            pseudo_hdr_checksum,
+            pseudo_hdr_cksum,
             router::{Encode, PrettyProtocol},
             tcp::{
                 connections::ConnKey,
@@ -611,7 +611,7 @@ impl<S: Endpoint> TcpSegment<S> {
             .first_chunk::<{ TCP_HDR_MIN_LEN as usize }>()
             .ok_or_else(|| format!("Too short for TCP header ({} bytes)", data.len()))?;
 
-        if pseudo_hdr_checksum(data, ip_pair, Protocol::Tcp)? != 0 {
+        if pseudo_hdr_cksum(data, ip_pair, Protocol::Tcp)? != 0 {
             return Err("Invalid TCP checksum".into());
         }
 
@@ -703,14 +703,14 @@ impl<S: Endpoint> TcpSegment<S> {
         // Zero out checksum field before calculating checksum
         buf.try_get_mut(16..18)?.copy_from_slice(&[0x00, 0x00]);
 
-        let tcp_checksum = pseudo_hdr_checksum(
+        let tcp_cksum = pseudo_hdr_cksum(
             buf.try_get(..usize::from(tcp_seg_len))?,
             self.ip_pair,
             Protocol::Tcp,
         )?;
 
         buf.try_get_mut(16..18)?
-            .copy_from_slice(&tcp_checksum.to_be_bytes());
+            .copy_from_slice(&tcp_cksum.to_be_bytes());
 
         Ok(tcp_seg_len)
     }

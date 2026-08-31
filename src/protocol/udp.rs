@@ -6,7 +6,7 @@ use {
         protocol::{
             Protocol,
             display::PrettyPayload,
-            pseudo_hdr_checksum,
+            pseudo_hdr_cksum,
             router::{Encode, PrettyProtocol},
         },
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
@@ -37,7 +37,7 @@ impl<'a> UdpDatagram<'a, Remote> {
         // A receiver should not treat a checksum field of all zeros as invalid because it means the
         // sender chose not to compute one (RFC 768, RFC 1122, Section 4.1.3.4).
         if u16::from_be_bytes([udp_hdr[6], udp_hdr[7]]) != 0
-            && pseudo_hdr_checksum(data, ip_pair, Protocol::Udp)? != 0
+            && pseudo_hdr_cksum(data, ip_pair, Protocol::Udp)? != 0
         {
             return Err("Invalid UDP checksum".into());
         }
@@ -86,13 +86,13 @@ impl Encode<Local> for UdpDatagram<'_, Local> {
         // Zero out checksum field before calculating checksum
         buf.try_get_mut(6..8)?.copy_from_slice(&[0x00, 0x00]);
 
-        let udp_checksum =
-            pseudo_hdr_checksum(buf.try_get(..usize::from(udp_len))?, self.ip_pair, self.proto())?;
+        let udp_cksum =
+            pseudo_hdr_cksum(buf.try_get(..usize::from(udp_len))?, self.ip_pair, self.proto())?;
 
         // A computed checksum of 0 must be transmitted as 0xFFFF because a checksum field of all
         // zeros means the sender chose not to compute one (RFC 768, RFC 1122, Section 4.1.3.4).
         buf.try_get_mut(6..8)?
-            .copy_from_slice(&if udp_checksum == 0 { 0xFFFF } else { udp_checksum }.to_be_bytes());
+            .copy_from_slice(&if udp_cksum == 0 { 0xFFFF } else { udp_cksum }.to_be_bytes());
 
         Ok(udp_len)
     }
@@ -228,7 +228,7 @@ mod tests {
     }
 
     #[test]
-    fn transmits_all_ones_when_computed_checksum_is_zero() -> Result {
+    fn transmits_all_ones_when_computed_cksum_is_zero() -> Result {
         // Payload `[0xE6, 0xB5]` results in a pseudo-header checksum of 0x0000 for IP addresses
         // 10.0.0.1 and 10.0.0.2 (in either order) and ports 1234 and 80 (in either order).
         // However, 0xFFFF must be transmitted instead of 0x0000.
@@ -279,7 +279,7 @@ mod tests {
 
         // Verify checksum
         assert_eq!(
-            pseudo_hdr_checksum(&reply_buf[20..36], REMOTE_TO_LOCAL_IP_PAIR, Protocol::Udp)?,
+            pseudo_hdr_cksum(&reply_buf[20..36], REMOTE_TO_LOCAL_IP_PAIR, Protocol::Udp)?,
             0
         );
 

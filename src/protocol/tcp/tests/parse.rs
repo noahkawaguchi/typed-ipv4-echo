@@ -39,7 +39,7 @@ fn fails_when_too_short() {
 }
 
 #[test]
-fn fails_for_invalid_checksum() {
+fn fails_for_invalid_cksum() {
     #[rustfmt::skip]
         const DATA: [u8; 25] = [
             0x04, 0xD2,                          // Source port: 1234
