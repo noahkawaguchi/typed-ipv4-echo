@@ -1,7 +1,7 @@
 use super::*;
 
-fn client_rst(seq_num: SeqPoint<Remote>) -> TcpHandler<Remote> {
-    TcpHandler { seq_num, flags: TcpFlags::Rst, ..CLIENT_PKT }
+fn client_rst(seq_num: SeqPoint<Remote>) -> TcpSegment<Remote> {
+    TcpSegment { seq_num, flags: TcpFlags::Rst, ..CLIENT_PKT }
 }
 
 #[test]
@@ -30,7 +30,7 @@ fn rst_in_established_within_window_but_not_at_rcv_nxt_gets_challenge_ack() -> R
 
     assert_eq!(
         reply,
-        Some(TcpHandler {
+        Some(TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
             ..SERVER_REPLY
@@ -125,7 +125,7 @@ fn rst_in_syn_received_within_window_but_not_at_rcv_nxt_gets_challenge_ack() -> 
 
     assert_eq!(
         reply,
-        Some(TcpHandler {
+        Some(TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
             ..SERVER_REPLY

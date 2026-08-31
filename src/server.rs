@@ -6,7 +6,7 @@ use {
         ipv4_header::Ipv4Header,
         logger::Logger,
         protocol::{
-            RtoConfig, TcpConnections, TcpHandler,
+            RtoConfig, TcpConnections, TcpSegment,
             handler::{Encode, ProtocolHandler},
         },
         try_ops::{TryAdd as _, TryGet as _},
@@ -34,7 +34,7 @@ enum ShutdownDecision {
 
     /// This was the first interrupt, active close began, and at least one connection is still
     /// closing.
-    BeganDraining { to_send: Vec<TcpHandler<Local>>, deadline: Instant },
+    BeganDraining { to_send: Vec<TcpSegment<Local>>, deadline: Instant },
 
     /// This was the first interrupt, and no connection needs to finish closing, so shutdown can
     /// happen immediately.

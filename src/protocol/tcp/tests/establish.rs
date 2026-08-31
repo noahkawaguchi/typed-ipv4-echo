@@ -4,7 +4,7 @@ use super::*;
 fn creates_valid_syn_ack() -> Result {
     let mut connections = TcpConnections::default();
 
-    let reply = TcpHandler { seq_num: CLIENT_ISN, flags: TcpFlags::Syn, ..CLIENT_PKT }
+    let reply = TcpSegment { seq_num: CLIENT_ISN, flags: TcpFlags::Syn, ..CLIENT_PKT }
         .create_reply(&mut connections)?;
 
     // seq_num is the random ISN that was stored in the connection table
@@ -12,7 +12,7 @@ fn creates_valid_syn_ack() -> Result {
 
     assert_eq!(
         reply,
-        Some(TcpHandler {
+        Some(TcpSegment {
             seq_num: stored_isn,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
             flags: TcpFlags::SynAck,
@@ -32,12 +32,12 @@ fn duplicate_syn_during_syn_received_resends_same_syn_ack() -> Result {
     let mut connections = TcpConnections::default().with_syn_rcv();
     let initial_state = connections.try_get()?.clone();
 
-    let reply = TcpHandler { seq_num: CLIENT_ISN, flags: TcpFlags::Syn, ..CLIENT_PKT }
+    let reply = TcpSegment { seq_num: CLIENT_ISN, flags: TcpFlags::Syn, ..CLIENT_PKT }
         .create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
-        Some(TcpHandler {
+        Some(TcpSegment {
             seq_num: SERVER_ISN,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
             flags: TcpFlags::SynAck,
@@ -62,7 +62,7 @@ fn handshake_ack_without_data_establishes_connection_and_returns_none() -> Resul
     let mut connections = TcpConnections::default().with_syn_rcv();
     let mut cloned_state = connections.try_get()?.clone();
 
-    let handshake_ack = TcpHandler {
+    let handshake_ack = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         ..CLIENT_PKT
@@ -90,7 +90,7 @@ fn handshake_ack_with_data_establishes_and_echoes() -> Result {
     let mut connections = TcpConnections::default().with_syn_rcv();
     let mut cloned_state = connections.try_get()?.clone();
 
-    let handshake_ack_with_data = TcpHandler {
+    let handshake_ack_with_data = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: TcpPayload::from_test_str("Hello")?,
@@ -99,7 +99,7 @@ fn handshake_ack_with_data_establishes_and_echoes() -> Result {
 
     assert_eq!(
         handshake_ack_with_data.create_reply(&mut connections)?,
-        Some(TcpHandler {
+        Some(TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
             payload: TcpPayload::from_test_str("Hello")?,
@@ -134,7 +134,7 @@ fn handshake_ack_with_wrong_seq_and_no_data_gets_current_state_ack() -> Result {
     let initial_state = connections.try_get()?.clone();
 
     // Correct ack_num, but seq_num doesn't match RCV.NXT = CLIENT_ISN + SYN_BYTE
-    let reply = TcpHandler {
+    let reply = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + SeqOffset::new(1),
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         ..CLIENT_PKT
@@ -143,7 +143,7 @@ fn handshake_ack_with_wrong_seq_and_no_data_gets_current_state_ack() -> Result {
 
     assert_eq!(
         reply,
-        Some(TcpHandler {
+        Some(TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
             ..SERVER_REPLY
@@ -172,7 +172,7 @@ fn fin_ack_in_syn_rcv_with_wrong_seq_gets_current_state_ack() -> Result {
     let initial_state = connections.try_get()?.clone();
 
     // Correct ack_num, but seq_num doesn't match RCV.NXT = CLIENT_ISN + SYN_BYTE
-    let reply = TcpHandler {
+    let reply = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + SeqOffset::new(1),
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
@@ -182,7 +182,7 @@ fn fin_ack_in_syn_rcv_with_wrong_seq_gets_current_state_ack() -> Result {
 
     assert_eq!(
         reply,
-        Some(TcpHandler {
+        Some(TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
             ..SERVER_REPLY
@@ -205,7 +205,7 @@ fn handshake_ack_with_with_wrong_seq_and_data_gets_current_state_ack() -> Result
     let initial_state = connections.try_get()?.clone();
 
     // Correct ack_num, but seq_num doesn't match RCV.NXT = CLIENT_ISN + SYN_BYTE
-    let reply = TcpHandler {
+    let reply = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + SeqOffset::new(1),
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: TcpPayload::from_test_str("Hello")?,
@@ -215,7 +215,7 @@ fn handshake_ack_with_with_wrong_seq_and_data_gets_current_state_ack() -> Result
 
     assert_eq!(
         reply,
-        Some(TcpHandler {
+        Some(TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
             ..SERVER_REPLY

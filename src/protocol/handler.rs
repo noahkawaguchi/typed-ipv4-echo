@@ -7,7 +7,7 @@ use {
             Protocol,
             display::PrettyPayload,
             icmp_echo::IcmpEchoHandler,
-            tcp::{TcpConnections, TcpHandler},
+            tcp::{TcpConnections, TcpSegment},
             udp::UdpHandler,
         },
     },
@@ -39,7 +39,7 @@ pub trait Encode<S: Endpoint>: PrettyProtocol {
 #[cfg_attr(test, derive(Debug))]
 pub enum ProtocolHandler<'a, S: Endpoint> {
     Icmp(IcmpEchoHandler<'a, S>),
-    Tcp(TcpHandler<S>),
+    Tcp(TcpSegment<S>),
     Udp(UdpHandler<'a, S>),
 }
 
@@ -54,7 +54,7 @@ impl<'a> ProtocolHandler<'a, Remote> {
             Protocol::Icmp => IcmpEchoHandler::parse(data, ip_pair)
                 .map(Self::Icmp)
                 .map_err(Into::into),
-            Protocol::Tcp => TcpHandler::parse(data, ip_pair).map(Self::Tcp),
+            Protocol::Tcp => TcpSegment::parse(data, ip_pair).map(Self::Tcp),
             Protocol::Udp => UdpHandler::parse(data, ip_pair).map(Self::Udp),
         }
     }

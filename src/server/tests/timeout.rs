@@ -145,7 +145,7 @@ fn poll_timeout_reflects_shutdown_deadline_across_a_real_run() -> Result {
 
     let [write] = device.write_history() else { return Err("Expected exactly one write".into()) };
 
-    assert_eq!(decode_mock_pkt(write)?, TcpHandler::SERVER_FIN_ACK_INITIATING_CLOSE);
+    assert_eq!(decode_mock_pkt(write)?, TcpSegment::SERVER_FIN_ACK_INITIATING_CLOSE);
 
     Ok(())
 }

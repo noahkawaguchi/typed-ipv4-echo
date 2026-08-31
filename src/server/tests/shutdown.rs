@@ -58,7 +58,7 @@ fn exits_once_connections_finish_closing() -> Result {
     let poll_calls = Cell::new(0u8);
     let poll = MockPoll::with_results([Err(io::ErrorKind::Interrupted.into()), Ok(true)]);
     let mut device = MockDevice::with_read_results([Ok(encode_mock_pkt(
-        &TcpHandler::CLIENT_FIN_ACK_COMPLETING_CLOSE,
+        &TcpSegment::CLIENT_FIN_ACK_COMPLETING_CLOSE,
     )?)])?;
 
     run_test_server(
@@ -80,8 +80,8 @@ fn exits_once_connections_finish_closing() -> Result {
         );
     };
 
-    assert_eq!(decode_mock_pkt(fin_ack)?, TcpHandler::SERVER_FIN_ACK_INITIATING_CLOSE);
-    assert_eq!(decode_mock_pkt(final_ack)?, TcpHandler::SERVER_FINAL_ACK_COMPLETING_CLOSE);
+    assert_eq!(decode_mock_pkt(fin_ack)?, TcpSegment::SERVER_FIN_ACK_INITIATING_CLOSE);
+    assert_eq!(decode_mock_pkt(final_ack)?, TcpSegment::SERVER_FINAL_ACK_COMPLETING_CLOSE);
 
     Ok(())
 }

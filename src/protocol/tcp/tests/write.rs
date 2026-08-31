@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn write_into_produces_correct_bytes_with_no_payload() -> Result {
-    let handler = TcpHandler::<Local> {
+    let handler = TcpSegment::<Local> {
         ip_pair: LOCAL_TO_REMOTE_IP_PAIR,
         ports: PortPair::new(80, 1234),
         seq_num: SeqPoint::new(0x1000_0000),
@@ -34,7 +34,7 @@ fn write_into_produces_correct_bytes_with_no_payload() -> Result {
 
 #[test]
 fn write_into_produces_correct_bytes_with_payload() -> Result {
-    let handler = TcpHandler::<Local> {
+    let handler = TcpSegment::<Local> {
         ip_pair: LOCAL_TO_REMOTE_IP_PAIR,
         ports: PortPair::new(80, 1234),
         seq_num: SeqPoint::new(1),

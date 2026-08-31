@@ -20,7 +20,7 @@ fn due_retransmission_is_sent_as_real_io() -> Result {
 
     let [write] = device.write_history() else { return Err("Expected exactly one write".into()) };
 
-    assert_eq!(decode_mock_pkt(write)?, TcpHandler::SERVER_SYN_ACK);
+    assert_eq!(decode_mock_pkt(write)?, TcpSegment::SERVER_SYN_ACK);
 
     Ok(())
 }
@@ -52,7 +52,7 @@ fn retransmission_does_not_drop_the_connection() -> Result {
     for write in [first, second] {
         assert_eq!(
             decode_mock_pkt(write)?,
-            TcpHandler::SERVER_SYN_ACK,
+            TcpSegment::SERVER_SYN_ACK,
             "Every retransmission should resend the same unacked SYN-ACK unchanged"
         );
     }
@@ -90,7 +90,7 @@ fn gives_up_and_drops_connection_after_max_retries() -> Result {
     for write in [first, second] {
         assert_eq!(
             decode_mock_pkt(write)?,
-            TcpHandler::SERVER_SYN_ACK,
+            TcpSegment::SERVER_SYN_ACK,
             "Every retransmission should resend the same unacked SYN-ACK unchanged"
         );
     }

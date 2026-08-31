@@ -20,7 +20,7 @@ fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result {
     let mut expected_state = after_handshake_with_snd_wnd(WINDOW);
     connections.insert(expected_state.clone());
 
-    let reply = TcpHandler {
+    let reply = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         window: WINDOW,
@@ -31,7 +31,7 @@ fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result {
 
     assert_eq!(
         reply,
-        Some(TcpHandler {
+        Some(TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
             payload: TcpPayload::from_test_str("Hel")?,
@@ -68,7 +68,7 @@ fn unacked_bytes_count_toward_room_left_in_send_window() -> Result {
 
     // "Hello" (5 bytes), window only allows 3 -> "Hel" sent (SND.NXT advances by 3, SND.UNA stays
     // put), "lo" buffered. 3 bytes are now sent but unacked.
-    TcpHandler {
+    TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         window: WINDOW,
@@ -93,7 +93,7 @@ fn unacked_bytes_count_toward_room_left_in_send_window() -> Result {
     // A duplicate ACK (SEG.ACK == SND.UNA, so nothing new is acknowledged) that only refreshes
     // SND.WND, still at 3. With 3 bytes already sent but unacked and a window of 3, there is no
     // room left, so the buffered "lo" must stay buffered.
-    let dup_ack_same_window = TcpHandler {
+    let dup_ack_same_window = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         window: WINDOW,
@@ -134,7 +134,7 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
     connections.insert(expected_state.clone());
 
     // "Hello" (5 bytes), window only allows 3 -> "Hel" sent, "lo" buffered
-    TcpHandler {
+    TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         window: INITIAL_WINDOW,
@@ -150,7 +150,7 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
     assert_eq!(connections.try_get()?, &expected_state, "State confirmation before window update");
 
     // Client acks the 3 sent bytes and advertises a bigger window -> should drain "lo"
-    let window_update = TcpHandler {
+    let window_update = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + HEL_LEN,
         window: LARGER_WINDOW,
@@ -161,7 +161,7 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
 
     assert_eq!(
         reply,
-        Some(TcpHandler {
+        Some(TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE + HEL_LEN,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
             payload: TcpPayload::from_test_str("lo")?,
@@ -196,7 +196,7 @@ fn zero_window_buffers_entire_payload_and_gets_bare_ack() -> Result {
     let mut expected_state = after_handshake_with_snd_wnd(ZERO_WINDOW);
     connections.insert(expected_state.clone());
 
-    let reply = TcpHandler {
+    let reply = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         window: ZERO_WINDOW,
@@ -207,7 +207,7 @@ fn zero_window_buffers_entire_payload_and_gets_bare_ack() -> Result {
 
     assert_eq!(
         reply,
-        Some(TcpHandler {
+        Some(TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
             ..SERVER_REPLY

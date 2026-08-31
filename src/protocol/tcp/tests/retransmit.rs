@@ -4,7 +4,7 @@ use super::*;
 fn syn_ack_is_resent_while_due() -> Result {
     let mut connections = TcpConnections::new(RtoConfig::default(), 5);
 
-    TcpHandler { seq_num: CLIENT_ISN, flags: TcpFlags::Syn, ..CLIENT_PKT }
+    TcpSegment { seq_num: CLIENT_ISN, flags: TcpFlags::Syn, ..CLIENT_PKT }
         .create_reply(&mut connections)?;
 
     let isn = connections.try_get()?.snd_una;
@@ -15,7 +15,7 @@ fn syn_ack_is_resent_while_due() -> Result {
     assert!(resent.is_empty(), "Expected exactly one retransmitted segment");
     assert_eq!(
         reply,
-        TcpHandler {
+        TcpSegment {
             seq_num: isn,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
             flags: TcpFlags::SynAck,
@@ -31,13 +31,13 @@ fn syn_ack_is_resent_while_due() -> Result {
 fn pending_segment_is_cleared_once_acked() -> Result {
     let mut connections = TcpConnections::new(RtoConfig::default(), 5);
 
-    TcpHandler { seq_num: CLIENT_ISN, flags: TcpFlags::Syn, ..CLIENT_PKT }
+    TcpSegment { seq_num: CLIENT_ISN, flags: TcpFlags::Syn, ..CLIENT_PKT }
         .create_reply(&mut connections)?;
 
     let isn = connections.try_get()?.snd_una;
 
     // Handshake ACK completes the connection and should clear the pending SYN-ACK
-    TcpHandler {
+    TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: isn + LOCAL_SYN_BYTE,
         ..CLIENT_PKT
@@ -56,7 +56,7 @@ fn pending_segment_is_cleared_once_acked() -> Result {
 fn data_echo_is_resent_unchanged() -> Result {
     let mut connections = TcpConnections::new(RtoConfig::default(), 5).after_handshake();
 
-    TcpHandler {
+    TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: TcpPayload::from_test_str("Hello")?,
@@ -70,7 +70,7 @@ fn data_echo_is_resent_unchanged() -> Result {
     assert!(resent.is_empty(), "Expected exactly one retransmitted segment");
     assert_eq!(
         reply,
-        TcpHandler {
+        TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
             payload: TcpPayload::from_test_str("Hello")?,
@@ -92,7 +92,7 @@ fn fin_ack_is_resent_unchanged() -> Result {
     assert!(resent.is_empty(), "Expected exactly one retransmitted segment");
     assert_eq!(
         reply,
-        TcpHandler {
+        TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
             flags: TcpFlags::FinAck,
@@ -112,7 +112,7 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result {
 
     // First data packet: "Hello" (5 bytes), ack=SERVER_ISN+1 -> echoed, pending segment
     // seq=SERVER_ISN+1..SERVER_ISN+6
-    TcpHandler {
+    TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: TcpPayload::from_test_str("Hello")?,
@@ -122,7 +122,7 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result {
 
     // Second data packet: "Hi" (2 bytes), still ack=SERVER_ISN+1 (hasn't acked the first echo yet)
     // -> echoed, pending segment seq=SERVER_ISN+6..SERVER_ISN+8
-    TcpHandler {
+    TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: TcpPayload::from_test_str("Hi")?,
@@ -137,7 +137,7 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result {
 
     assert_eq!(
         hello,
-        TcpHandler {
+        TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
             payload: TcpPayload::from_test_str("Hello")?,
@@ -147,7 +147,7 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result {
 
     assert_eq!(
         hi,
-        TcpHandler {
+        TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_HI_LEN,
             payload: TcpPayload::from_test_str("Hi")?,
@@ -164,7 +164,7 @@ fn gives_up_after_max_retransmits() -> Result {
 
     let mut connections = TcpConnections::new(RtoConfig::default(), MAX_RETRIES);
 
-    TcpHandler { seq_num: CLIENT_ISN, flags: TcpFlags::Syn, ..CLIENT_PKT }
+    TcpSegment { seq_num: CLIENT_ISN, flags: TcpFlags::Syn, ..CLIENT_PKT }
         .create_reply(&mut connections)?;
 
     for _ in 0..MAX_RETRIES {
@@ -191,7 +191,7 @@ fn retransmissions_back_off_exponentially() -> Result {
     )
     .after_handshake();
 
-    TcpHandler {
+    TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: TcpPayload::from_test_str("Hello")?,

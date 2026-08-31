@@ -3,7 +3,7 @@ use {
         Result,
         endpoint::{Local, Remote},
         protocol::tcp::{
-            LOCAL_SYN_BYTE, SendInfo, SeqOffset, SeqPoint, TcpFlags, TcpHandler, TcpPayload,
+            LOCAL_SYN_BYTE, SendInfo, SeqOffset, SeqPoint, TcpFlags, TcpPayload, TcpSegment,
             pending_segment::PendingSegment,
         },
     },
@@ -189,7 +189,7 @@ impl SynReceived {
     /// Enters ESTABLISHED, setting SND.WND, SND.WL1, and SND.WL2 (RFC 9293, Section 3.10.7.4,
     /// "Fifth, check the ACK field," "SYN-RECEIVED STATE").
     #[expect(clippy::unused_self, reason = "Require an instance for state transition")]
-    pub(super) const fn establish(self, seg: &TcpHandler<Remote>) -> SyncedState<Established> {
+    pub(super) const fn establish(self, seg: &TcpSegment<Remote>) -> SyncedState<Established> {
         SyncedState {
             window_state: WindowState {
                 snd_wnd: seg.window,
@@ -238,7 +238,7 @@ impl<T> SyncedState<T> {
     pub(super) fn incoming_ack_update(
         self,
         conn: &mut ConnState,
-        seg: &TcpHandler<Remote>,
+        seg: &TcpSegment<Remote>,
     ) -> Self {
         if conn.snd_una.precedes_or_eq(seg.ack_num) && seg.ack_num.precedes_or_eq(conn.snd_nxt) {
             // Exclude duplicate ACKs: SND.UNA < SEG.ACK <= SND.NXT
