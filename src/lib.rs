@@ -4,10 +4,15 @@ compile_error!("This crate only supports Linux because it directly uses low-leve
 pub mod server;
 pub mod sys;
 
+#[cfg(feature = "bench-internals")]
+pub mod checksum;
+
+#[cfg(not(feature = "bench-internals"))]
+mod checksum;
+
 pub use config::Config;
 
 mod addr_pairs;
-mod checksum;
 mod config;
 mod endpoint;
 mod ipv4_header;

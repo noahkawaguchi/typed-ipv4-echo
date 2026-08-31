@@ -3,8 +3,19 @@ name    = "typenet"
 version = "0.1.0"
 edition = "2024"
 
+[[bench]]
+harness           = false
+name              = "checksum"
+required-features = ["bench-internals"]
+
 [dependencies]
 libc = "0.2.189"
+
+[dev-dependencies]
+criterion = { version = "0.8.2", features = ["html_reports"] }
+
+[features]
+bench-internals = [] # Used for compiling/exposing some internals only in benchmarks
 
 [lints.clippy]
 # All lint groups except restriction and cargo

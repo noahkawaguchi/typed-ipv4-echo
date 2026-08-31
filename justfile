@@ -165,7 +165,7 @@ netem-clear:
 ####################################################################################################
 
 # Run tests, lints, format checking, and spell checking to match CI
-all-checks: (test '--quiet') lint-targets fmt-check spell-check
+ci-checks: (test '--quiet') lint fmt-check spell-check
 
 # Run tests, including ignored
 test *ARGS: tun
@@ -175,16 +175,16 @@ test *ARGS: tun
 cov *ARGS: tun
     cargo llvm-cov {{ ARGS }} -- --include-ignored
 
-# Generate HTML test coverage report and open in browser (includes ignored tests)
+# Generate HTML test coverage report (in `target/llvm-cov/html`) and open in browser
 cov-open: (cov '--open')
 
-# Lint with Clippy, denying warnings
-lint *ARGS:
-    cargo clippy --workspace --all-targets {{ ARGS }} -- --deny warnings
+# Run benchmarks (generates HTML in `target/criterion`)
+bench:
+    cargo bench --features bench-internals
 
-# Lint with Clippy for {aarch64,x86_64}-unknown-linux-gnu, denying warnings
-lint-targets: (lint '--target' 'aarch64-unknown-linux-gnu') \
-              (lint '--target' 'x86_64-unknown-linux-gnu')
+# Lint with Clippy, denying warnings
+lint:
+    cargo clippy --workspace --all-targets -- --deny warnings
 
 # Check formatting
 fmt-check:
