@@ -7,7 +7,7 @@ use {
         logger::Logger,
         protocol::{
             RtoConfig, TcpConnections, TcpSegment,
-            handler::{Encode, ProtocolHandler},
+            handler::{Encode, ProtocolRouter},
         },
         try_ops::{TryAdd as _, TryGet as _},
     },
@@ -46,8 +46,8 @@ enum ShutdownDecision {
 #[cfg_attr(test, derive(Debug))]
 struct ParsedExchange<'a> {
     ipv4_header: Ipv4Header<Remote>,
-    incoming_handler: ProtocolHandler<'a, Remote>,
-    reply_handler: Option<ProtocolHandler<'a, Local>>,
+    incoming_handler: ProtocolRouter<'a, Remote>,
+    reply_handler: Option<ProtocolRouter<'a, Local>>,
 }
 
 /// Reads and writes IPv4 packets to and from `device`, maintaining TCP connection state and echoing
@@ -312,7 +312,7 @@ impl<D, P, S> Server<'_, D, P, S> {
             Ipv4Header::parse(data).map_err(|e| format!("Skipping packet: {e}"))?;
 
         let incoming_handler =
-            ProtocolHandler::parse(ipv4_payload, ipv4_header.protocol, ipv4_header.ip_pair)
+            ProtocolRouter::parse(ipv4_payload, ipv4_header.protocol, ipv4_header.ip_pair)
                 .map_err(|e| format!("Skipping packet: {e}"))?;
 
         let reply_handler = incoming_handler

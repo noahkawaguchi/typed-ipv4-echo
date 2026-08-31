@@ -36,8 +36,8 @@ fn syn_parses_and_produces_a_reply() -> Result {
             .parse_incoming(&bytes),
         Ok(ParsedExchange {
             ipv4_header: _,
-            incoming_handler: ProtocolHandler::Tcp(_),
-            reply_handler: Some(ProtocolHandler::Tcp(_)),
+            incoming_handler: ProtocolRouter::Tcp(_),
+            reply_handler: Some(ProtocolRouter::Tcp(_)),
         })
     );
 
@@ -56,7 +56,7 @@ fn handshake_ack_parses_and_produces_no_reply() -> Result {
         .parse_incoming(&bytes),
         Ok(ParsedExchange {
             ipv4_header: _,
-            incoming_handler: ProtocolHandler::Tcp(_),
+            incoming_handler: ProtocolRouter::Tcp(_),
             reply_handler: None
         })
     );
