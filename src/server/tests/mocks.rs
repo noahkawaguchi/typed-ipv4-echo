@@ -1,6 +1,6 @@
 use {
     super::*,
-    crate::try_ops::{TryGet as _, TryGetMut as _},
+    crate::try_ops::TryGetMut as _,
     std::{collections::VecDeque, fs::File, os::fd::BorrowedFd},
 };
 

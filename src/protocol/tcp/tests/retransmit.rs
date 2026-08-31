@@ -1,7 +1,4 @@
-use {
-    super::*,
-    std::{thread, time::Duration},
-};
+use super::*;
 
 #[test]
 fn syn_ack_is_resent_while_due() -> Result {

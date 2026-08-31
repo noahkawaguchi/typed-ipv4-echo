@@ -770,7 +770,7 @@ mod tests {
                 test_consts::{LOCAL_TO_REMOTE_IP_PAIR, REMOTE_TO_LOCAL_IP_PAIR},
             },
         },
-        std::{assert_matches, collections::VecDeque},
+        std::{assert_matches, collections::VecDeque, thread, time::Duration},
     };
 
     impl TcpHandler<Remote> {
