@@ -54,36 +54,36 @@ A driving force throughout the codebase is the use of domain types to create and
 
 ### Static Dispatch Architecture
 
-The server separates IPv4 handling from ICMP/TCP/UDP-specific logic using a `ProtocolHandler` enum with variants for each supported protocol.
+The server separates IPv4 handling from ICMP/TCP/UDP-specific logic using a `ProtocolRouter` enum with variants for each supported protocol.
 
 ```
-╭─────────────────────────────────╮
-│      TUN device, main loop,     │
-│        shutdown signals         │
-╰────────────────┬────────────────╯
-                 │
-                 ▼
-╭─────────────────────────────────╮
-│           IPv4 header           │
-│         parsing/writing         │
-╰────────────────┬────────────────╯
-                 │
-                 ▼
-╭─────────────────────────────────╮
-│      ProtocolHandler enum       │
-│        (static dispatch)        │
-╰────┬───────────┬───────────┬────╯
-     │           │           │
-     ▼           ▼           ▼
-╭─────────╮ ╭─────────╮ ╭─────────╮
-│  ICMP   │ │   TCP   │ │   UDP   │
-│ handler │ │ handler │ │ handler │
-╰─────────╯ ╰─────────╯ ╰─────────╯
+╭──────────────────────────────╮
+│    TUN device, main loop,    │
+│      shutdown signals        │
+╰──────────────┬───────────────╯
+               │
+               ▼
+╭──────────────────────────────╮
+│         IPv4 header          │
+│       parsing/writing        │
+╰──────────────┬───────────────╯
+               │
+               ▼
+╭──────────────────────────────╮
+│     ProtocolRouter enum      │
+│      (static dispatch)       │
+╰────┬─────────┬──────────┬────╯
+     │         │          │
+     ▼         ▼          ▼
+╭────────╮ ╭────────╮ ╭────────╮
+│  ICMP  │ │  TCP   │ │  UDP   │
+│ module │ │ module │ │ module │
+╰────────╯ ╰────────╯ ╰────────╯
 ```
 
-Each variant wraps a concrete protocol handler responsible for:
+Each variant wraps a protocol-specific struct responsible for:
 
-- Parsing protocol-specific headers and payloads from raw bytes
+- Parsing headers and payloads from raw bytes
 - Determining the packets to send to clients
 - Encoding appropriate reply packets into raw bytes
 
