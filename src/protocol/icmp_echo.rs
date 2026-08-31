@@ -19,7 +19,7 @@ const ICMP_HDR_LEN: u16 = 8;
 
 /// Manages ICMP Echo Request/Reply headers, data, and reply logic. Sent from `S`.
 #[cfg_attr(test, derive(Debug))]
-pub struct IcmpEchoHandler<'a, S: Endpoint> {
+pub struct IcmpEchoMsg<'a, S: Endpoint> {
     /// Not a part of the ICMP header or checksum, but used for addressing replies and to stay
     /// parallel to TCP and UDP.
     ip_pair: Ipv4AddrPair<S>,
@@ -31,13 +31,13 @@ pub struct IcmpEchoHandler<'a, S: Endpoint> {
     payload: &'a [u8],
 }
 
-impl<S: Endpoint> IcmpEchoHandler<'_, S> {
+impl<S: Endpoint> IcmpEchoMsg<'_, S> {
     const ICMP_TYPE_ECHO_REQUEST: u8 = 8;
     const ICMP_TYPE_ECHO_REPLY: u8 = 0;
     const ICMP_CODE_ECHO: u8 = 0;
 }
 
-impl<'a> IcmpEchoHandler<'a, Remote> {
+impl<'a> IcmpEchoMsg<'a, Remote> {
     /// Parses `data` as an ICMP Echo Request header and payload.
     pub(super) fn parse(data: &'a [u8], ip_pair: Ipv4AddrPair<Remote>) -> Result<Self, String> {
         let (icmp_header, payload) = data
@@ -66,11 +66,11 @@ impl<'a> IcmpEchoHandler<'a, Remote> {
     }
 
     /// Creates an ICMP header and payload for replying to `self`.
-    pub(super) const fn create_reply(&self) -> IcmpEchoHandler<'a, Local> {
+    pub(super) const fn create_reply(&self) -> IcmpEchoMsg<'a, Local> {
         // ICMP Echo Reply:
         // - Change type from 8 to 0
         // - Keep the same identifier, sequence number, and payload data
-        IcmpEchoHandler::<Local> {
+        IcmpEchoMsg::<Local> {
             ip_pair: self.ip_pair.swapped(),
             icmp_type: Self::ICMP_TYPE_ECHO_REPLY,
             identifier: self.identifier,
@@ -80,7 +80,7 @@ impl<'a> IcmpEchoHandler<'a, Remote> {
     }
 }
 
-impl Encode<Local> for IcmpEchoHandler<'_, Local> {
+impl Encode<Local> for IcmpEchoMsg<'_, Local> {
     fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
         // Copy echo payload
         buf.try_get_mut(
@@ -117,13 +117,13 @@ impl Encode<Local> for IcmpEchoHandler<'_, Local> {
     fn get_ip_pair(&self) -> Ipv4AddrPair<Local> { self.ip_pair }
 }
 
-impl<S: Endpoint> PrettyProtocol for IcmpEchoHandler<'_, S> {
+impl<S: Endpoint> PrettyProtocol for IcmpEchoMsg<'_, S> {
     fn pretty_payload(&self, include_content: bool) -> PrettyPayload<'_> {
         PrettyPayload { data: self.payload, include_content }
     }
 }
 
-impl<S: Endpoint> fmt::Display for IcmpEchoHandler<'_, S> {
+impl<S: Endpoint> fmt::Display for IcmpEchoMsg<'_, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -160,7 +160,7 @@ mod tests {
             0x41, 0x42, 0x43,  // Payload: "ABC"
         ];
 
-        let handler = IcmpEchoHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
+        let handler = IcmpEchoMsg::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
 
         assert_eq!(handler.identifier, 0x1234);
         assert_eq!(handler.sequence, 0x5678);
@@ -174,7 +174,7 @@ mod tests {
         const DATA: [u8; 5] = [8, 0, 0x3A, 0x4B, 0x12]; // Only 5 bytes
 
         assert_matches!(
-            IcmpEchoHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR),
+            IcmpEchoMsg::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR),
             Err(e) if e.contains("Too short")
         );
     }
@@ -190,7 +190,7 @@ mod tests {
         ];
 
         assert_matches!(
-            IcmpEchoHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR),
+            IcmpEchoMsg::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR),
             Err(e) if e.contains("Not an Echo Request")
         );
     }
@@ -206,7 +206,7 @@ mod tests {
         ];
 
         assert_matches!(
-            IcmpEchoHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR),
+            IcmpEchoMsg::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR),
             Err(e) if e.contains("Not an Echo Request")
         );
     }
@@ -223,7 +223,7 @@ mod tests {
         ];
 
         assert_matches!(
-            IcmpEchoHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR),
+            IcmpEchoMsg::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR),
             Err(e) if e.contains("checksum")
         );
     }
@@ -238,7 +238,7 @@ mod tests {
             0x00, 0x01,        // Sequence: 1
         ];
 
-        let handler = IcmpEchoHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
+        let handler = IcmpEchoMsg::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
 
         assert_eq!(handler.identifier, 0);
         assert_eq!(handler.sequence, 1);
@@ -258,7 +258,7 @@ mod tests {
             0x48, 0x65, 0x6C, 0x6C, 0x6F,  // Payload: "Hello"
         ];
 
-        let handler = IcmpEchoHandler::parse(&REQUEST, REMOTE_TO_LOCAL_IP_PAIR)?;
+        let handler = IcmpEchoMsg::parse(&REQUEST, REMOTE_TO_LOCAL_IP_PAIR)?;
         let mut reply_buf = [0u8; ETHERNET_MTU];
         let reply = handler.create_reply();
         let icmp_len = reply.write_into(&mut reply_buf[20..])?;
