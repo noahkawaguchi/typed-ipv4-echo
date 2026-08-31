@@ -35,7 +35,7 @@ pub trait Encode<S: Endpoint>: PrettyProtocol {
     fn get_ip_pair(&self) -> Ipv4AddrPair<S>;
 }
 
-/// Enum for static dispatch over the supported protocol-specific handlers. Sent from `S`.
+/// Enum for static dispatch over the supported protocol-specific structs. Sent from `S`.
 #[cfg_attr(test, derive(Debug))]
 pub enum ProtocolRouter<'a, S: Endpoint> {
     Icmp(IcmpEchoMsg<'a, S>),
@@ -66,14 +66,14 @@ impl<'a> ProtocolRouter<'a, Remote> {
         tcp_connections: &mut TcpConnections,
     ) -> Result<Option<ProtocolRouter<'a, Local>>> {
         Ok(match self {
-            Self::Icmp(handler) => Some(ProtocolRouter::<Local>::Icmp(handler.create_reply())),
+            Self::Icmp(msg) => Some(ProtocolRouter::<Local>::Icmp(msg.create_reply())),
 
             // TCP is the only one that's actually optional or fallible
-            Self::Tcp(handler) => handler
+            Self::Tcp(seg) => seg
                 .create_reply(tcp_connections)?
                 .map(ProtocolRouter::<Local>::Tcp),
 
-            Self::Udp(handler) => Some(ProtocolRouter::<Local>::Udp(handler.create_reply())),
+            Self::Udp(dgram) => Some(ProtocolRouter::<Local>::Udp(dgram.create_reply())),
         })
     }
 }
@@ -81,25 +81,25 @@ impl<'a> ProtocolRouter<'a, Remote> {
 impl Encode<Local> for ProtocolRouter<'_, Local> {
     fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
         match self {
-            Self::Icmp(handler) => handler.write_into(buf),
-            Self::Tcp(handler) => handler.write_into(buf),
-            Self::Udp(handler) => handler.write_into(buf),
+            Self::Icmp(msg) => msg.write_into(buf),
+            Self::Tcp(seg) => seg.write_into(buf),
+            Self::Udp(dgram) => dgram.write_into(buf),
         }
     }
 
     fn proto(&self) -> Protocol {
         match self {
-            Self::Icmp(handler) => handler.proto(),
-            Self::Tcp(handler) => handler.proto(),
-            Self::Udp(handler) => handler.proto(),
+            Self::Icmp(msg) => msg.proto(),
+            Self::Tcp(seg) => seg.proto(),
+            Self::Udp(dgram) => dgram.proto(),
         }
     }
 
     fn get_ip_pair(&self) -> Ipv4AddrPair<Local> {
         match self {
-            Self::Icmp(handler) => handler.get_ip_pair(),
-            Self::Tcp(handler) => handler.get_ip_pair(),
-            Self::Udp(handler) => handler.get_ip_pair(),
+            Self::Icmp(msg) => msg.get_ip_pair(),
+            Self::Tcp(seg) => seg.get_ip_pair(),
+            Self::Udp(dgram) => dgram.get_ip_pair(),
         }
     }
 }
@@ -107,9 +107,9 @@ impl Encode<Local> for ProtocolRouter<'_, Local> {
 impl<S: Endpoint> PrettyProtocol for ProtocolRouter<'_, S> {
     fn pretty_payload(&self, include_content: bool) -> PrettyPayload<'_> {
         match self {
-            Self::Icmp(handler) => handler.pretty_payload(include_content),
-            Self::Tcp(handler) => handler.pretty_payload(include_content),
-            Self::Udp(handler) => handler.pretty_payload(include_content),
+            Self::Icmp(msg) => msg.pretty_payload(include_content),
+            Self::Tcp(seg) => seg.pretty_payload(include_content),
+            Self::Udp(dgram) => dgram.pretty_payload(include_content),
         }
     }
 }
@@ -117,9 +117,9 @@ impl<S: Endpoint> PrettyProtocol for ProtocolRouter<'_, S> {
 impl<S: Endpoint> fmt::Display for ProtocolRouter<'_, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Icmp(handler) => write!(f, "{handler}"),
-            Self::Tcp(handler) => write!(f, "{handler}"),
-            Self::Udp(handler) => write!(f, "{handler}"),
+            Self::Icmp(msg) => write!(f, "{msg}"),
+            Self::Tcp(seg) => write!(f, "{seg}"),
+            Self::Udp(dgram) => write!(f, "{dgram}"),
         }
     }
 }

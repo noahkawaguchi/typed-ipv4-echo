@@ -15,8 +15,8 @@ use {
         protocol::{
             Protocol,
             display::{PrettyPayload, WithThousandsSeparators as _},
-            router::{Encode, PrettyProtocol},
             pseudo_header_checksum,
+            router::{Encode, PrettyProtocol},
             tcp::{
                 connections::ConnKey,
                 flags::TcpFlags,

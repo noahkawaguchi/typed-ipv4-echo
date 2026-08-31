@@ -90,20 +90,18 @@ impl MockPoll {
     }
 }
 
-/// Encodes `handler` into a full IPv4 packet so it can be used as a scripted mock to be read.
-pub fn encode_mock_pkt(handler: &TcpSegment<Remote>) -> Result<Vec<u8>> {
+/// Encodes `seg` into a full IPv4 packet so it can be used as a scripted mock to be read.
+pub fn encode_mock_pkt(seg: &TcpSegment<Remote>) -> Result<Vec<u8>> {
     let mut buf = [0u8; ETHERNET_MTU];
-    let proto_len = handler.write_into(&mut buf[Ipv4Header::REPLY_HDR_LEN..])?;
+    let proto_len = seg.write_into(&mut buf[Ipv4Header::REPLY_HDR_LEN..])?;
 
-    let ipv4_header =
-        Ipv4Header::test_try_new_remote(handler.proto(), handler.get_ip_pair(), proto_len)?;
-
+    let ipv4_header = Ipv4Header::test_try_new_remote(seg.proto(), seg.get_ip_pair(), proto_len)?;
     ipv4_header.test_write_into_remote(&mut buf);
 
     Ok(buf.try_get(..ipv4_header.total_len.into())?.to_vec())
 }
 
-/// Decodes a full IPv4 packet in the local to remote direction into a `TcpHandler` so tests can
+/// Decodes a full IPv4 packet in the local to remote direction into a `TcpSegment` so tests can
 /// assert on structs instead of raw bytes.
 pub fn decode_mock_pkt(bytes: &[u8]) -> Result<TcpSegment<Local>> {
     let (ipv4_header, payload) = Ipv4Header::test_parse_local(bytes)?;

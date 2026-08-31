@@ -99,7 +99,7 @@ impl Logger {
     pub(crate) fn pkt_io<S: Endpoint>(
         &self,
         ipv4_header: &Ipv4Header<S>,
-        proto_handler: &impl PrettyProtocol,
+        pretty_proto: &impl PrettyProtocol,
     ) -> io::Result<()> {
         match self.level {
             LogLevel::Silent | LogLevel::ServerInfo => {}
@@ -111,9 +111,9 @@ impl Logger {
 
             level @ (LogLevel::PktDetails | LogLevel::PktFull) => {
                 println!(
-                    "{}\n{ipv4_header}\n{proto_handler}\n{}",
+                    "{}\n{ipv4_header}\n{pretty_proto}\n{}",
                     Timestamp(self.birth),
-                    proto_handler.pretty_payload(level == LogLevel::PktFull)
+                    pretty_proto.pretty_payload(level == LogLevel::PktFull)
                 );
             }
         }

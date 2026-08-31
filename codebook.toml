@@ -26,6 +26,7 @@ words = [
     "cov",
     "ctype",
     "datagrams",
+    "dgram",
     "direnv",
     "distros",
     "dtolnay",

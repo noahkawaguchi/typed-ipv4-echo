@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn write_into_produces_correct_bytes_with_no_payload() -> Result {
-    let handler = TcpSegment::<Local> {
+    let seg = TcpSegment::<Local> {
         ip_pair: LOCAL_TO_REMOTE_IP_PAIR,
         ports: PortPair::new(80, 1234),
         seq_num: SeqPoint::new(0x1000_0000),
@@ -14,7 +14,7 @@ fn write_into_produces_correct_bytes_with_no_payload() -> Result {
     };
 
     let mut reply = [0u8; ETHERNET_MTU];
-    let tcp_len = handler.write_into(&mut reply[20..])?;
+    let tcp_len = seg.write_into(&mut reply[20..])?;
 
     assert_eq!(tcp_len, 20, "no payload, so length is just the header");
 
@@ -34,7 +34,7 @@ fn write_into_produces_correct_bytes_with_no_payload() -> Result {
 
 #[test]
 fn write_into_produces_correct_bytes_with_payload() -> Result {
-    let handler = TcpSegment::<Local> {
+    let seg = TcpSegment::<Local> {
         ip_pair: LOCAL_TO_REMOTE_IP_PAIR,
         ports: PortPair::new(80, 1234),
         seq_num: SeqPoint::new(1),
@@ -46,7 +46,7 @@ fn write_into_produces_correct_bytes_with_payload() -> Result {
     };
 
     let mut reply = [0u8; ETHERNET_MTU];
-    let tcp_len = handler.write_into(&mut reply[20..])?;
+    let tcp_len = seg.write_into(&mut reply[20..])?;
 
     assert_eq!(tcp_len, 25, "header (20 bytes) + payload (5 bytes)");
 

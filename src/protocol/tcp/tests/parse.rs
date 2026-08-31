@@ -15,15 +15,15 @@ fn correct_for_valid_segment() -> Result {
             0x48, 0x65, 0x6C, 0x6C, 0x6F,        // Payload: "Hello"
         ];
 
-    let handler = TcpSegment::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
+    let seg = TcpSegment::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
 
-    assert_eq!(handler.ports, PortPair::new(1234, 80));
-    assert_eq!(handler.seq_num, SeqPoint::new(1));
-    assert_eq!(handler.ack_num, SeqPoint::new(2));
-    assert_eq!(handler.offset_bytes, 20);
-    assert_eq!(handler.flags, TcpFlags::SynAck);
-    assert_eq!(handler.window, SeqOffset::new(29_200));
-    assert_eq!(handler.payload.as_ref().map(TcpPayload::as_bytes), Some("Hello".as_ref()));
+    assert_eq!(seg.ports, PortPair::new(1234, 80));
+    assert_eq!(seg.seq_num, SeqPoint::new(1));
+    assert_eq!(seg.ack_num, SeqPoint::new(2));
+    assert_eq!(seg.offset_bytes, 20);
+    assert_eq!(seg.flags, TcpFlags::SynAck);
+    assert_eq!(seg.window, SeqOffset::new(29_200));
+    assert_eq!(seg.payload.as_ref().map(TcpPayload::as_bytes), Some("Hello".as_ref()));
 
     Ok(())
 }
@@ -73,10 +73,10 @@ fn handles_large_sequence_numbers() -> Result {
             0x00, 0x00,                          // Urgent pointer
         ];
 
-    let handler = TcpSegment::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
+    let seg = TcpSegment::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
 
-    assert_eq!(handler.seq_num, SeqPoint::new(u32::MAX));
-    assert_eq!(handler.ack_num, SeqPoint::new(0xFEDC_BA98));
+    assert_eq!(seg.seq_num, SeqPoint::new(u32::MAX));
+    assert_eq!(seg.ack_num, SeqPoint::new(0xFEDC_BA98));
 
     Ok(())
 }

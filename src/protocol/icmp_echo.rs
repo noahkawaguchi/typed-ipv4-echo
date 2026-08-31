@@ -160,11 +160,11 @@ mod tests {
             0x41, 0x42, 0x43,  // Payload: "ABC"
         ];
 
-        let handler = IcmpEchoMsg::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
+        let msg = IcmpEchoMsg::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
 
-        assert_eq!(handler.identifier, 0x1234);
-        assert_eq!(handler.sequence, 0x5678);
-        assert_eq!(handler.payload, &[0x41, 0x42, 0x43]);
+        assert_eq!(msg.identifier, 0x1234);
+        assert_eq!(msg.sequence, 0x5678);
+        assert_eq!(msg.payload, &[0x41, 0x42, 0x43]);
 
         Ok(())
     }
@@ -238,11 +238,11 @@ mod tests {
             0x00, 0x01,        // Sequence: 1
         ];
 
-        let handler = IcmpEchoMsg::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
+        let msg = IcmpEchoMsg::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
 
-        assert_eq!(handler.identifier, 0);
-        assert_eq!(handler.sequence, 1);
-        assert_eq!(handler.payload.len(), 0);
+        assert_eq!(msg.identifier, 0);
+        assert_eq!(msg.sequence, 1);
+        assert_eq!(msg.payload.len(), 0);
 
         Ok(())
     }
@@ -258,9 +258,9 @@ mod tests {
             0x48, 0x65, 0x6C, 0x6C, 0x6F,  // Payload: "Hello"
         ];
 
-        let handler = IcmpEchoMsg::parse(&REQUEST, REMOTE_TO_LOCAL_IP_PAIR)?;
+        let msg = IcmpEchoMsg::parse(&REQUEST, REMOTE_TO_LOCAL_IP_PAIR)?;
         let mut reply_buf = [0u8; ETHERNET_MTU];
-        let reply = handler.create_reply();
+        let reply = msg.create_reply();
         let icmp_len = reply.write_into(&mut reply_buf[20..])?;
 
         // IPs should be swapped

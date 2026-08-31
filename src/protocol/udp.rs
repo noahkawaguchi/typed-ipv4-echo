@@ -138,10 +138,10 @@ mod tests {
             0x6F, 0x21, 0x21, 0x21,  // Payload: "o!!!"
         ];
 
-        let handler = UdpDatagram::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
+        let dgram = UdpDatagram::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
 
-        assert_eq!(handler.ports, PortPair::new(1234, 53));
-        assert_eq!(handler.payload, b"Hello!!!");
+        assert_eq!(dgram.ports, PortPair::new(1234, 53));
+        assert_eq!(dgram.payload, b"Hello!!!");
 
         Ok(())
     }
@@ -186,10 +186,10 @@ mod tests {
             0x6F, 0x21, 0x21, 0x21,  // Payload: "o!!!"
         ];
 
-        let handler = UdpDatagram::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
+        let dgram = UdpDatagram::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
 
-        assert_eq!(handler.ports, PortPair::new(1234, 53));
-        assert_eq!(handler.payload, b"Hello!!!");
+        assert_eq!(dgram.ports, PortPair::new(1234, 53));
+        assert_eq!(dgram.payload, b"Hello!!!");
 
         Ok(())
     }
@@ -204,10 +204,10 @@ mod tests {
             0xCB, 0xFB,              // Checksum (valid for this datagram and IP pair)
         ];
 
-        let handler = UdpDatagram::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
+        let dgram = UdpDatagram::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
 
-        assert_eq!(handler.ports, PortPair::new(8080, 80));
-        assert_eq!(handler.payload.len(), 0);
+        assert_eq!(dgram.ports, PortPair::new(8080, 80));
+        assert_eq!(dgram.payload.len(), 0);
 
         Ok(())
     }
@@ -223,9 +223,9 @@ mod tests {
             0x74, 0x65, 0x73, 0x74,  // Payload: "test"
         ];
 
-        let handler = UdpDatagram::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
+        let dgram = UdpDatagram::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
 
-        assert_eq!(handler.ports, PortPair::new(65535, 1));
+        assert_eq!(dgram.ports, PortPair::new(65535, 1));
 
         Ok(())
     }
@@ -236,14 +236,14 @@ mod tests {
         // 10.0.0.1 and 10.0.0.2 (in either order) and ports 1234 and 80 (in either order).
         // However, 0xFFFF must be transmitted instead of 0x0000.
 
-        const HANDLER: UdpDatagram<Local> = UdpDatagram {
+        const DGRAM: UdpDatagram<Local> = UdpDatagram {
             ip_pair: LOCAL_TO_REMOTE_IP_PAIR,
             ports: PortPair::new(1234, 80),
             payload: &[0xE6, 0xB5],
         };
 
         let mut buf = [0u8; ETHERNET_MTU];
-        HANDLER.write_into(&mut buf)?;
+        DGRAM.write_into(&mut buf)?;
 
         assert_eq!(&buf[6..8], &[0xFF, 0xFF]);
 
@@ -261,9 +261,9 @@ mod tests {
             0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x21, 0x21, 0x21,  // Payload: "Hello!!!"
         ];
 
-        let handler = UdpDatagram::parse(&REQUEST, REMOTE_TO_LOCAL_IP_PAIR)?;
+        let dgram = UdpDatagram::parse(&REQUEST, REMOTE_TO_LOCAL_IP_PAIR)?;
         let mut reply_buf = [0u8; ETHERNET_MTU];
-        let reply = handler.create_reply();
+        let reply = dgram.create_reply();
         let udp_len = reply.write_into(&mut reply_buf[20..])?;
 
         // IPs should be swapped

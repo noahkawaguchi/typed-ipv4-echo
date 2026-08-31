@@ -41,13 +41,12 @@ enum ShutdownDecision {
     NoConnections,
 }
 
-/// A parsed incoming IPv4 header and protocol handler along with a reply handler if one is
-/// necessary.
+/// A parsed incoming IPv4 header and protocol router along with a reply router if one is necessary.
 #[cfg_attr(test, derive(Debug))]
 struct ParsedExchange<'a> {
     ipv4_header: Ipv4Header<Remote>,
-    incoming_handler: ProtocolRouter<'a, Remote>,
-    reply_handler: Option<ProtocolRouter<'a, Local>>,
+    incoming_router: ProtocolRouter<'a, Remote>,
+    reply_router: Option<ProtocolRouter<'a, Local>>,
 }
 
 /// Reads and writes IPv4 packets to and from `device`, maintaining TCP connection state and echoing
@@ -140,11 +139,11 @@ where
 
                 // A retransmit deadline elapsed -> retransmit all expired segments
                 Ok(false) => {
-                    for reply_handler in self.tcp_connections.make_retransmissions() {
+                    for tcp_seg in self.tcp_connections.make_retransmissions() {
                         self.logger
                             .pkt_extra(" ==== Packet sent (retransmission) ====");
 
-                        self.send_pkt(&reply_handler)?;
+                        self.send_pkt(&tcp_seg)?;
                         self.logger.divider();
                     }
                 }
@@ -175,9 +174,9 @@ where
                         Ok(exchange) => {
                             self.logger.pkt_extra(" ==== Packet received ====");
                             self.logger
-                                .pkt_io(&exchange.ipv4_header, &exchange.incoming_handler)?;
+                                .pkt_io(&exchange.ipv4_header, &exchange.incoming_router)?;
 
-                            match exchange.reply_handler {
+                            match exchange.reply_router {
                                 None => self.logger.pkt_extra("\n<no reply>"),
 
                                 Some(reply) => {
@@ -224,9 +223,9 @@ where
 
                 self.logger.divider();
 
-                for reply_handler in to_send {
+                for tcp_seg in to_send {
                     self.logger.pkt_extra(" ==== Packet sent ====");
-                    self.send_pkt(&reply_handler)?;
+                    self.send_pkt(&tcp_seg)?;
                 }
 
                 self.logger.divider();
@@ -244,19 +243,19 @@ where
         })
     }
 
-    /// Writes `handler`'s protocol-specific header and payload into the write buffer, prefixed with
-    /// an IPv4 header, then writes the resulting packet to `device` and prints its string
-    /// representation to stdout.
-    fn send_pkt(&mut self, handler: &impl Encode<Local>) -> Result {
-        let proto_len = handler.write_into(&mut self.write_buf[Ipv4Header::REPLY_HDR_LEN..])?;
+    /// Writes the protocol-specific header and payload of `outgoing` into the write buffer,
+    /// prefixed with an IPv4 header, then writes the resulting packet to the device and logs its
+    /// transmission.
+    fn send_pkt(&mut self, outgoing: &impl Encode<Local>) -> Result {
+        let proto_len = outgoing.write_into(&mut self.write_buf[Ipv4Header::REPLY_HDR_LEN..])?;
 
-        let ipv4_header = Ipv4Header::try_new(handler.proto(), handler.get_ip_pair(), proto_len)?;
+        let ipv4_header = Ipv4Header::try_new(outgoing.proto(), outgoing.get_ip_pair(), proto_len)?;
         ipv4_header.write_into(&mut self.write_buf);
 
         self.device
             .write_all(self.write_buf.try_get(..ipv4_header.total_len.into())?)?;
 
-        self.logger.pkt_io(&ipv4_header, handler)?;
+        self.logger.pkt_io(&ipv4_header, outgoing)?;
 
         Ok(())
     }
@@ -311,15 +310,15 @@ impl<D, P, S> Server<'_, D, P, S> {
         let (ipv4_header, ipv4_payload) =
             Ipv4Header::parse(data).map_err(|e| format!("Skipping packet: {e}"))?;
 
-        let incoming_handler =
+        let incoming_router =
             ProtocolRouter::parse(ipv4_payload, ipv4_header.protocol, ipv4_header.ip_pair)
                 .map_err(|e| format!("Skipping packet: {e}"))?;
 
-        let reply_handler = incoming_handler
+        let reply_router = incoming_router
             .create_reply(&mut self.tcp_connections)
             .map_err(|e| format!("Error creating reply: {e}"))?;
 
-        Ok(ParsedExchange { ipv4_header, incoming_handler, reply_handler })
+        Ok(ParsedExchange { ipv4_header, incoming_router, reply_router })
     }
 }
 
