@@ -47,8 +47,8 @@ impl PendingSegment {
     /// Returns the time at which the segment is due for retransmission using exponential backoff,
     /// or `Instant::now()` if `Instant` overflowed.
     pub(super) fn time_due(&self, rto_config: &RtoConfig) -> Instant {
-        // Make the RTO saturate at `Duration::MAX`, or "about 584,942,417,355 years" (std library
-        // docs), then clamp to the real acceptable range.
+        // Make the RTO saturate at `Duration::MAX`, or "about 584,942,417,355 years" (standard
+        // library docs), then clamp to the real acceptable range.
         let rto = rto_config
             .initial
             .saturating_mul(2u32.saturating_pow(self.retries.into()))

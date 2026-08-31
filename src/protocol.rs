@@ -18,7 +18,7 @@ use {
     std::fmt,
 };
 
-/// Calculates the TCP/UDP checksum of the pseudo-header + `data`. `data` should be the TCP/UDP
+/// Calculates the TCP/UDP checksum of the pseudo-header + `data`. `data` should cover the TCP/UDP
 /// header and payload. Does not zero out the checksum field inside the header of `data` before
 /// calculating.
 fn pseudo_header_checksum<S: Endpoint>(

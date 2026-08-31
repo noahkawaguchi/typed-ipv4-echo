@@ -29,7 +29,7 @@ pub fn attach(device_name: &str) -> io::Result<File> {
     // The interface must already exist, otherwise the `ioctl()` syscall below will try to create it
     // and fail with permission denied.
     //
-    // NOTE: Query the kernel's interface table directly because path existence checks relative to
+    // Query the kernel's interface table directly because path existence checks relative to
     // `/sys/class/net` are fooled by absolute paths, empty strings, etc.
     if CString::new(device_name).ok().is_none_or(|name| {
         // SAFETY: `name` is a valid, NUL-terminated C string that outlives this call.
