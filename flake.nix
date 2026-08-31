@@ -31,10 +31,6 @@
                   "clippy"
                   "llvm-tools-preview"
                 ];
-                targets = [
-                  "aarch64-unknown-linux-gnu"
-                  "x86_64-unknown-linux-gnu"
-                ];
               })
 
               cargo-llvm-cov

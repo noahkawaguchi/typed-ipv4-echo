@@ -255,11 +255,10 @@ Tests, lints, format checking, and spell checking run in CI (as defined in [`.gi
 
 The project takes a strict approach to linting (as defined in [`Cargo.toml`](Cargo.toml)), completely forbidding panicking constructs like `unwrap` and `expect` and isolating limited use of `unsafe`.
 
-The [`justfile`](justfile) includes recipes for running CI checks locally. The `lint-targets` recipe cross-compiles and lints for both `aarch64-unknown-linux-gnu` and `x86_64-unknown-linux-gnu`. If not using Nix, this requires `rustup target add <TARGET>` for one or both of the targets depending on whether your host platform is already one of the two.
+The [`justfile`](justfile) includes recipes for running CI checks locally.
 
 ```sh
 just lint
-just lint-targets
 just fmt-check
 just spell-check
 just ci-checks  # All CI checks (including tests)
