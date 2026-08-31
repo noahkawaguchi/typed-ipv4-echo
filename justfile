@@ -175,7 +175,7 @@ test *ARGS: tun
 cov *ARGS: tun
     cargo llvm-cov {{ ARGS }} -- --include-ignored
 
-# Generate HTML test coverage report and open in browser (includes ignored tests)
+# Generate HTML test coverage report (in `target/llvm-cov/html`) and open in browser
 cov-open: (cov '--open')
 
 # Run benchmarks (generates HTML in `target/criterion`)
