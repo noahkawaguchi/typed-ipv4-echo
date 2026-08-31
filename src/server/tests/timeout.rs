@@ -32,7 +32,7 @@ fn pending_retransmission_alone_gives_duration() {
                 RtoConfig { initial: INITIAL_RTO, ..Default::default() },
                 5
             )
-            .with_syn_rcv_and_packet_last_sent(now),
+            .with_syn_rcv_and_pkt_last_sent(now),
             ..decision_test_server()
         }
         .poll_timeout(now),
@@ -52,7 +52,7 @@ fn earlier_retransmit_deadline_taken_over_later_shutdown_deadline() -> Result {
                 RtoConfig { initial: INITIAL_RTO, ..Default::default() },
                 5
             )
-            .with_syn_rcv_and_packet_last_sent(now),
+            .with_syn_rcv_and_pkt_last_sent(now),
             shutdown_deadline: Some(now.try_add(Duration::from_secs(30))?),
             ..decision_test_server()
         }
@@ -145,7 +145,7 @@ fn poll_timeout_reflects_shutdown_deadline_across_a_real_run() -> Result {
 
     let [write] = device.write_history() else { return Err("Expected exactly one write".into()) };
 
-    assert_eq!(decode_mock_packet(write)?, TcpHandler::SERVER_FIN_ACK_INITIATING_CLOSE);
+    assert_eq!(decode_mock_pkt(write)?, TcpHandler::SERVER_FIN_ACK_INITIATING_CLOSE);
 
     Ok(())
 }

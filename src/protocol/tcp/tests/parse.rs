@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn correctly_parses_valid_packet() -> Result {
+fn correctly_parses_valid_segment() -> Result {
     #[rustfmt::skip]
         const DATA: [u8; 25] = [
             0x04, 0xD2,                          // Source port: 1234

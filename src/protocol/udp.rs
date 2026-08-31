@@ -127,7 +127,7 @@ mod tests {
     };
 
     #[test]
-    fn correctly_parses_valid_packet() -> Result {
+    fn correctly_parses_valid_datagram() -> Result {
         #[rustfmt::skip]
         const DATA: [u8; 16] = [
             0x04, 0xD2,              // Source port: 1234

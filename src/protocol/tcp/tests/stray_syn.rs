@@ -12,12 +12,9 @@ fn stray_syn_out_of_window_gets_challenge_ack() -> Result {
 
     // seq=CLIENT_ISN-20 < rcv_nxt=CLIENT_ISN+1, outside the receive window, caught at "First, check
     // sequence number"
-    let reply = TcpHandler {
-        seq_num: CLIENT_ISN - SeqOffset::new(20),
-        flags: TcpFlags::Syn,
-        ..CLIENT_PACKET
-    }
-    .create_reply(&mut connections)?;
+    let reply =
+        TcpHandler { seq_num: CLIENT_ISN - SeqOffset::new(20), flags: TcpFlags::Syn, ..CLIENT_PKT }
+            .create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
@@ -50,7 +47,7 @@ fn stray_syn_in_window_gets_challenge_ack() -> Result {
 
     // seq=CLIENT_ISN+1 == rcv_nxt, inside the receive window, reaches "Fourth, check the SYN bit"
     let reply =
-        TcpHandler { seq_num: CLIENT_ISN + REMOTE_SYN_BYTE, flags: TcpFlags::Syn, ..CLIENT_PACKET }
+        TcpHandler { seq_num: CLIENT_ISN + REMOTE_SYN_BYTE, flags: TcpFlags::Syn, ..CLIENT_PKT }
             .create_reply(&mut connections)?;
 
     assert_eq!(
@@ -85,7 +82,7 @@ fn stray_syn_in_fin_wait_1_gets_challenge_ack() -> Result {
 
     // seq=CLIENT_ISN+1 == rcv_nxt, inside the receive window, reaches "Fourth, check the SYN bit"
     let reply =
-        TcpHandler { seq_num: CLIENT_ISN + REMOTE_SYN_BYTE, flags: TcpFlags::Syn, ..CLIENT_PACKET }
+        TcpHandler { seq_num: CLIENT_ISN + REMOTE_SYN_BYTE, flags: TcpFlags::Syn, ..CLIENT_PKT }
             .create_reply(&mut connections)?;
 
     assert_eq!(
@@ -123,7 +120,7 @@ fn stray_syn_ack_gets_challenge_ack() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::SynAck,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 

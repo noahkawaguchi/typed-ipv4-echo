@@ -212,14 +212,12 @@ impl TcpConnections {
     /// Inserts a SYN-RECEIVED connection using `KEY`, `CLIENT_ISN`, and `SERVER_ISN` as if we had
     /// just responded to the peer's SYN with SYN-ACK.
     #[cfg(test)]
-    pub(crate) fn with_syn_rcv(self) -> Self {
-        self.with_syn_rcv_and_packet_last_sent(Instant::now())
-    }
+    pub(crate) fn with_syn_rcv(self) -> Self { self.with_syn_rcv_and_pkt_last_sent(Instant::now()) }
 
     /// Inserts a SYN-RECEIVED connection using `KEY`, `CLIENT_ISN`, and `SERVER_ISN` as if we had
     /// just responded to the peer's SYN with SYN-ACK at time `sent_at`.
     #[cfg(test)]
-    pub(crate) fn with_syn_rcv_and_packet_last_sent(mut self, sent_at: Instant) -> Self {
+    pub(crate) fn with_syn_rcv_and_pkt_last_sent(mut self, sent_at: Instant) -> Self {
         use {
             crate::protocol::tcp::{
                 LOCAL_SYN_BYTE, REMOTE_SYN_BYTE,

@@ -1,7 +1,7 @@
 use super::*;
 
 fn client_rst(seq_num: SeqPoint<Remote>) -> TcpHandler<Remote> {
-    TcpHandler { seq_num, flags: TcpFlags::Rst, ..CLIENT_PACKET }
+    TcpHandler { seq_num, flags: TcpFlags::Rst, ..CLIENT_PKT }
 }
 
 #[test]

@@ -776,14 +776,14 @@ mod tests {
     impl TcpHandler<Remote> {
         /// A SYN requesting a new connection using the regular `CLIENT_PACKET` consts, which should
         /// generate a SYN-ACK reply.
-        pub(crate) const CLIENT_SYN: Self = Self { flags: TcpFlags::Syn, ..CLIENT_PACKET };
+        pub(crate) const CLIENT_SYN: Self = Self { flags: TcpFlags::Syn, ..CLIENT_PKT };
 
         /// The handshake-completing ACK matching the module's standard test consts, which should be
         /// accepted if in SYN-RECEIVED by transitioning to ESTABLISHED and replying with `None`.
         pub(crate) const CLIENT_ACK_COMPLETING_HANDSHAKE: Self = Self {
             seq_num: CLIENT_ISN.const_add(REMOTE_SYN_BYTE),
             ack_num: SERVER_ISN.const_add(LOCAL_SYN_BYTE),
-            ..CLIENT_PACKET
+            ..CLIENT_PKT
         };
 
         /// The client's FIN-ACK completing active close after our own FIN was sent (FIN-WAIT-1),
@@ -792,7 +792,7 @@ mod tests {
             seq_num: CLIENT_ISN.const_add(REMOTE_SYN_BYTE),
             ack_num: SERVER_ISN.const_add(LOCAL_SYN_BYTE.const_add(LOCAL_FIN_BYTE)),
             flags: TcpFlags::FinAck,
-            ..CLIENT_PACKET
+            ..CLIENT_PKT
         };
     }
 

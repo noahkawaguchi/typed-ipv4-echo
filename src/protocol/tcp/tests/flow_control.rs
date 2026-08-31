@@ -25,7 +25,7 @@ fn small_window_truncates_echoed_payload_and_buffers_the_rest() -> Result {
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         window: WINDOW,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -73,7 +73,7 @@ fn unacked_bytes_count_toward_room_left_in_send_window() -> Result {
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         window: WINDOW,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -97,7 +97,7 @@ fn unacked_bytes_count_toward_room_left_in_send_window() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         window: WINDOW,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(
@@ -139,7 +139,7 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         window: INITIAL_WINDOW,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -154,7 +154,7 @@ fn window_opening_via_ack_drains_buffered_remainder() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + HEL_LEN,
         window: LARGER_WINDOW,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     let reply = window_update.create_reply(&mut connections)?;
@@ -201,7 +201,7 @@ fn zero_window_buffers_entire_payload_and_gets_bare_ack() -> Result {
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         window: ZERO_WINDOW,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 

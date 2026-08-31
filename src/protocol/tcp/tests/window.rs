@@ -23,7 +23,7 @@ fn new_ack_adopts_window_from_segment() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -37,7 +37,7 @@ fn new_ack_adopts_window_from_segment() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN,
         window: NEW_WND,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(window_update.create_reply(&mut connections)?, None);
@@ -75,7 +75,7 @@ fn stale_segment_does_not_clobber_send_window() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -91,7 +91,7 @@ fn stale_segment_does_not_clobber_send_window() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         window: SeqOffset::new(1000),
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(fresh_window_update.create_reply(&mut connections)?, None);
@@ -111,7 +111,7 @@ fn stale_segment_does_not_clobber_send_window() -> Result {
             seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
             ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN,
             window: SeqOffset::new(65_000),
-            ..CLIENT_PACKET
+            ..CLIENT_PKT
         }
         .create_reply(&mut connections)?,
         None
@@ -145,7 +145,7 @@ fn same_seq_but_fresher_ack_updates_window() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -153,21 +153,21 @@ fn same_seq_but_fresher_ack_updates_window() -> Result {
     cloned_state.rcv_nxt += REMOTE_HELLO_LEN;
     assert_eq!(connections.try_get()?, &cloned_state);
 
-    let hi_packet = TcpHandler {
+    let hi_pkt = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: TcpPayload::from_test_str("Hi")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
-    hi_packet.create_reply(&mut connections)?;
+    hi_pkt.create_reply(&mut connections)?;
 
     cloned_state.snd_nxt += LOCAL_HI_LEN;
     cloned_state.rcv_nxt += REMOTE_HI_LEN;
     cloned_state.tcp_state = TcpState::Established(SyncedState::test_new(WindowState::test_new(
-        hi_packet.window,
-        hi_packet.seq_num,
-        hi_packet.ack_num,
+        hi_pkt.window,
+        hi_pkt.seq_num,
+        hi_pkt.ack_num,
     )));
 
     assert_eq!(connections.try_get()?, &cloned_state);
@@ -178,7 +178,7 @@ fn same_seq_but_fresher_ack_updates_window() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_HI_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN,
         window: SeqOffset::new(1000),
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(window_update_1.create_reply(&mut connections)?, None);
@@ -198,7 +198,7 @@ fn same_seq_but_fresher_ack_updates_window() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_HI_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN + LOCAL_HI_LEN,
         window: SeqOffset::new(2000),
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(window_update_2.create_reply(&mut connections)?, None);
@@ -244,7 +244,7 @@ fn duplicate_ack_updates_window() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -260,7 +260,7 @@ fn duplicate_ack_updates_window() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         window: NEW_WND,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(dup_ack_fresh_seq.create_reply(&mut connections)?, None);

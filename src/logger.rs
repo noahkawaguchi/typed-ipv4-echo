@@ -18,14 +18,14 @@ pub enum LogLevel {
     ServerInfo = 1,
 
     /// Minimal indicators for each packet with no details.
-    PacketQuiet = 2,
+    PktQuiet = 2,
 
     /// Packet header details but only payload lengths and whether they are UTF-8.
-    PacketDetails = 3,
+    PktDetails = 3,
 
     /// Packet header details and payload content.
     #[default]
-    PacketFull = 4,
+    PktFull = 4,
 }
 
 impl FromStr for LogLevel {
@@ -35,9 +35,9 @@ impl FromStr for LogLevel {
         match s.trim() {
             "0" => Ok(Self::Silent),
             "1" => Ok(Self::ServerInfo),
-            "2" => Ok(Self::PacketQuiet),
-            "3" => Ok(Self::PacketDetails),
-            "4" => Ok(Self::PacketFull),
+            "2" => Ok(Self::PktQuiet),
+            "3" => Ok(Self::PktDetails),
+            "4" => Ok(Self::PktFull),
             _ => Err("Log level must be a digit between 0 and 4 inclusive"),
         }
     }
@@ -76,8 +76,8 @@ impl Logger {
         match self.level {
             LogLevel::Silent | LogLevel::ServerInfo => {}
             // Buffered until the next newline or flush, which is desired
-            LogLevel::PacketQuiet => print!(" "),
-            LogLevel::PacketDetails | LogLevel::PacketFull => println!("\n{:=<80}\n", ""),
+            LogLevel::PktQuiet => print!(" "),
+            LogLevel::PktDetails | LogLevel::PktFull => println!("\n{:=<80}\n", ""),
         }
     }
 
@@ -104,16 +104,16 @@ impl Logger {
         match self.level {
             LogLevel::Silent | LogLevel::ServerInfo => {}
 
-            LogLevel::PacketQuiet => {
+            LogLevel::PktQuiet => {
                 print!("{}", S::INDICATOR);
                 io::stdout().flush()?;
             }
 
-            level @ (LogLevel::PacketDetails | LogLevel::PacketFull) => {
+            level @ (LogLevel::PktDetails | LogLevel::PktFull) => {
                 println!(
                     "{}\n{ipv4_header}\n{proto_handler}\n{}",
                     Timestamp(self.birth),
-                    proto_handler.pretty_payload(level == LogLevel::PacketFull)
+                    proto_handler.pretty_payload(level == LogLevel::PktFull)
                 );
             }
         }
@@ -124,14 +124,14 @@ impl Logger {
     /// Logs packet-related information and formatting other than the packets themselves to stdout
     /// if the log level allows.
     pub(crate) fn pkt_extra(&self, msg: impl fmt::Display) {
-        if self.level >= LogLevel::PacketDetails {
+        if self.level >= LogLevel::PktDetails {
             println!("{msg}");
         }
     }
 
     /// Logs an error handling a packet to stderr if the log level allows.
     pub(crate) fn pkt_err(&self, msg: impl fmt::Display) {
-        if self.level >= LogLevel::PacketDetails {
+        if self.level >= LogLevel::PktDetails {
             eprintln!("[{}] {msg}", Timestamp(self.birth));
         }
     }

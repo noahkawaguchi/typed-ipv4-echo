@@ -15,7 +15,7 @@ fn fin_ack_in_syn_received_establishes_and_closes_immediately() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(
@@ -58,7 +58,7 @@ fn creates_valid_fin_ack() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(
@@ -100,7 +100,7 @@ fn fin_ack_acks_prior_data_and_advances_snd_una() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -128,7 +128,7 @@ fn fin_ack_acks_prior_data_and_advances_snd_una() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN,
         flags: TcpFlags::FinAck,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     client_fin_ack.create_reply(&mut connections)?;
@@ -173,7 +173,7 @@ fn out_of_order_fin_ack_gets_duplicate_ack_without_closing() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(
@@ -218,7 +218,7 @@ fn partial_ack_in_last_ack_does_not_close_connection() -> Result {
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     client_fin_ack.create_reply(&mut connections)?;
@@ -238,7 +238,7 @@ fn partial_ack_in_last_ack_does_not_close_connection() -> Result {
     let partial_ack = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_FIN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(
@@ -275,7 +275,7 @@ fn final_ack_after_fin_ack_removes_connection_and_returns_none() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     client_fin_ack.create_reply(&mut connections)?;
@@ -295,7 +295,7 @@ fn final_ack_after_fin_ack_removes_connection_and_returns_none() -> Result {
         TcpHandler {
             seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_FIN_BYTE,
             ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
-            ..CLIENT_PACKET
+            ..CLIENT_PKT
         }
         .create_reply(&mut connections)?,
         None
@@ -346,7 +346,7 @@ fn fin_wait_1_to_fin_wait_2_on_ack_of_our_fin() -> Result {
     let ack_of_fin = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(ack_of_fin.create_reply(&mut connections)?, None);
@@ -373,7 +373,7 @@ fn fin_wait_2_closes_on_fin_ack_from_peer() -> Result {
     let ack_of_fin = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(ack_of_fin.create_reply(&mut connections)?, None);
@@ -392,7 +392,7 @@ fn fin_wait_2_closes_on_fin_ack_from_peer() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
         flags: TcpFlags::FinAck,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -423,7 +423,7 @@ fn fin_wait_1_closes_immediately_if_peers_fin_also_acks_ours() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
         flags: TcpFlags::FinAck,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -455,7 +455,7 @@ fn data_after_our_fin_in_fin_wait_1_is_acked_without_echo() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -485,7 +485,7 @@ fn data_after_our_fin_in_fin_wait_2_is_acked_without_echo() -> Result {
     let ack_of_fin = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(ack_of_fin.create_reply(&mut connections)?, None);
@@ -503,7 +503,7 @@ fn data_after_our_fin_in_fin_wait_2_is_acked_without_echo() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -535,7 +535,7 @@ fn simultaneous_close_transitions_through_closing_to_closed() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(
@@ -560,7 +560,7 @@ fn simultaneous_close_transitions_through_closing_to_closed() -> Result {
         TcpHandler {
             seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_FIN_BYTE,
             ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
-            ..CLIENT_PACKET
+            ..CLIENT_PKT
         }
         .create_reply(&mut connections)?,
         None
@@ -587,7 +587,7 @@ fn fin_ack_with_data_in_fin_wait_1_advances_rcv_nxt_past_data_and_fin() -> Resul
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(
@@ -624,7 +624,7 @@ fn fin_ack_with_data_in_fin_wait_1_acking_our_fin_closes_immediately() -> Result
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
         flags: TcpFlags::FinAck,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -656,7 +656,7 @@ fn fin_ack_with_data_in_fin_wait_2_advances_rcv_nxt_past_data_and_fin() -> Resul
         TcpHandler {
             seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
             ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
-            ..CLIENT_PACKET
+            ..CLIENT_PKT
         }
         .create_reply(&mut connections)?,
         None
@@ -668,7 +668,7 @@ fn fin_ack_with_data_in_fin_wait_2_advances_rcv_nxt_past_data_and_fin() -> Resul
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
         flags: TcpFlags::FinAck,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -701,7 +701,7 @@ fn fin_ack_with_data_in_established_echoes_data_and_starts_closing() -> Result {
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(
@@ -758,7 +758,7 @@ fn fin_ack_with_data_in_established_buffers_the_untransmittable_remainder() -> R
         window: SMALL_WINDOW,
         flags: TcpFlags::FinAck,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(

@@ -4,7 +4,7 @@ use super::*;
 fn syn_ack_is_resent_while_due() -> Result {
     let mut connections = TcpConnections::new(RtoConfig::default(), 5);
 
-    TcpHandler { seq_num: CLIENT_ISN, flags: TcpFlags::Syn, ..CLIENT_PACKET }
+    TcpHandler { seq_num: CLIENT_ISN, flags: TcpFlags::Syn, ..CLIENT_PKT }
         .create_reply(&mut connections)?;
 
     let isn = connections.try_get()?.snd_una;
@@ -31,7 +31,7 @@ fn syn_ack_is_resent_while_due() -> Result {
 fn pending_segment_is_cleared_once_acked() -> Result {
     let mut connections = TcpConnections::new(RtoConfig::default(), 5);
 
-    TcpHandler { seq_num: CLIENT_ISN, flags: TcpFlags::Syn, ..CLIENT_PACKET }
+    TcpHandler { seq_num: CLIENT_ISN, flags: TcpFlags::Syn, ..CLIENT_PKT }
         .create_reply(&mut connections)?;
 
     let isn = connections.try_get()?.snd_una;
@@ -40,7 +40,7 @@ fn pending_segment_is_cleared_once_acked() -> Result {
     TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: isn + LOCAL_SYN_BYTE,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -60,7 +60,7 @@ fn data_echo_is_resent_unchanged() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -116,7 +116,7 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -126,7 +126,7 @@ fn multiple_unacked_segments_are_all_retransmitted() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: TcpPayload::from_test_str("Hi")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -164,7 +164,7 @@ fn gives_up_after_max_retransmits() -> Result {
 
     let mut connections = TcpConnections::new(RtoConfig::default(), MAX_RETRIES);
 
-    TcpHandler { seq_num: CLIENT_ISN, flags: TcpFlags::Syn, ..CLIENT_PACKET }
+    TcpHandler { seq_num: CLIENT_ISN, flags: TcpFlags::Syn, ..CLIENT_PKT }
         .create_reply(&mut connections)?;
 
     for _ in 0..MAX_RETRIES {
@@ -195,7 +195,7 @@ fn retransmissions_back_off_exponentially() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 

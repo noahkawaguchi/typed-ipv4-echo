@@ -144,7 +144,7 @@ where
                         self.logger
                             .pkt_extra(" ==== Packet sent (retransmission) ====");
 
-                        self.send_packet(&reply_handler)?;
+                        self.send_pkt(&reply_handler)?;
                         self.logger.divider();
                     }
                 }
@@ -182,7 +182,7 @@ where
 
                                 Some(reply) => {
                                     self.logger.pkt_extra("\n ==== Packet sent ====");
-                                    self.send_packet(&reply)?;
+                                    self.send_pkt(&reply)?;
                                 }
                             }
                         }
@@ -226,7 +226,7 @@ where
 
                 for reply_handler in to_send {
                     self.logger.pkt_extra(" ==== Packet sent ====");
-                    self.send_packet(&reply_handler)?;
+                    self.send_pkt(&reply_handler)?;
                 }
 
                 self.logger.divider();
@@ -247,7 +247,7 @@ where
     /// Writes `handler`'s protocol-specific header and payload into the write buffer, prefixed with
     /// an IPv4 header, then writes the resulting packet to `device` and prints its string
     /// representation to stdout.
-    fn send_packet(&mut self, handler: &impl Encode<Local>) -> Result {
+    fn send_pkt(&mut self, handler: &impl Encode<Local>) -> Result {
         let proto_len = handler.write_into(&mut self.write_buf[Ipv4Header::REPLY_HDR_LEN..])?;
 
         let ipv4_header = Ipv4Header::try_new(handler.proto(), handler.get_ip_pair(), proto_len)?;
@@ -328,7 +328,7 @@ mod tests {
     mod grace_period;
     mod interrupt;
     mod mocks;
-    mod packet_handling;
+    mod pkt_handling;
     mod propagate;
     mod retransmit;
     mod shutdown;

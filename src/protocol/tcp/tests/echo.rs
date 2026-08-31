@@ -9,7 +9,7 @@ fn creates_valid_data_echo() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -38,7 +38,7 @@ fn pure_ack_on_established_connection_returns_none() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -49,7 +49,7 @@ fn pure_ack_on_established_connection_returns_none() -> Result {
     let pure_ack = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(pure_ack.create_reply(&mut connections)?, None);
@@ -85,7 +85,7 @@ fn consecutive_replies_use_snd_nxt_for_seq_num() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -114,7 +114,7 @@ fn consecutive_replies_use_snd_nxt_for_seq_num() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: TcpPayload::from_test_str("Hi")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -150,7 +150,7 @@ fn old_ack_num_does_not_regress_snd_una() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -175,14 +175,14 @@ fn old_ack_num_does_not_regress_snd_una() -> Result {
 
     // Second packet: "Hi" (2 bytes), ack=SERVER_ISN+6 -> SND.UNA advances to SERVER_ISN+6, SND.NXT
     // becomes SERVER_ISN+8
-    let hi_packet = TcpHandler {
+    let hi_pkt = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN,
         payload: TcpPayload::from_test_str("Hi")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
-    let reply2 = hi_packet.create_reply(&mut connections)?;
+    let reply2 = hi_pkt.create_reply(&mut connections)?;
 
     assert_eq!(
         reply2,
@@ -199,9 +199,9 @@ fn old_ack_num_does_not_regress_snd_una() -> Result {
     cloned_state.rcv_nxt += REMOTE_HI_LEN;
     cloned_state.snd_una += LOCAL_HELLO_LEN;
     cloned_state.tcp_state = TcpState::Established(SyncedState::test_new(WindowState::test_new(
-        hi_packet.window,
-        hi_packet.seq_num,
-        hi_packet.ack_num,
+        hi_pkt.window,
+        hi_pkt.seq_num,
+        hi_pkt.ack_num,
     )));
 
     assert_eq!(
@@ -215,7 +215,7 @@ fn old_ack_num_does_not_regress_snd_una() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_HI_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: TcpPayload::from_test_str("Hey")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -248,7 +248,7 @@ fn old_ack_num_does_not_regress_snd_una() -> Result {
 }
 
 #[test]
-fn duplicate_data_packet_gets_duplicate_ack_without_echo() -> Result {
+fn duplicate_data_pkt_gets_duplicate_ack_without_echo() -> Result {
     // A retransmitted segment should get a duplicate ACK pointing at the current rcv_nxt, not
     // another echo. Processing a second distinct packet first makes the seq_num check meaningful
     // because the retransmitted packet's seq+len points back to CLIENT_ISN+6, but rcv_nxt is
@@ -260,14 +260,14 @@ fn duplicate_data_packet_gets_duplicate_ack_without_echo() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     let hi = TcpHandler {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN,
         payload: TcpPayload::from_test_str("Hi")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     // First packet: "Hello" (seq=CLIENT_ISN+1) -> rcv_nxt advances to CLIENT_ISN+6, snd_nxt
@@ -327,7 +327,7 @@ fn ack_for_unsent_data_is_dropped_and_gets_current_state_reply() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + SeqOffset::new(20),
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -366,7 +366,7 @@ fn wraparound_ack_for_unsent_data_is_still_rejected() -> Result {
     connections.insert(initial_state.clone());
 
     // ack=0 wraps 1 past SND.NXT=`u32::MAX`
-    let reply = TcpHandler { seq_num: CLIENT_ISN + REMOTE_SYN_BYTE, ..CLIENT_PACKET }
+    let reply = TcpHandler { seq_num: CLIENT_ISN + REMOTE_SYN_BYTE, ..CLIENT_PKT }
         .create_reply(&mut connections)?;
 
     assert_eq!(
@@ -384,7 +384,7 @@ fn wraparound_ack_for_unsent_data_is_still_rejected() -> Result {
 }
 
 #[test]
-fn data_packet_for_unknown_connection_gets_rst() -> Result {
+fn data_pkt_for_unknown_connection_gets_rst() -> Result {
     // ACK with payload for a connection the server has no record of (e.g. after restart)
 
     let mut connections = TcpConnections::default(); // Empty, no known connections
@@ -393,7 +393,7 @@ fn data_packet_for_unknown_connection_gets_rst() -> Result {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         payload: TcpPayload::from_test_str("Hello")?,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 

@@ -187,7 +187,7 @@ mod tests {
     }
 
     #[test]
-    fn correctly_parses_valid_packet() -> Result<(), String> {
+    fn correctly_parses_valid_pkt() -> Result<(), String> {
         #[rustfmt::skip]
         const DATA: [u8; 20] = [
             0x45, 0x00, 0x00, 0x3C,  // Version 4, IHL 5, TOS 0, Total Length 60
