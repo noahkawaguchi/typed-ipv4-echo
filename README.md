@@ -11,8 +11,9 @@ Typenet is a userspace IPv4/ICMP/TCP/UDP implementation and echo server that ope
 5. [Running the Server](#running-the-server)
 6. [Connecting as a Client](#connecting-as-a-client)
 7. [Testing](#testing)
-8. [Development and CI](#development-and-ci)
-9. [Demos](#demos)
+8. [Benchmarking](#benchmarking)
+9. [Development and CI](#development-and-ci)
+10. [Demos](#demos)
 
 ## Goals and Non-Goals
 
@@ -235,6 +236,18 @@ The project includes unit and integration tests for:
 - Internet checksum calculation
 - Serial number arithmetic
 - Various custom type invariants
+
+## Benchmarking
+
+In addition to running benchmarks with summaries in the terminal, this will also generate HTML reports in the `target/criterion` directory.
+
+```sh
+just bench
+```
+
+The `checksum` benchmark target compares the production Internet checksum implementation (64-bit and 128-bit integers used as groups of 16-bit lanes) with 16-bit and 32-bit alternatives.
+
+![Checksum Line Chart](img/checksum_line_chart.svg)
 
 ## Development and CI
 
