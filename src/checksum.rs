@@ -151,19 +151,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn checksum_of_empty_input_is_negative_zero() {
+    fn empty_input_produces_negative_zero() {
         // Empty input should produce 0xFFFF (one's complement of 0x0000)
         assert_eq!(calculate(&[]), 0xFFFF);
     }
 
     #[test]
-    fn checksum_of_zeros_is_all_ones() {
+    fn zeros_produce_all_ones() {
         // All zeros should produce 0xFFFF (one's complement of 0x0000)
         assert_eq!(calculate(&[0u8; 20]), 0xFFFF);
     }
 
     #[test]
-    fn checksum_of_all_ones_is_zero() {
+    fn all_ones_produce_zero() {
         // All ones should produce 0x0000 (one's complement of 0xFFFF)
         assert_eq!(calculate(&[0xFFu8; 20]), 0x0000);
     }
@@ -193,7 +193,7 @@ mod tests {
     }
 
     #[test]
-    fn checksum_of_known_ipv4_header_without_folding() {
+    fn known_ipv4_header_without_folding() {
         // IPv4 header with simple values for manual verification
         // Version=4, IHL=5, TOS=0, Total Length=32, ID=1, Flags=0, TTL=64, Protocol=17 (UDP)
         #[rustfmt::skip]
@@ -218,7 +218,7 @@ mod tests {
     }
 
     #[test]
-    fn checksum_of_known_ipv4_header_with_folding() {
+    fn known_ipv4_header_with_folding() {
         // IPv4 header with values that require carry folding
         // Using large IP addresses to force carries
         #[rustfmt::skip]
