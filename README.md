@@ -249,7 +249,7 @@ just lint
 just lint-targets
 just fmt-check
 just spell-check
-just all-checks  # All CI checks (including tests)
+just ci-checks  # All CI checks (including tests)
 ```
 
 ## Demos

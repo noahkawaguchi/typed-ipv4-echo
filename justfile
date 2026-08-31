@@ -165,7 +165,7 @@ netem-clear:
 ####################################################################################################
 
 # Run tests, lints, format checking, and spell checking to match CI
-all-checks: (test '--quiet') lint-targets fmt-check spell-check
+ci-checks: (test '--quiet') lint-targets fmt-check spell-check
 
 # Run tests, including ignored
 test *ARGS: tun
