@@ -178,6 +178,10 @@ cov *ARGS: tun
 # Generate HTML test coverage report and open in browser (includes ignored tests)
 cov-open: (cov '--open')
 
+# Run benchmarks (generates HTML in `target/criterion`)
+bench:
+    cargo bench --features bench-internals
+
 # Lint with Clippy, denying warnings
 lint *ARGS:
     cargo clippy --workspace --all-targets {{ ARGS }} -- --deny warnings
