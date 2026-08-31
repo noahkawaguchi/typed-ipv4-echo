@@ -1,5 +1,7 @@
 use typenet::{
-    Config, Result, server,
+    Result,
+    config::Config,
+    server,
     sys::{ShutdownSignal, poll, tun},
 };
 
