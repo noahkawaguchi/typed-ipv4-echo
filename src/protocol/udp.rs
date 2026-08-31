@@ -6,8 +6,8 @@ use {
         protocol::{
             Protocol,
             display::PrettyPayload,
-            handler::{Encode, PrettyProtocol},
             pseudo_header_checksum,
+            router::{Encode, PrettyProtocol},
         },
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },

@@ -7,7 +7,7 @@ use {
         logger::Logger,
         protocol::{
             RtoConfig, TcpConnections, TcpSegment,
-            handler::{Encode, ProtocolRouter},
+            router::{Encode, ProtocolRouter},
         },
         try_ops::{TryAdd as _, TryGet as _},
     },

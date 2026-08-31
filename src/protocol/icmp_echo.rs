@@ -7,7 +7,7 @@ use {
         protocol::{
             Protocol,
             display::{PrettyPayload, WithThousandsSeparators as _},
-            handler::{Encode, PrettyProtocol},
+            router::{Encode, PrettyProtocol},
         },
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
