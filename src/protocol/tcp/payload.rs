@@ -59,6 +59,13 @@ impl TcpPayload {
             })
             .map(|maybe_zero_len| NonZeroU16::new(maybe_zero_len).map(|len| Self { data, len }))
     }
+
+    /// Attempts to create a test payload by converting a `&str` into a `Self`. An empty string maps
+    /// to `Ok(None)`.
+    #[cfg(test)]
+    pub(super) fn from_test_str(s: &str) -> Result<Option<Self>, &'static str> {
+        Self::try_from_iter(s.as_bytes().iter().copied())
+    }
 }
 
 #[cfg(test)]

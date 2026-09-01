@@ -53,7 +53,7 @@ pub const AFTER_HANDSHAKE: ConnState = ConnState {
 
 /// An incoming pure ACK packet from the client (port 1234) to the server (port 80).
 /// `seq_num` and `ack_num` will be 0 if not overridden.
-pub const CLIENT_PACKET: TcpHandler<Remote> = TcpHandler {
+pub const CLIENT_PKT: TcpSegment<Remote> = TcpSegment {
     ip_pair: Ipv4AddrPair::new(KEY.client_ip, KEY.server_ip),
     ports: PortPair::new(KEY.client_port, KEY.server_port),
     seq_num: SeqPoint::new(0),
@@ -66,7 +66,7 @@ pub const CLIENT_PACKET: TcpHandler<Remote> = TcpHandler {
 
 /// An outgoing pure ACK packet from the server (port 80) to the client (port 1234).
 /// `seq_num` and `ack_num` will be 0 if not overridden.
-pub const SERVER_REPLY: TcpHandler<Local> = TcpHandler {
+pub const SERVER_REPLY: TcpSegment<Local> = TcpSegment {
     ip_pair: Ipv4AddrPair::new(KEY.server_ip, KEY.client_ip),
     ports: PortPair::new(KEY.server_port, KEY.client_port),
     seq_num: SeqPoint::new(0),
@@ -76,9 +76,3 @@ pub const SERVER_REPLY: TcpHandler<Local> = TcpHandler {
     window: SeqOffset::new(u16::MAX),
     payload: None,
 };
-
-/// Attempts to convert a `&str` into an `Option<TcpPayload>`, with an empty string mapping to
-/// `Ok(None)`.
-pub fn payload_from(s: &str) -> Result<Option<TcpPayload>, &'static str> {
-    TcpPayload::try_from_iter(s.as_bytes().iter().copied())
-}

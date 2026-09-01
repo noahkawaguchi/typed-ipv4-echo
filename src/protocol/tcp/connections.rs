@@ -4,7 +4,7 @@ use {
         addr_pairs::{Ipv4AddrPair, PortPair},
         endpoint::Local,
         protocol::tcp::{
-            LOCAL_FIN_BYTE, PendingSegment, SendInfo, TcpFlags, TcpHandler,
+            LOCAL_FIN_BYTE, PendingSegment, SendInfo, TcpFlags, TcpSegment,
             state::{ConnState, TcpState},
         },
     },
@@ -116,7 +116,7 @@ impl TcpConnections {
     /// Reproduces every pending unacked segment that is due for retransmission. If any connection
     /// has a due segment that has already been retried `max_retries` times, gives up and removes
     /// that connection entirely.
-    pub fn make_retransmissions(&mut self) -> Vec<TcpHandler<Local>> {
+    pub fn make_retransmissions(&mut self) -> Vec<TcpSegment<Local>> {
         let now = Instant::now();
 
         let due_keys = self
@@ -144,7 +144,7 @@ impl TcpConnections {
 
             retransmissions.extend(conn.pending.iter_mut().filter_map(|seg| {
                 (seg.time_due(&self.rto_config) <= now).then(|| {
-                    TcpHandler::from_pairs_and_info(
+                    TcpSegment::from_pairs_and_info(
                         Ipv4AddrPair::new(key.server_ip, key.client_ip),
                         PortPair::new(key.server_port, key.client_port),
                         seg.retransmit_info(now),
@@ -158,7 +158,7 @@ impl TcpConnections {
 
     /// Initiates active close (RFC 9293 "CLOSE" call) for every connection currently ESTABLISHED,
     /// transitioning each to FIN-WAIT-1 and returning a FIN-ACK reply for it.
-    pub fn close_established(&mut self) -> Vec<TcpHandler<Local>> {
+    pub fn close_established(&mut self) -> Vec<TcpSegment<Local>> {
         let now = Instant::now();
 
         self.table
@@ -183,7 +183,7 @@ impl TcpConnections {
                 conn.pending
                     .push(PendingSegment::new(send_info.clone(), now));
 
-                Some(TcpHandler::from_pairs_and_info(
+                Some(TcpSegment::from_pairs_and_info(
                     Ipv4AddrPair::new(key.server_ip, key.client_ip),
                     PortPair::new(key.server_port, key.client_port),
                     send_info,
@@ -212,14 +212,12 @@ impl TcpConnections {
     /// Inserts a SYN-RECEIVED connection using `KEY`, `CLIENT_ISN`, and `SERVER_ISN` as if we had
     /// just responded to the peer's SYN with SYN-ACK.
     #[cfg(test)]
-    pub(crate) fn with_syn_rcv(self) -> Self {
-        self.with_syn_rcv_and_packet_last_sent(Instant::now())
-    }
+    pub(crate) fn with_syn_rcv(self) -> Self { self.with_syn_rcv_and_pkt_last_sent(Instant::now()) }
 
     /// Inserts a SYN-RECEIVED connection using `KEY`, `CLIENT_ISN`, and `SERVER_ISN` as if we had
     /// just responded to the peer's SYN with SYN-ACK at time `sent_at`.
     #[cfg(test)]
-    pub(crate) fn with_syn_rcv_and_packet_last_sent(mut self, sent_at: Instant) -> Self {
+    pub(crate) fn with_syn_rcv_and_pkt_last_sent(mut self, sent_at: Instant) -> Self {
         use {
             crate::protocol::tcp::{
                 LOCAL_SYN_BYTE, REMOTE_SYN_BYTE,

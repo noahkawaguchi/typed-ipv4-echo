@@ -7,7 +7,7 @@ use {
         protocol::{
             Protocol,
             display::{PrettyPayload, WithThousandsSeparators as _},
-            handler::{Encode, PrettyProtocol},
+            router::{Encode, PrettyProtocol},
         },
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
     },
@@ -19,7 +19,7 @@ const ICMP_HDR_LEN: u16 = 8;
 
 /// Manages ICMP Echo Request/Reply headers, data, and reply logic. Sent from `S`.
 #[cfg_attr(test, derive(Debug))]
-pub struct IcmpEchoHandler<'a, S: Endpoint> {
+pub struct IcmpEchoMsg<'a, S: Endpoint> {
     /// Not a part of the ICMP header or checksum, but used for addressing replies and to stay
     /// parallel to TCP and UDP.
     ip_pair: Ipv4AddrPair<S>,
@@ -31,26 +31,25 @@ pub struct IcmpEchoHandler<'a, S: Endpoint> {
     payload: &'a [u8],
 }
 
-impl<S: Endpoint> IcmpEchoHandler<'_, S> {
+impl<S: Endpoint> IcmpEchoMsg<'_, S> {
     const ICMP_TYPE_ECHO_REQUEST: u8 = 8;
     const ICMP_TYPE_ECHO_REPLY: u8 = 0;
     const ICMP_CODE_ECHO: u8 = 0;
 }
 
-impl<'a> IcmpEchoHandler<'a, Remote> {
+impl<'a> IcmpEchoMsg<'a, Remote> {
     /// Parses `data` as an ICMP Echo Request header and payload.
     pub(super) fn parse(data: &'a [u8], ip_pair: Ipv4AddrPair<Remote>) -> Result<Self, String> {
-        let Some((icmp_header, payload)) = data.split_first_chunk::<{ ICMP_HDR_LEN as usize }>()
-        else {
-            return Err(format!("Too short for ICMP header ({} bytes)", data.len()));
-        };
+        let (icmp_hdr, payload) = data
+            .split_first_chunk::<{ ICMP_HDR_LEN as usize }>()
+            .ok_or_else(|| format!("Too short for ICMP header ({} bytes)", data.len()))?;
 
         if checksum::calculate(data) != 0 {
             return Err(String::from("Invalid ICMP checksum"));
         }
 
-        let icmp_type = icmp_header[0];
-        let icmp_code = icmp_header[1];
+        let icmp_type = icmp_hdr[0];
+        let icmp_code = icmp_hdr[1];
 
         // ICMP Echo Request (ping): type=8, code=0
         if icmp_type != Self::ICMP_TYPE_ECHO_REQUEST || icmp_code != Self::ICMP_CODE_ECHO {
@@ -60,18 +59,18 @@ impl<'a> IcmpEchoHandler<'a, Remote> {
         Ok(Self {
             ip_pair,
             icmp_type,
-            identifier: u16::from_be_bytes([icmp_header[4], icmp_header[5]]),
-            sequence: u16::from_be_bytes([icmp_header[6], icmp_header[7]]),
+            identifier: u16::from_be_bytes([icmp_hdr[4], icmp_hdr[5]]),
+            sequence: u16::from_be_bytes([icmp_hdr[6], icmp_hdr[7]]),
             payload,
         })
     }
 
     /// Creates an ICMP header and payload for replying to `self`.
-    pub(super) const fn create_reply(&self) -> IcmpEchoHandler<'a, Local> {
+    pub(super) const fn create_reply(&self) -> IcmpEchoMsg<'a, Local> {
         // ICMP Echo Reply:
         // - Change type from 8 to 0
         // - Keep the same identifier, sequence number, and payload data
-        IcmpEchoHandler::<Local> {
+        IcmpEchoMsg::<Local> {
             ip_pair: self.ip_pair.swapped(),
             icmp_type: Self::ICMP_TYPE_ECHO_REPLY,
             identifier: self.identifier,
@@ -81,7 +80,7 @@ impl<'a> IcmpEchoHandler<'a, Remote> {
     }
 }
 
-impl Encode<Local> for IcmpEchoHandler<'_, Local> {
+impl Encode<Local> for IcmpEchoMsg<'_, Local> {
     fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
         // Copy echo payload
         buf.try_get_mut(
@@ -106,9 +105,9 @@ impl Encode<Local> for IcmpEchoHandler<'_, Local> {
         let icmp_len = ICMP_HDR_LEN.try_add(self.payload.len().try_into()?)?;
 
         // Calculate ICMP checksum (covers the entire ICMP message: header + payload)
-        let icmp_checksum = checksum::calculate(buf.try_get(..usize::from(icmp_len))?);
+        let icmp_cksum = checksum::calculate(buf.try_get(..usize::from(icmp_len))?);
         buf.try_get_mut(2..4)?
-            .copy_from_slice(&icmp_checksum.to_be_bytes());
+            .copy_from_slice(&icmp_cksum.to_be_bytes());
 
         Ok(icmp_len)
     }
@@ -118,13 +117,13 @@ impl Encode<Local> for IcmpEchoHandler<'_, Local> {
     fn get_ip_pair(&self) -> Ipv4AddrPair<Local> { self.ip_pair }
 }
 
-impl<S: Endpoint> PrettyProtocol for IcmpEchoHandler<'_, S> {
+impl<S: Endpoint> PrettyProtocol for IcmpEchoMsg<'_, S> {
     fn pretty_payload(&self, include_content: bool) -> PrettyPayload<'_> {
         PrettyPayload { data: self.payload, include_content }
     }
 }
 
-impl<S: Endpoint> fmt::Display for IcmpEchoHandler<'_, S> {
+impl<S: Endpoint> fmt::Display for IcmpEchoMsg<'_, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -161,11 +160,11 @@ mod tests {
             0x41, 0x42, 0x43,  // Payload: "ABC"
         ];
 
-        let handler = IcmpEchoHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
+        let msg = IcmpEchoMsg::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
 
-        assert_eq!(handler.identifier, 0x1234);
-        assert_eq!(handler.sequence, 0x5678);
-        assert_eq!(handler.payload, &[0x41, 0x42, 0x43]);
+        assert_eq!(msg.identifier, 0x1234);
+        assert_eq!(msg.sequence, 0x5678);
+        assert_eq!(msg.payload, &[0x41, 0x42, 0x43]);
 
         Ok(())
     }
@@ -175,7 +174,7 @@ mod tests {
         const DATA: [u8; 5] = [8, 0, 0x3A, 0x4B, 0x12]; // Only 5 bytes
 
         assert_matches!(
-            IcmpEchoHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR),
+            IcmpEchoMsg::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR),
             Err(e) if e.contains("Too short")
         );
     }
@@ -191,7 +190,7 @@ mod tests {
         ];
 
         assert_matches!(
-            IcmpEchoHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR),
+            IcmpEchoMsg::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR),
             Err(e) if e.contains("Not an Echo Request")
         );
     }
@@ -207,13 +206,13 @@ mod tests {
         ];
 
         assert_matches!(
-            IcmpEchoHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR),
+            IcmpEchoMsg::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR),
             Err(e) if e.contains("Not an Echo Request")
         );
     }
 
     #[test]
-    fn parsing_fails_on_invalid_checksum() {
+    fn parsing_fails_on_invalid_cksum() {
         #[rustfmt::skip]
         const DATA: [u8; 11] = [
             8, 0,              // Type 8 (Echo Request), Code 0
@@ -224,7 +223,7 @@ mod tests {
         ];
 
         assert_matches!(
-            IcmpEchoHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR),
+            IcmpEchoMsg::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR),
             Err(e) if e.contains("checksum")
         );
     }
@@ -239,11 +238,11 @@ mod tests {
             0x00, 0x01,        // Sequence: 1
         ];
 
-        let handler = IcmpEchoHandler::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
+        let msg = IcmpEchoMsg::parse(&DATA, REMOTE_TO_LOCAL_IP_PAIR)?;
 
-        assert_eq!(handler.identifier, 0);
-        assert_eq!(handler.sequence, 1);
-        assert_eq!(handler.payload.len(), 0);
+        assert_eq!(msg.identifier, 0);
+        assert_eq!(msg.sequence, 1);
+        assert_eq!(msg.payload.len(), 0);
 
         Ok(())
     }
@@ -259,9 +258,9 @@ mod tests {
             0x48, 0x65, 0x6C, 0x6C, 0x6F,  // Payload: "Hello"
         ];
 
-        let handler = IcmpEchoHandler::parse(&REQUEST, REMOTE_TO_LOCAL_IP_PAIR)?;
+        let msg = IcmpEchoMsg::parse(&REQUEST, REMOTE_TO_LOCAL_IP_PAIR)?;
         let mut reply_buf = [0u8; ETHERNET_MTU];
-        let reply = handler.create_reply();
+        let reply = msg.create_reply();
         let icmp_len = reply.write_into(&mut reply_buf[20..])?;
 
         // IPs should be swapped
@@ -280,8 +279,7 @@ mod tests {
         assert_eq!(icmp_len, 8 + 5);
 
         // Verify checksum is valid (checksum of ICMP message should be 0)
-        let checksum = checksum::calculate(reply_buf.try_get(20..20 + usize::from(icmp_len))?);
-        assert_eq!(checksum, 0x0000);
+        assert_eq!(checksum::calculate(reply_buf.try_get(20..20 + usize::from(icmp_len))?), 0);
 
         Ok(())
     }

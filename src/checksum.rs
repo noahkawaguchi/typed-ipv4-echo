@@ -74,7 +74,7 @@ const _: () = assert!(one_carry_fold(one_carry_fold(u32::MAX)) == 0xFFFF);
 /// checksum calculation.
 #[cfg(any(test, feature = "bench-internals"))]
 #[must_use]
-pub fn always_folded_checksum(data: &[u8]) -> u16 {
+pub fn always_folded_cksum(data: &[u8]) -> u16 {
     let (byte_pairs, maybe_odd_byte) = data.as_chunks::<2>();
 
     !byte_pairs.iter().fold(
@@ -96,7 +96,7 @@ pub fn always_folded_checksum(data: &[u8]) -> u16 {
 /// checksum calculation.
 #[cfg(any(test, feature = "bench-internals"))]
 #[must_use]
-pub fn naive_wrapping_checksum(data: &[u8]) -> u16 {
+pub fn naive_wrapping_cksum(data: &[u8]) -> u16 {
     let (byte_pairs, maybe_odd_byte) = data.as_chunks::<2>();
 
     let sum = byte_pairs.iter().fold(
@@ -120,7 +120,7 @@ pub fn naive_wrapping_checksum(data: &[u8]) -> u16 {
 /// checksum calculation.
 #[cfg(any(test, feature = "bench-internals"))]
 #[must_use]
-pub fn range_checked_checksum(data: &[u8]) -> u16 {
+pub fn range_checked_cksum(data: &[u8]) -> u16 {
     let (byte_pairs, maybe_odd_byte) = data.as_chunks::<2>();
 
     let sum = byte_pairs.iter().fold(
@@ -193,11 +193,11 @@ mod tests {
     }
 
     #[test]
-    fn known_ipv4_header_without_folding() {
+    fn known_ipv4_hdr_without_folding() {
         // IPv4 header with simple values for manual verification
         // Version=4, IHL=5, TOS=0, Total Length=32, ID=1, Flags=0, TTL=64, Protocol=17 (UDP)
         #[rustfmt::skip]
-        const HEADER: [u8; 20] = [
+        const HDR: [u8; 20] = [
             0x45, 0x00,  // Version/IHL, TOS           = 0x4500
             0x00, 0x20,  // Total Length               = 0x0020
             0x00, 0x01,  // Identification             = 0x0001
@@ -214,15 +214,15 @@ mod tests {
         //      0x0002 = 0x9935
         // No carry to fold (sum fits in 16 bits)
         // One's complement: ~0x9935 = 0x66CA
-        assert_eq!(calculate(&HEADER), 0x66CA);
+        assert_eq!(calculate(&HDR), 0x66CA);
     }
 
     #[test]
-    fn known_ipv4_header_with_folding() {
+    fn known_ipv4_hdr_with_folding() {
         // IPv4 header with values that require carry folding
         // Using large IP addresses to force carries
         #[rustfmt::skip]
-        const HEADER: [u8; 20] = [
+        const HDR: [u8; 20] = [
             0x45, 0x00,  // Version/IHL, TOS           = 0x4500
             0x00, 0x54,  // Total Length               = 0x0054
             0xAB, 0xCD,  // Identification             = 0xABCD
@@ -239,7 +239,7 @@ mod tests {
         //      0xFFC8 = 0x4_B1A3
         // Fold carry: 0xB1A3 + 0x4 = 0xB1A7
         // One's complement: ~0xB1A7 = 0x4E58
-        assert_eq!(calculate(&HEADER), 0x4E58);
+        assert_eq!(calculate(&HDR), 0x4E58);
     }
 
     #[test]
@@ -277,9 +277,9 @@ mod tests {
             let data = vec![0xFFu8; num_bytes];
             let expected = if num_bytes & 1 == 1 { 0xFF } else { 0 };
 
-            assert_eq!(expected, naive_wrapping_checksum(&data));
-            assert_eq!(expected, range_checked_checksum(&data));
-            assert_eq!(expected, always_folded_checksum(&data));
+            assert_eq!(expected, naive_wrapping_cksum(&data));
+            assert_eq!(expected, range_checked_cksum(&data));
+            assert_eq!(expected, always_folded_cksum(&data));
             assert_eq!(expected, calculate(&data));
         }
 
@@ -291,10 +291,10 @@ mod tests {
             let expected = if num_bytes & 1 == 1 { 0xFF } else { 0 };
 
             // Incorrect now
-            assert_ne!(expected, naive_wrapping_checksum(&data));
+            assert_ne!(expected, naive_wrapping_cksum(&data));
             // Still correct
-            assert_eq!(expected, range_checked_checksum(&data));
-            assert_eq!(expected, always_folded_checksum(&data));
+            assert_eq!(expected, range_checked_cksum(&data));
+            assert_eq!(expected, always_folded_cksum(&data));
             assert_eq!(expected, calculate(&data));
         }
     }

@@ -11,16 +11,16 @@ fn fin_ack_in_syn_received_establishes_and_closes_immediately() -> Result {
     let mut connections = TcpConnections::default().with_syn_rcv();
     let mut cloned_state = connections.try_get()?.clone();
 
-    let client_fin_ack = TcpHandler {
+    let client_fin_ack = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(
         client_fin_ack.create_reply(&mut connections)?,
-        Some(TcpHandler {
+        Some(TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_FIN_BYTE,
             flags: TcpFlags::FinAck,
@@ -54,16 +54,16 @@ fn creates_valid_fin_ack() -> Result {
     let mut connections = TcpConnections::default().after_handshake();
     let mut cloned_state = connections.try_get()?.clone();
 
-    let client_fin_ack = TcpHandler {
+    let client_fin_ack = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(
         client_fin_ack.create_reply(&mut connections)?,
-        Some(TcpHandler {
+        Some(TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_FIN_BYTE,
             flags: TcpFlags::FinAck,
@@ -96,11 +96,11 @@ fn fin_ack_acks_prior_data_and_advances_snd_una() -> Result {
     let mut cloned_state = connections.try_get()?.clone();
 
     // Client sends data, server echoes "Hello" back
-    TcpHandler {
+    TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
-        payload: payload_from("Hello")?,
-        ..CLIENT_PACKET
+        payload: TcpPayload::from_test_str("Hello")?,
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
@@ -124,11 +124,11 @@ fn fin_ack_acks_prior_data_and_advances_snd_una() -> Result {
 
     // Client's FIN-ACK arrives in order (seq=CLIENT_ISN+6) and acks the echoed "Hello"
     // (ack=SERVER_ISN+6)
-    let client_fin_ack = TcpHandler {
+    let client_fin_ack = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN,
         flags: TcpFlags::FinAck,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     client_fin_ack.create_reply(&mut connections)?;
@@ -169,16 +169,16 @@ fn out_of_order_fin_ack_gets_duplicate_ack_without_closing() -> Result {
     let mut cloned_state = connections.try_get()?.clone();
 
     // FIN-ACK arrives at seq=CLIENT_ISN+6, but rcv_nxt is still CLIENT_ISN+1 (a 5-byte gap)
-    let client_fin_ack = TcpHandler {
+    let client_fin_ack = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(
         client_fin_ack.create_reply(&mut connections)?,
-        Some(TcpHandler {
+        Some(TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
             ..SERVER_REPLY
@@ -213,12 +213,12 @@ fn partial_ack_in_last_ack_does_not_close_connection() -> Result {
     let mut cloned_state = connections.try_get()?.clone();
 
     // Client's FIN-ACK arrives with trailing data, echoed alongside our own FIN -> LAST-ACK
-    let client_fin_ack = TcpHandler {
+    let client_fin_ack = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
-        payload: payload_from("Hello")?,
-        ..CLIENT_PACKET
+        payload: TcpPayload::from_test_str("Hello")?,
+        ..CLIENT_PKT
     };
 
     client_fin_ack.create_reply(&mut connections)?;
@@ -235,10 +235,10 @@ fn partial_ack_in_last_ack_does_not_close_connection() -> Result {
 
     // Client ACKs only the echoed "Hello" (SEG.ACK=SERVER_ISN+1+5), not the FIN yet
     // (SND.NXT=SERVER_ISN+1+5+1)
-    let partial_ack = TcpHandler {
+    let partial_ack = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_FIN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_HELLO_LEN,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(
@@ -271,11 +271,11 @@ fn final_ack_after_fin_ack_removes_connection_and_returns_none() -> Result {
     let mut connections = TcpConnections::default().after_handshake();
     let mut cloned_state = connections.try_get()?.clone();
 
-    let client_fin_ack = TcpHandler {
+    let client_fin_ack = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     client_fin_ack.create_reply(&mut connections)?;
@@ -292,10 +292,10 @@ fn final_ack_after_fin_ack_removes_connection_and_returns_none() -> Result {
 
     // ack=SERVER_ISN+2 (our FIN-ACK seq + 1)
     assert_eq!(
-        TcpHandler {
+        TcpSegment {
             seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_FIN_BYTE,
             ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
-            ..CLIENT_PACKET
+            ..CLIENT_PKT
         }
         .create_reply(&mut connections)?,
         None
@@ -318,7 +318,7 @@ fn close_established_sends_fin_ack_and_transitions_to_fin_wait_1() -> Result {
     assert!(replies.is_empty(), "Expected exactly one reply");
     assert_eq!(
         reply,
-        TcpHandler {
+        TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
             flags: TcpFlags::FinAck,
@@ -343,10 +343,10 @@ fn fin_wait_1_to_fin_wait_2_on_ack_of_our_fin() -> Result {
     let mut cloned_state = connections.try_get()?.clone();
 
     // Client acknowledges our FIN (ack=SERVER_ISN+2), no FIN of its own yet
-    let ack_of_fin = TcpHandler {
+    let ack_of_fin = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(ack_of_fin.create_reply(&mut connections)?, None);
@@ -370,10 +370,10 @@ fn fin_wait_2_closes_on_fin_ack_from_peer() -> Result {
     let mut cloned_state = connections.try_get()?.clone();
 
     // Our FIN is acknowledged -> FIN-WAIT-2
-    let ack_of_fin = TcpHandler {
+    let ack_of_fin = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(ack_of_fin.create_reply(&mut connections)?, None);
@@ -388,17 +388,17 @@ fn fin_wait_2_closes_on_fin_ack_from_peer() -> Result {
     assert_eq!(connections.try_get()?, &cloned_state);
 
     // Client's FIN arrives in order
-    let fin_reply = TcpHandler {
+    let fin_reply = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
         flags: TcpFlags::FinAck,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
     assert_eq!(
         fin_reply,
-        Some(TcpHandler {
+        Some(TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_FIN_BYTE,
             ..SERVER_REPLY
@@ -419,17 +419,17 @@ fn fin_wait_1_closes_immediately_if_peers_fin_also_acks_ours() -> Result {
     connections.close_established(); // -> FIN-WAIT-1, snd_nxt=SERVER_ISN+2
 
     // Client's FIN arrives in order and also acknowledges our FIN (ack=SERVER_ISN+2)
-    let reply = TcpHandler {
+    let reply = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
         flags: TcpFlags::FinAck,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
-        Some(TcpHandler {
+        Some(TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_FIN_BYTE,
             ..SERVER_REPLY
@@ -451,17 +451,17 @@ fn data_after_our_fin_in_fin_wait_1_is_acked_without_echo() -> Result {
     connections.close_established(); // -> FIN-WAIT-1, snd_nxt=SERVER_ISN+2
     let mut cloned_state = connections.try_get()?.clone();
 
-    let reply = TcpHandler {
+    let reply = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
-        payload: payload_from("Hello")?,
-        ..CLIENT_PACKET
+        payload: TcpPayload::from_test_str("Hello")?,
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
-        Some(TcpHandler {
+        Some(TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
             ..SERVER_REPLY
@@ -482,10 +482,10 @@ fn data_after_our_fin_in_fin_wait_2_is_acked_without_echo() -> Result {
     let mut cloned_state = connections.try_get()?.clone();
 
     // Our FIN is acknowledged -> FIN-WAIT-2
-    let ack_of_fin = TcpHandler {
+    let ack_of_fin = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(ack_of_fin.create_reply(&mut connections)?, None);
@@ -499,17 +499,17 @@ fn data_after_our_fin_in_fin_wait_2_is_acked_without_echo() -> Result {
 
     assert_eq!(connections.try_get()?, &cloned_state);
 
-    let reply = TcpHandler {
+    let reply = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
-        payload: payload_from("Hello")?,
-        ..CLIENT_PACKET
+        payload: TcpPayload::from_test_str("Hello")?,
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
-        Some(TcpHandler {
+        Some(TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN,
             ..SERVER_REPLY
@@ -531,16 +531,16 @@ fn simultaneous_close_transitions_through_closing_to_closed() -> Result {
 
     // Client's FIN arrives in order, but doesn't yet acknowledge our FIN (ack=SERVER_ISN+1,
     // simultaneous close) -> CLOSING
-    let client_fin_ack = TcpHandler {
+    let client_fin_ack = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
-        ..CLIENT_PACKET
+        ..CLIENT_PKT
     };
 
     assert_eq!(
         client_fin_ack.create_reply(&mut connections)?,
-        Some(TcpHandler {
+        Some(TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_FIN_BYTE,
             ..SERVER_REPLY
@@ -557,10 +557,10 @@ fn simultaneous_close_transitions_through_closing_to_closed() -> Result {
 
     // Client's ACK of our FIN finally arrives -> fully closed
     assert_eq!(
-        TcpHandler {
+        TcpSegment {
             seq_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_FIN_BYTE,
             ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
-            ..CLIENT_PACKET
+            ..CLIENT_PKT
         }
         .create_reply(&mut connections)?,
         None
@@ -582,17 +582,17 @@ fn fin_ack_with_data_in_fin_wait_1_advances_rcv_nxt_past_data_and_fin() -> Resul
     let mut cloned_state = connections.try_get()?.clone();
 
     // Client's FIN-ACK arrives in order with data, not yet acknowledging our FIN (ack=SERVER_ISN+1)
-    let fin_ack_with_data = TcpHandler {
+    let fin_ack_with_data = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
-        payload: payload_from("Hello")?,
-        ..CLIENT_PACKET
+        payload: TcpPayload::from_test_str("Hello")?,
+        ..CLIENT_PKT
     };
 
     assert_eq!(
         fin_ack_with_data.create_reply(&mut connections)?,
-        Some(TcpHandler {
+        Some(TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_FIN_BYTE,
             ..SERVER_REPLY
@@ -619,18 +619,18 @@ fn fin_ack_with_data_in_fin_wait_1_acking_our_fin_closes_immediately() -> Result
     let mut connections = TcpConnections::default().after_handshake();
     connections.close_established(); // -> FIN-WAIT-1, snd_nxt=SERVER_ISN+2
 
-    let reply = TcpHandler {
+    let reply = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
         flags: TcpFlags::FinAck,
-        payload: payload_from("Hello")?,
-        ..CLIENT_PACKET
+        payload: TcpPayload::from_test_str("Hello")?,
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
-        Some(TcpHandler {
+        Some(TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_FIN_BYTE,
             ..SERVER_REPLY
@@ -653,28 +653,28 @@ fn fin_ack_with_data_in_fin_wait_2_advances_rcv_nxt_past_data_and_fin() -> Resul
 
     // Our FIN is acknowledged -> FIN-WAIT-2
     assert_eq!(
-        TcpHandler {
+        TcpSegment {
             seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
             ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
-            ..CLIENT_PACKET
+            ..CLIENT_PKT
         }
         .create_reply(&mut connections)?,
         None
     );
 
     // Client's FIN arrives in order with trailing data
-    let reply = TcpHandler {
+    let reply = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
         flags: TcpFlags::FinAck,
-        payload: payload_from("Hello")?,
-        ..CLIENT_PACKET
+        payload: TcpPayload::from_test_str("Hello")?,
+        ..CLIENT_PKT
     }
     .create_reply(&mut connections)?;
 
     assert_eq!(
         reply,
-        Some(TcpHandler {
+        Some(TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE + LOCAL_FIN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_FIN_BYTE,
             ..SERVER_REPLY
@@ -696,21 +696,21 @@ fn fin_ack_with_data_in_established_echoes_data_and_starts_closing() -> Result {
     let mut connections = TcpConnections::default().after_handshake(); // rcv_nxt=CLIENT_ISN+1
     let mut cloned_state = connections.try_get()?.clone();
 
-    let fin_ack_with_data = TcpHandler {
+    let fin_ack_with_data = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         flags: TcpFlags::FinAck,
-        payload: payload_from("Hello")?,
-        ..CLIENT_PACKET
+        payload: TcpPayload::from_test_str("Hello")?,
+        ..CLIENT_PKT
     };
 
     assert_eq!(
         fin_ack_with_data.create_reply(&mut connections)?,
-        Some(TcpHandler {
+        Some(TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_FIN_BYTE,
             flags: TcpFlags::FinAck,
-            payload: payload_from("Hello")?,
+            payload: TcpPayload::from_test_str("Hello")?,
             ..SERVER_REPLY
         }),
         "Data should be echoed and piggybacked on the FIN-ACK, with the ACK covering both the \
@@ -752,22 +752,22 @@ fn fin_ack_with_data_in_established_buffers_the_untransmittable_remainder() -> R
     };
     connections.insert(expected_state.clone());
 
-    let fin_ack_with_data = TcpHandler {
+    let fin_ack_with_data = TcpSegment {
         seq_num: CLIENT_ISN + REMOTE_SYN_BYTE,
         ack_num: SERVER_ISN + LOCAL_SYN_BYTE,
         window: SMALL_WINDOW,
         flags: TcpFlags::FinAck,
-        payload: payload_from("Hello")?,
-        ..CLIENT_PACKET
+        payload: TcpPayload::from_test_str("Hello")?,
+        ..CLIENT_PKT
     };
 
     assert_eq!(
         fin_ack_with_data.create_reply(&mut connections)?,
-        Some(TcpHandler {
+        Some(TcpSegment {
             seq_num: SERVER_ISN + LOCAL_SYN_BYTE,
             ack_num: CLIENT_ISN + REMOTE_SYN_BYTE + REMOTE_HELLO_LEN + REMOTE_FIN_BYTE,
             flags: TcpFlags::FinAck,
-            payload: payload_from("Hel")?,
+            payload: TcpPayload::from_test_str("Hel")?,
             ..SERVER_REPLY
         }),
         "Only the first 3 bytes fit in the advertised window of 3, piggybacked on the FIN-ACK"

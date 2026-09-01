@@ -1,6 +1,7 @@
 #[cfg(not(target_os = "linux"))]
 compile_error!("This crate only supports Linux because it directly uses low-level Linux APIs");
 
+pub mod config;
 pub mod server;
 pub mod sys;
 
@@ -10,10 +11,7 @@ pub mod checksum;
 #[cfg(not(feature = "bench-internals"))]
 mod checksum;
 
-pub use config::Config;
-
 mod addr_pairs;
-mod config;
 mod endpoint;
 mod ipv4_header;
 mod logger;
