@@ -131,6 +131,35 @@ impl TcpSegment<Remote> {
         };
 
         Ok(match (connections.get_mut(&key), self.flags, &self.payload) {
+            // RST from an unknown (CLOSED) connection -> silently drop segment (never RST a RST)
+            (None, TcpFlags::Rst | TcpFlags::RstAck, _) => None,
+
+            // RST on a known connection -> RFC 9293, Section 3.10.7.4 has three cases for when the
+            // RST bit is set, protecting against a blind reset attack (as described in RFC 5961,
+            // Section 3):
+            //   Case 1: SEG.SEQ outside window           -> silently drop segment
+            //   Case 2: SEG.SEQ == RCV.NXT               -> reset connection, no reply
+            //   Case 3: SEG.SEQ in window but != RCV.NXT -> no connection reset, send challenge ACK
+            (
+                Some(&mut ConnState { snd_nxt, rcv_nxt, .. }),
+                TcpFlags::Rst | TcpFlags::RstAck,
+                _,
+            ) => {
+                if self.seq_num == rcv_nxt {
+                    // Case 2
+                    connections.remove(&key);
+                    None
+                } else {
+                    // Check whether `seq_num` falls within the receive window [RCV.NXT, RCV.NXT +
+                    // RCV.WND). true -> Case 3, false -> Case 1.
+                    (rcv_nxt.precedes_or_eq(self.seq_num)
+                        && self
+                            .seq_num
+                            .precedes(rcv_nxt + TcpSegment::<Local>::RCV_WND.into()))
+                    .then_some(SendInfo::pure_ack(snd_nxt, rcv_nxt))
+                }
+            }
+
             // SYN packet (step 1 of handshake)
             // Reply with SYN-ACK (step 2), no payload echo
             (None, TcpFlags::Syn, _) => {
@@ -249,8 +278,7 @@ impl TcpSegment<Remote> {
 
             (
                 Some(conn @ &mut ConnState { tcp_state: TcpState::Established(established), .. }),
-                // Any non-RST
-                TcpFlags::Syn | TcpFlags::SynAck | TcpFlags::Ack | TcpFlags::FinAck,
+                _,
                 _,
             ) => self.handle_established(conn, established)?,
 
@@ -375,35 +403,6 @@ impl TcpSegment<Remote> {
                 connections.remove(&key);
                 None
             }
-
-            // RST on a known connection -> RFC 9293, Section 3.10.7.4 has three cases for when the
-            // RST bit is set, protecting against a blind reset attack (as described in RFC 5961,
-            // Section 3):
-            //   Case 1: SEG.SEQ outside window           -> silently drop segment
-            //   Case 2: SEG.SEQ == RCV.NXT               -> reset connection, no reply
-            //   Case 3: SEG.SEQ in window but != RCV.NXT -> no connection reset, send challenge ACK
-            (
-                Some(&mut ConnState { snd_nxt, rcv_nxt, .. }),
-                TcpFlags::Rst | TcpFlags::RstAck,
-                _,
-            ) => {
-                if self.seq_num == rcv_nxt {
-                    // Case 2
-                    connections.remove(&key);
-                    None
-                } else {
-                    // Check whether `seq_num` falls within the receive window [RCV.NXT, RCV.NXT +
-                    // RCV.WND). true -> Case 3, false -> Case 1.
-                    (rcv_nxt.precedes_or_eq(self.seq_num)
-                        && self
-                            .seq_num
-                            .precedes(rcv_nxt + TcpSegment::<Local>::RCV_WND.into()))
-                    .then_some(SendInfo::pure_ack(snd_nxt, rcv_nxt))
-                }
-            }
-
-            // RST from an unknown (CLOSED) connection -> silently drop segment (never RST a RST)
-            (None, TcpFlags::Rst | TcpFlags::RstAck, _) => None,
 
             // Something else unrecognized (other than RST caught above) -> RST so the peer fails
             // fast instead of hanging. Per RFC 9293, Section 3.10.7.1, any non-RST segment to a
