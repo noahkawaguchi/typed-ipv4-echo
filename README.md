@@ -28,18 +28,18 @@ Typenet is a userspace IPv4/ICMP/TCP/UDP implementation and echo server that ope
 
 ## Features
 
-- **Near-Zero Dependencies**: Depends only on the Rust Standard Library and `libc` (raw FFI to access platform C APIs), implementing all other logic from scratch
-- **TUN Device Integration**: Performs low-level packet I/O using Linux TUN virtual network interfaces rather than sockets
-- **Multi-Protocol Support**: Manages TCP connections, ICMP Echo Request/Reply, and UDP datagrams
-- **Flexible Configuration and Logging**: Allows customization of key parameters at runtime (see [Environment Variables](#environment-variables) below)
-- **Graceful Shutdown**: Catches SIGINT, drains TCP connections with a timeout, and exits cleanly
+- Depends only on Rust's standard library and `libc` (raw FFI to access platform C APIs), implementing all other logic from scratch
+- Performs low-level packet I/O using Linux TUN virtual network interfaces rather than sockets
+- Supports TCP connections, ICMP Echo Request/Reply, and UDP datagrams over IPv4
+- Allows configuration of key parameters at runtime, including a range of log levels (see [Environment Variables](#environment-variables) below)
+- Catches SIGINT, drains TCP connections with a timeout, and exits gracefully
 
 ### TCP Implementation
 
 Although the TCP implementation is not complete, it covers a significant portion of RFC 9293 and is capable of reliable transmission of data in degraded network conditions (see [Network Emulation](#network-emulation) below). Some highlights include:
 
-- Three-way handshake (passive open)
 - 4-tuple-keyed state machine
+- Three-way handshake (passive open)
 - Data receipt and transmission (currently echo only)
 - Retransmissions with binary exponential backoff
 - Flow control (respects peer's window and buffers remaining bytes to send when the window opens)
@@ -50,7 +50,7 @@ Although the TCP implementation is not complete, it covers a significant portion
 
 ### Encoding Domain Logic in the Type System
 
-A driving force throughout the codebase is the use of domain types to create and uphold static guarantees that make invalid operations unrepresentable. As just one example, the sealed trait `Endpoint` and its zero-sized implementers `Local` and `Remote` turn classes of logic bugs, such as arithmetic between RCV.NXT and SND.UNA or packets with the source and destination addresses flipped, into compile errors.
+A driving force throughout the codebase is the use of domain types to create and uphold static guarantees that make invalid operations unrepresentable. As just one example, the sealed trait `Endpoint` and its zero-sized implementers `Local` and `Remote` turn classes of logic bugs, such as arithmetic between `RCV.NXT` and `SND.UNA` or packets with the source and destination addresses flipped, into compile errors.
 
 ### Static Dispatch Architecture
 
@@ -92,12 +92,13 @@ Each variant wraps a protocol-specific struct responsible for:
 - Linux (for its TUN devices and various low-level APIs)
 - `sudo` privileges (for creating and managing TUN devices)
 - For [Nix](https://github.com/NixOS/nix) users, the toolchain is included as a flake.
-- Otherwise, install:
+- Otherwise, install the following:
   - The [Rust toolchain](https://rust-lang.org/tools/install)
   - The command runner [Just](https://github.com/casey/just)
-  - `telnet`, `nc`/`netcat`, `ping`, and `tc` (likely already installed)
-  - [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov) (only if generating test coverage reports)
-  - [Codebook](https://github.com/blopker/codebook) (only if spell checking)
+  - _Likely already installed_: `telnet`, `nc`/`netcat`, `ping`, and `tc`
+  - _Optional, used for generating test coverage reports_: [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov)
+  - _Development only, used for spell checking_: [Codebook](https://github.com/blopker/codebook)
+  - _Development only, used for formatting_: install nightly Rust using `rustup toolchain install nightly`
 
 <details>
 <summary><i>Optional: Capture and save traffic with TShark (click to expand)</i></summary>
@@ -135,7 +136,7 @@ For each of these three recipes, see `just --usage <RECIPE>` for further options
 <summary><i>Optional environment variable configuration (click to expand)</i></summary>
 <br />
 
-The following environment variables can be used to configure the TUN device and server. When using Just, a `.env` file will automatically be read if present.
+The following environment variables can be used to configure the TUN device and server. When running commands using the [`justfile`](justfile), a `.env` file will automatically be read if present.
 
 | Key                     | Meaning                                                   | Default     |
 | ----------------------- | --------------------------------------------------------- | ----------- |
