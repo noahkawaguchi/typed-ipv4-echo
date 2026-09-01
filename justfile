@@ -190,6 +190,10 @@ lint:
 fmt-check:
     cargo fmt --all --check && echo 'Formatting check passed'
 
+# Apply formatting changes
+fmt:
+    cargo fmt --all
+
 # Check spelling with Codebook
 spell-check:
     git ls-files -z | xargs -0 codebook-lsp lint
