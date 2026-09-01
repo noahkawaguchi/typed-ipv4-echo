@@ -78,48 +78,41 @@ impl<'a> ProtocolRouter<'a, Remote> {
     }
 }
 
+/// Generates a function for a trait implementation, matching on the variant of `self` and calling
+/// the same method on all of the inner structs. Used when the inner structs all implement the trait
+/// being implemented by the enum.
+macro_rules! static_dispatch {
+    ($fn_name:ident(&self) -> $ret_type:ty) => {
+        fn $fn_name(&self) -> $ret_type {
+            match self {
+                Self::Icmp(msg) => msg.$fn_name(),
+                Self::Tcp(seg) => seg.$fn_name(),
+                Self::Udp(dgram) => dgram.$fn_name(),
+            }
+        }
+    };
+
+    ($fn_name:ident(&self, $arg_type:ty) -> $ret_type:ty) => {
+        fn $fn_name(&self, arg: $arg_type) -> $ret_type {
+            match self {
+                Self::Icmp(msg) => msg.$fn_name(arg),
+                Self::Tcp(seg) => seg.$fn_name(arg),
+                Self::Udp(dgram) => dgram.$fn_name(arg),
+            }
+        }
+    };
+}
+
 impl Encode<Local> for ProtocolRouter<'_, Local> {
-    fn write_into(&self, buf: &mut [u8]) -> Result<u16> {
-        match self {
-            Self::Icmp(msg) => msg.write_into(buf),
-            Self::Tcp(seg) => seg.write_into(buf),
-            Self::Udp(dgram) => dgram.write_into(buf),
-        }
-    }
-
-    fn proto(&self) -> Protocol {
-        match self {
-            Self::Icmp(msg) => msg.proto(),
-            Self::Tcp(seg) => seg.proto(),
-            Self::Udp(dgram) => dgram.proto(),
-        }
-    }
-
-    fn get_ip_pair(&self) -> Ipv4AddrPair<Local> {
-        match self {
-            Self::Icmp(msg) => msg.get_ip_pair(),
-            Self::Tcp(seg) => seg.get_ip_pair(),
-            Self::Udp(dgram) => dgram.get_ip_pair(),
-        }
-    }
+    static_dispatch!(write_into(&self, &mut [u8]) -> Result<u16>);
+    static_dispatch!(proto(&self) -> Protocol);
+    static_dispatch!(get_ip_pair(&self) -> Ipv4AddrPair<Local>);
 }
 
 impl<S: Endpoint> PrettyProtocol for ProtocolRouter<'_, S> {
-    fn pretty_payload(&self, include_content: bool) -> PrettyPayload<'_> {
-        match self {
-            Self::Icmp(msg) => msg.pretty_payload(include_content),
-            Self::Tcp(seg) => seg.pretty_payload(include_content),
-            Self::Udp(dgram) => dgram.pretty_payload(include_content),
-        }
-    }
+    static_dispatch!(pretty_payload(&self, bool) -> PrettyPayload<'_>);
 }
 
 impl<S: Endpoint> fmt::Display for ProtocolRouter<'_, S> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Icmp(msg) => write!(f, "{msg}"),
-            Self::Tcp(seg) => write!(f, "{seg}"),
-            Self::Udp(dgram) => write!(f, "{dgram}"),
-        }
-    }
+    static_dispatch!(fmt(&self, &mut fmt::Formatter) -> fmt::Result);
 }
