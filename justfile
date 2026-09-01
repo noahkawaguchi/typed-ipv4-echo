@@ -188,11 +188,11 @@ lint:
 
 # Check formatting
 fmt-check:
-    cargo fmt --all --check && echo 'Formatting check passed'
+    RUSTUP_TOOLCHAIN=nightly cargo fmt --all --check && echo 'Formatting check passed'
 
 # Apply formatting changes
 fmt:
-    cargo fmt --all
+    RUSTUP_TOOLCHAIN=nightly cargo fmt --all
 
 # Check spelling with Codebook
 spell-check:
