@@ -260,7 +260,7 @@ The [`justfile`](justfile) includes recipes for running CI checks locally.
 
 ```sh
 just lint
-just fmt-check
+just fmt-check  # `just fmt` to apply changes
 just spell-check
 just ci-checks  # All CI checks (including tests)
 ```

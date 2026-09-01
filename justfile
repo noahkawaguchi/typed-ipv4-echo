@@ -169,7 +169,7 @@ ci-checks: (test '--quiet') lint fmt-check spell-check
 
 # Run tests, including ignored
 test *ARGS: tun
-    cargo test --workspace --all-targets {{ ARGS }} -- --include-ignored
+    cargo test --workspace --all-targets --all-features {{ ARGS }} -- --include-ignored
 
 # Generate test coverage report and print summary (includes ignored tests)
 cov *ARGS: tun
@@ -184,11 +184,15 @@ bench:
 
 # Lint with Clippy, denying warnings
 lint:
-    cargo clippy --workspace --all-targets -- --deny warnings
+    cargo clippy --workspace --all-targets --all-features -- --deny warnings
 
 # Check formatting
 fmt-check:
-    cargo fmt --all --check && echo 'Formatting check passed'
+    RUSTUP_TOOLCHAIN=nightly cargo fmt --all --check && echo 'Formatting check passed'
+
+# Apply formatting changes
+fmt:
+    RUSTUP_TOOLCHAIN=nightly cargo fmt --all
 
 # Check spelling with Codebook
 spell-check:
