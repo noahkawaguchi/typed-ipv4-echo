@@ -4,7 +4,7 @@ mod connections;
 mod flags;
 mod payload;
 mod pending_segment;
-mod send_info;
+mod send_options;
 mod seq_space;
 mod state;
 
@@ -23,7 +23,7 @@ use {
                 flags::TcpFlags,
                 payload::TcpPayload,
                 pending_segment::PendingSegment,
-                send_info::SendOptions,
+                send_options::SendOptions,
                 seq_space::{SeqOffset, SeqPoint},
                 state::{
                     Closing, ConnState, Established, FinWait1, FinWait2, LastAck, SynReceived,
