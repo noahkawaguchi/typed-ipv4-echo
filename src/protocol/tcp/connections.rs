@@ -4,7 +4,7 @@ use {
         addr_pairs::{Ipv4AddrPair, PortPair},
         endpoint::Local,
         protocol::tcp::{
-            LOCAL_FIN_BYTE, PendingSegment, SendInfo, TcpFlags, TcpSegment,
+            LOCAL_FIN_BYTE, PendingSegment, SendOptions, TcpFlags, TcpSegment,
             state::{ConnState, TcpState},
         },
     },
@@ -144,10 +144,10 @@ impl TcpConnections {
 
             retransmissions.extend(conn.pending.iter_mut().filter_map(|seg| {
                 (seg.time_due(&self.rto_config) <= now).then(|| {
-                    TcpSegment::from_pairs_and_info(
+                    TcpSegment::from_pairs_and_opts(
                         Ipv4AddrPair::new(key.server_ip, key.client_ip),
                         PortPair::new(key.server_port, key.client_port),
-                        seg.retransmit_info(now),
+                        seg.retransmit_opts(now),
                     )
                 })
             }));
@@ -168,7 +168,7 @@ impl TcpConnections {
                     return None;
                 };
 
-                let send_info = SendInfo {
+                let send_opts = SendOptions {
                     seq_num: conn.snd_nxt,
                     ack_num: conn.rcv_nxt,
                     flags: TcpFlags::FinAck,
@@ -181,12 +181,12 @@ impl TcpConnections {
                 conn.snd_nxt += LOCAL_FIN_BYTE;
 
                 conn.pending
-                    .push(PendingSegment::new(send_info.clone(), now));
+                    .push(PendingSegment::new(send_opts.clone(), now));
 
-                Some(TcpSegment::from_pairs_and_info(
+                Some(TcpSegment::from_pairs_and_opts(
                     Ipv4AddrPair::new(key.server_ip, key.client_ip),
                     PortPair::new(key.server_port, key.client_port),
-                    send_info,
+                    send_opts,
                 ))
             })
             .collect()
@@ -235,7 +235,7 @@ impl TcpConnections {
                 rcv_nxt: CLIENT_ISN + REMOTE_SYN_BYTE,
                 snd_una: SERVER_ISN,
                 pending: vec![PendingSegment::new(
-                    SendInfo {
+                    SendOptions {
                         seq_num: SERVER_ISN,
                         ack_num: CLIENT_ISN + REMOTE_SYN_BYTE,
                         flags: TcpFlags::SynAck,

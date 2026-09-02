@@ -23,7 +23,7 @@ use {
                 flags::TcpFlags,
                 payload::TcpPayload,
                 pending_segment::PendingSegment,
-                send_info::SendInfo,
+                send_info::SendOptions,
                 seq_space::{SeqOffset, SeqPoint},
                 state::{
                     Closing, ConnState, Established, FinWait1, FinWait2, LastAck, SynReceived,
@@ -97,12 +97,12 @@ impl TcpSegment<Remote> {
         &self,
         connections: &mut TcpConnections,
     ) -> Result<Option<TcpSegment<Local>>> {
-        SendInfo::decide_reply(self, connections).map(|maybe_send_info| {
-            maybe_send_info.map(|send_info| {
-                TcpSegment::<Local>::from_pairs_and_info(
+        SendOptions::decide_reply(self, connections).map(|maybe_send_opts| {
+            maybe_send_opts.map(|send_opts| {
+                TcpSegment::<Local>::from_pairs_and_opts(
                     self.ip_pair.swapped(),
                     self.ports.swapped(),
-                    send_info,
+                    send_opts,
                 )
             })
         })
@@ -122,10 +122,10 @@ impl TcpSegment<Local> {
     /// receive.
     const RCV_WND: SeqOffset<u16, Remote> = SeqOffset::new(u16::MAX);
 
-    fn from_pairs_and_info(
+    fn from_pairs_and_opts(
         ip_pair: Ipv4AddrPair<Local>,
         ports: PortPair<Local>,
-        SendInfo { seq_num, ack_num, flags, payload }: SendInfo,
+        SendOptions { seq_num, ack_num, flags, payload }: SendOptions,
     ) -> Self {
         Self {
             ip_pair,

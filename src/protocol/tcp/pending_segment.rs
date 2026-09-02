@@ -2,7 +2,7 @@ use {
     crate::{
         endpoint::Local,
         protocol::tcp::{
-            SendInfo, SeqOffset, SeqPoint, TcpFlags, connections::RtoConfig,
+            SendOptions, SeqOffset, SeqPoint, TcpFlags, connections::RtoConfig,
             payload::LenOrDefault as _,
         },
     },
@@ -13,7 +13,7 @@ use {
 #[cfg_attr(test, derive(Debug, Clone))]
 pub(super) struct PendingSegment {
     /// The values and data the segment was sent with, frozen at send time.
-    send_info: SendInfo,
+    send_opts: SendOptions,
 
     /// The sequence number one past the last byte/flag consumed by the segment (`seq_num +
     /// consumed`, e.g. `seq_num + 1` for a SYN/FIN, `seq_num + payload.len()` for data). Compared
@@ -30,18 +30,18 @@ pub(super) struct PendingSegment {
 impl PendingSegment {
     /// Creates a new unacked segment eligible for retransmission, covering the sequence numbers
     /// consumed by the segment.
-    pub(super) fn new(send_info: SendInfo, sent_at: Instant) -> Self {
-        let end_seq = send_info
+    pub(super) fn new(send_opts: SendOptions, sent_at: Instant) -> Self {
+        let end_seq = send_opts
             .seq_num
             // Any SYN/FIN consumes a single phantom byte
             + SeqOffset::new(u32::from(matches!(
-                send_info.flags,
+                send_opts.flags,
                 TcpFlags::Syn | TcpFlags::SynAck | TcpFlags::FinAck
             )))
             // A payload consumes the number of bytes in the payload
-            + send_info.payload.len_or_default();
+            + send_opts.payload.len_or_default();
 
-        Self { send_info, end_seq, last_sent_at: sent_at, retries: 0 }
+        Self { send_opts, end_seq, last_sent_at: sent_at, retries: 0 }
     }
 
     /// Returns the time at which the segment is due for retransmission using exponential backoff,
@@ -71,17 +71,17 @@ impl PendingSegment {
         self.retries >= max_retries
     }
 
-    /// Clones the segment's `SendInfo` for retransmission and records that it is being
+    /// Clones the segment's `SendOptions` for retransmission and records that it is being
     /// retransmitted `now`.
-    pub(super) fn retransmit_info(&mut self, now: Instant) -> SendInfo {
+    pub(super) fn retransmit_opts(&mut self, now: Instant) -> SendOptions {
         self.retries = self.retries.saturating_add(1);
         self.last_sent_at = now;
-        self.send_info.clone()
+        self.send_opts.clone()
     }
 
-    /// Returns a reference to the segment's `SendInfo` without recording a retransmission.
+    /// Returns a reference to the segment's `SendOptions` without recording a retransmission.
     #[cfg(test)]
-    pub(super) const fn peek_info(&self) -> &SendInfo { &self.send_info }
+    pub(super) const fn peek_opts(&self) -> &SendOptions { &self.send_opts }
 }
 
 #[cfg(test)]
@@ -97,7 +97,7 @@ mod tests {
         let now = Instant::now();
 
         let pending = PendingSegment::new(
-            SendInfo {
+            SendOptions {
                 seq_num: SeqPoint::new(42),
                 ack_num: SeqPoint::new(24),
                 flags: TcpFlags::Ack,
@@ -131,7 +131,7 @@ mod tests {
     fn reports_due_now_on_overflow() -> Result<(), &'static str> {
         assert!(
             PendingSegment::new(
-                SendInfo {
+                SendOptions {
                     seq_num: SeqPoint::new(42),
                     ack_num: SeqPoint::new(24),
                     flags: TcpFlags::Ack,
