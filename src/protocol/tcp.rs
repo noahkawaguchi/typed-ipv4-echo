@@ -129,81 +129,87 @@ impl TcpSegment<Remote> {
             server_port: self.ports.dst,
         };
 
-        Ok(match (connections.get_mut(&key), self.flags) {
-            (None, _) => self.handle_unknown_conn(connections, key)?,
+        Ok(match connections.get_mut(&key) {
+            None => self.handle_unknown_conn(connections, key)?,
 
-            // RST on a known connection -> RFC 9293, Section 3.10.7.4 has three cases for when the
-            // RST bit is set, protecting against a blind reset attack (as described in RFC 5961,
-            // Section 3):
-            //   Case 1: SEG.SEQ outside window           -> silently drop segment
-            //   Case 2: SEG.SEQ == RCV.NXT               -> reset connection, no reply
-            //   Case 3: SEG.SEQ in window but != RCV.NXT -> no connection reset, send challenge ACK
-            (Some(&mut ConnState { snd_nxt, rcv_nxt, .. }), TcpFlags::Rst | TcpFlags::RstAck) => {
-                if self.seq_num == rcv_nxt {
-                    // Case 2
-                    connections.remove(&key);
-                    None
-                } else if rcv_nxt.precedes_or_eq(self.seq_num)
-                    && self
-                        .seq_num
-                        .precedes(rcv_nxt + TcpSegment::<Local>::RCV_WND.into())
+            Some(conn) => match self.flags {
+                // RST on a known connection -> RFC 9293, Section 3.10.7.4 has three cases for when
+                // the RST bit is set, protecting against a blind reset attack (as described in RFC
+                // 5961, Section 3):
+                //   Case 1: SEG.SEQ outside window           -> silently drop segment
+                //   Case 2: SEG.SEQ == RCV.NXT               -> reset connection, no reply
+                //   Case 3: SEG.SEQ in window but != RCV.NXT -> don't reset, send challenge ACK
+                TcpFlags::Rst | TcpFlags::RstAck => {
+                    if self.seq_num == conn.rcv_nxt {
+                        // Case 2
+                        connections.remove(&key);
+                        None
+                    } else if conn.rcv_nxt.precedes_or_eq(self.seq_num)
+                        && self
+                            .seq_num
+                            .precedes(conn.rcv_nxt + TcpSegment::<Local>::RCV_WND.into())
+                    {
+                        Some(SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt)) // Case 3
+                    } else {
+                        None // Case 1
+                    }
+                }
+
+                // Stray SYN or SYN-ACK on a synchronized connection -> send a challenge ACK, do not
+                // reset the connection (RFC 9293, Section 3.10.7.4).
+                //
+                // Out-of-window SYN is caught at the general "First, check sequence number," while
+                // in-window SYN is caught at "Fourth, check the SYN bit," but both have the same
+                // result. The ACK field and ACK bit are checked fifth, so SYN and SYN-ACK are
+                // treated the same here.
+                TcpFlags::Syn | TcpFlags::SynAck
+                    if !matches!(conn.tcp_state, TcpState::SynReceived(_)) =>
                 {
-                    Some(SendInfo::pure_ack(snd_nxt, rcv_nxt)) // Case 3
-                } else {
-                    None // Case 1
+                    Some(SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt))
                 }
-            }
 
-            // Stray SYN or SYN-ACK on a synchronized connection -> send a challenge ACK, do not
-            // reset the connection (RFC 9293, Section 3.10.7.4).
-            //
-            // Out-of-window SYN is caught at the general "First, check sequence number," while
-            // in-window SYN is caught at "Fourth, check the SYN bit," but both have the same
-            // result. The ACK field and ACK bit are checked fifth, so SYN and SYN-ACK are treated
-            // the same here.
-            (
-                Some(&mut ConnState { tcp_state, snd_nxt, rcv_nxt, .. }),
-                TcpFlags::Syn | TcpFlags::SynAck,
-            ) if !matches!(tcp_state, TcpState::SynReceived(_)) => {
-                Some(SendInfo::pure_ack(snd_nxt, rcv_nxt))
-            }
-
-            (Some(conn), _) => match conn.tcp_state {
-                TcpState::SynReceived(syn_received) => self.handle_syn_rcv(conn, syn_received)?,
-
-                TcpState::Established(established) => self.handle_established(conn, established)?,
-
-                TcpState::FinWait1(fin_wait_1) => {
-                    let (maybe_send_info, remove_conn) = self.handle_fin_wait_1(conn, fin_wait_1);
-                    if remove_conn {
-                        connections.remove(&key);
+                _ => match conn.tcp_state {
+                    TcpState::SynReceived(syn_received) => {
+                        self.handle_syn_rcv(conn, syn_received)?
                     }
-                    maybe_send_info
-                }
 
-                TcpState::FinWait2(fin_wait_2) => {
-                    let (send_info, remove_conn) = self.handle_fin_wait_2(conn, fin_wait_2);
-                    if remove_conn {
-                        connections.remove(&key);
+                    TcpState::Established(established) => {
+                        self.handle_established(conn, established)?
                     }
-                    Some(send_info)
-                }
 
-                TcpState::Closing(closing) => {
-                    let (maybe_send_info, remove_conn) = self.handle_closing(conn, closing);
-                    if remove_conn {
-                        connections.remove(&key);
+                    TcpState::FinWait1(fin_wait_1) => {
+                        let (maybe_send_info, remove_conn) =
+                            self.handle_fin_wait_1(conn, fin_wait_1);
+                        if remove_conn {
+                            connections.remove(&key);
+                        }
+                        maybe_send_info
                     }
-                    maybe_send_info
-                }
 
-                TcpState::LastAck(last_ack) => {
-                    let (maybe_send_info, remove_conn) = self.handle_last_ack(conn, last_ack);
-                    if remove_conn {
-                        connections.remove(&key);
+                    TcpState::FinWait2(fin_wait_2) => {
+                        let (send_info, remove_conn) = self.handle_fin_wait_2(conn, fin_wait_2);
+                        if remove_conn {
+                            connections.remove(&key);
+                        }
+                        Some(send_info)
                     }
-                    maybe_send_info
-                }
+
+                    TcpState::Closing(closing) => {
+                        let (maybe_send_info, remove_conn) = self.handle_closing(conn, closing);
+                        if remove_conn {
+                            connections.remove(&key);
+                        }
+                        maybe_send_info
+                    }
+
+                    TcpState::LastAck(last_ack) => {
+                        let (maybe_send_info, remove_conn) = self.handle_last_ack(conn, last_ack);
+                        if remove_conn {
+                            connections.remove(&key);
+                        }
+                        maybe_send_info
+                    }
+                },
             },
         }
         .map(|send_info| {
