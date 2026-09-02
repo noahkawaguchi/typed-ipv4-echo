@@ -24,7 +24,8 @@ use {
                 pending_segment::PendingSegment,
                 seq_space::{SeqOffset, SeqPoint},
                 state::{
-                    ConnState, Established, FinWait1, FinWait2, SynReceived, SyncedState, TcpState,
+                    Closing, ConnState, Established, FinWait1, FinWait2, SynReceived, SyncedState,
+                    TcpState,
                 },
             },
         },
@@ -229,6 +230,14 @@ impl TcpSegment<Remote> {
                 Some(send_info)
             }
 
+            (Some(conn @ &mut ConnState { tcp_state: TcpState::Closing(closing), .. }), _, _) => {
+                let (maybe_send_info, remove_conn) = self.handle_closing(conn, closing);
+                if remove_conn {
+                    connections.remove(&key);
+                }
+                maybe_send_info
+            }
+
             // Partial ACK in LAST-ACK, not yet covering our FIN -> update send-side state like a
             // plain ACK, keep waiting in LAST-ACK for the real final ACK
             (
@@ -244,17 +253,6 @@ impl TcpSegment<Remote> {
             // connection, no reply
             (
                 Some(&mut ConnState { tcp_state: TcpState::LastAck(_), snd_nxt, .. }),
-                TcpFlags::Ack,
-                None,
-            ) if self.ack_num == snd_nxt => {
-                connections.remove(&key);
-                None
-            }
-
-            // CLOSING (simultaneous close), the remote peer's ACK of our FIN arrives -> fully
-            // closed, no reply
-            (
-                Some(&mut ConnState { tcp_state: TcpState::Closing(_), snd_nxt, .. }),
                 TcpFlags::Ack,
                 None,
             ) if self.ack_num == snd_nxt => {
@@ -587,6 +585,20 @@ impl TcpSegment<Remote> {
             ),
 
             _ => (SendInfo::rst(self.ack_num), false),
+        }
+    }
+
+    fn handle_closing(
+        &self,
+        conn: &ConnState,
+        _closing: SyncedState<Closing>,
+    ) -> (Option<SendInfo>, bool) {
+        match (self.flags, self.payload.as_ref()) {
+            // CLOSING (simultaneous close), the remote peer's ACK of our FIN arrives -> fully
+            // closed, no reply
+            (TcpFlags::Ack, None) if self.ack_num == conn.snd_nxt => (None, true),
+
+            _ => (Some(SendInfo::rst(self.ack_num)), false),
         }
     }
 }
