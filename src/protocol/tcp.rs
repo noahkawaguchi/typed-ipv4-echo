@@ -24,8 +24,8 @@ use {
                 pending_segment::PendingSegment,
                 seq_space::{SeqOffset, SeqPoint},
                 state::{
-                    Closing, ConnState, Established, FinWait1, FinWait2, SynReceived, SyncedState,
-                    TcpState,
+                    Closing, ConnState, Established, FinWait1, FinWait2, LastAck, SynReceived,
+                    SyncedState, TcpState,
                 },
             },
         },
@@ -118,10 +118,6 @@ impl TcpSegment<Remote> {
     }
 
     /// Creates a TCP header and payload for replying to `self`, or returns `Ok(None)` for no reply.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "Large match expression to express reply cases clearly"
-    )]
     pub(super) fn create_reply(
         &self,
         connections: &mut TcpConnections,
@@ -238,26 +234,12 @@ impl TcpSegment<Remote> {
                 maybe_send_info
             }
 
-            // Partial ACK in LAST-ACK, not yet covering our FIN -> update send-side state like a
-            // plain ACK, keep waiting in LAST-ACK for the real final ACK
-            (
-                Some(conn @ &mut ConnState { tcp_state: TcpState::LastAck(last_ack), .. }),
-                TcpFlags::Ack,
-                None,
-            ) if self.ack_num != conn.snd_nxt => {
-                conn.tcp_state = TcpState::LastAck(last_ack.incoming_ack_update(conn, self));
-                None
-            }
-
-            // Final ACK completing passive close (LAST-ACK), fully acknowledging our FIN -> remove
-            // connection, no reply
-            (
-                Some(&mut ConnState { tcp_state: TcpState::LastAck(_), snd_nxt, .. }),
-                TcpFlags::Ack,
-                None,
-            ) if self.ack_num == snd_nxt => {
-                connections.remove(&key);
-                None
+            (Some(conn @ &mut ConnState { tcp_state: TcpState::LastAck(last_ack), .. }), _, _) => {
+                let (maybe_send_info, remove_conn) = self.handle_last_ack(conn, last_ack);
+                if remove_conn {
+                    connections.remove(&key);
+                }
+                maybe_send_info
             }
 
             // Something else unrecognized (other than RST caught above) -> RST so the peer fails
@@ -596,6 +578,27 @@ impl TcpSegment<Remote> {
         match (self.flags, self.payload.as_ref()) {
             // CLOSING (simultaneous close), the remote peer's ACK of our FIN arrives -> fully
             // closed, no reply
+            (TcpFlags::Ack, None) if self.ack_num == conn.snd_nxt => (None, true),
+
+            _ => (Some(SendInfo::rst(self.ack_num)), false),
+        }
+    }
+
+    fn handle_last_ack(
+        &self,
+        conn: &mut ConnState,
+        last_ack: SyncedState<LastAck>,
+    ) -> (Option<SendInfo>, bool) {
+        match (self.flags, self.payload.as_ref()) {
+            // Partial ACK in LAST-ACK, not yet covering our FIN -> update send-side state like a
+            // plain ACK, keep waiting in LAST-ACK for the real final ACK
+            (TcpFlags::Ack, None) if self.ack_num != conn.snd_nxt => {
+                conn.tcp_state = TcpState::LastAck(last_ack.incoming_ack_update(conn, self));
+                (None, false)
+            }
+
+            // Final ACK completing passive close (LAST-ACK), fully acknowledging our FIN -> remove
+            // connection, no reply
             (TcpFlags::Ack, None) if self.ack_num == conn.snd_nxt => (None, true),
 
             _ => (Some(SendInfo::rst(self.ack_num)), false),
