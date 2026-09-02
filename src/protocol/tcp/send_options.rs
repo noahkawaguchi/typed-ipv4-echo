@@ -15,7 +15,7 @@ use {
     std::time::Instant,
 };
 
-/// Fields that differ when determining a segment to send.
+/// Comprises fields that differ when determining a segment to send and handles core reply logic.
 #[derive(Clone)]
 #[cfg_attr(test, derive(Debug))]
 pub(super) struct SendOptions {
@@ -42,7 +42,8 @@ impl SendOptions {
         }
     }
 
-    /// Creates a `Self` for replying to `seg`, or returns `Ok(None)` for no reply.
+    /// Creates a `Self` for replying to `seg`, or returns `Ok(None)` for no reply, updating
+    /// connection state accordingly.
     pub(super) fn decide_reply(
         seg: &TcpSegment<Remote>,
         connections: &mut TcpConnections,
@@ -145,7 +146,7 @@ impl SendOptions {
         key: ConnKey,
     ) -> Result<Option<Self>> {
         Ok(match seg.flags {
-            // SYN packet (step 1 of handshake) -> reply with SYN-ACK (step 2)
+            // SYN (step 1 of handshake) -> store new connection, reply with SYN-ACK (step 2).
             TcpFlags::Syn => {
                 let opts = Self {
                     seq_num: SeqPoint::new(sys::random_u32()?),
@@ -159,7 +160,7 @@ impl SendOptions {
                 Some(opts)
             }
 
-            // RST from an unknown connection -> silently drop segment (never RST a RST)
+            // RST from an unknown connection -> silently drop segment (never RST a RST).
             TcpFlags::Rst | TcpFlags::RstAck => None,
 
             _ => Some(Self::rst(seg)),
@@ -174,7 +175,7 @@ impl SendOptions {
         Ok(match (seg.flags, &seg.payload) {
             // Duplicate SYN while awaiting the handshake ACK (client's retransmission timer resent
             // the SYN) -> resend the same SYN-ACK (which was likely lost) using the already-stored
-            // ISN
+            // ISN.
             (TcpFlags::Syn, _) => {
                 let opts = Self {
                     seq_num: conn.snd_una, // ISN
@@ -189,9 +190,9 @@ impl SendOptions {
                 Some(opts)
             }
 
-            // ACK or FIN-ACK during SYN-RECEIVED with an unacceptable sequence number (regardless
-            // of whether it carries data) -> per RFC 9293, Section 3.10.7.4, "First, check sequence
-            // number," reply with an ACK reflecting current state and drop the segment.
+            // ACK or FIN-ACK with an unacceptable sequence number (regardless of whether it carries
+            // data) -> per RFC 9293, Section 3.10.7.4, "First, check sequence number," reply with
+            // an ACK reflecting current state and drop the segment.
             //
             // Due to the current simplification of not using a reassembly buffer, any SEG.SEQ other
             // than exactly RCV.NXT gets a current state ACK and is not held for later.
@@ -277,9 +278,8 @@ impl SendOptions {
             // current state.
             (TcpFlags::Ack, _) if conn.snd_nxt.precedes(seg.ack_num) => Some(Self::pure_ack(conn)),
 
-            // Pure ACK (no payload) on an established connection (acknowledgment of data sent by
-            // the server) -> advance SND.UNA, then send however much the window allows from the
-            // data queued to be sent, if any
+            // Pure ACK (acknowledgment of data sent by the server) -> advance SND.UNA, then send
+            // however much the window allows from the data queued to be sent, if any.
             (TcpFlags::Ack, None) => {
                 let new_established = established.incoming_ack_update(conn, seg);
                 conn.tcp_state = TcpState::Established(new_established);
@@ -288,9 +288,9 @@ impl SendOptions {
                     .map(|to_send| Self::data_payload(conn, to_send))
             }
 
-            // In-order data packet on an established connection -> ACK receipt of data, advancing
-            // RCV.NXT, and echo as much of the queued data as SND.WND currently allows. Buffer
-            // anything that doesn't fit to go out later as the window opens.
+            // In-order data packet -> ACK receipt of data, advancing RCV.NXT, and echo as much of
+            // the queued data as SND.WND currently allows. Buffer anything that doesn't fit to go
+            // out later as the window opens.
             (TcpFlags::Ack, Some(payload)) if seg.seq_num == conn.rcv_nxt => {
                 let new_established = established.incoming_ack_update(conn, seg);
 
@@ -304,19 +304,18 @@ impl SendOptions {
                 })
             }
 
-            // Out-of-order/duplicate data or out-of-order FIN-ACK on an established connection
-            // -> duplicate ACK. ACK rcv_nxt so the client knows what the server expects next, but
-            // don't echo data, start closing, or advance snd_nxt/rcv_nxt.
+            // Out-of-order/duplicate data or out-of-order FIN-ACK -> duplicate ACK. ACK RCV.NXT so
+            // the client knows what the server expects next, but don't echo data, start closing, or
+            // advance SND.NXT/RCV.NXT.
             (TcpFlags::Ack | TcpFlags::FinAck, _) if seg.seq_num != conn.rcv_nxt => {
                 conn.tcp_state = TcpState::Established(established.incoming_ack_update(conn, seg));
                 Some(Self::pure_ack(conn))
             }
 
-            // FIN-ACK (connection teardown) on an established connection, arriving in order ->
-            // echo any trailing data (as much as the window allows, same as plain in-order data),
-            // then start closing to wait for client's final ACK, replying with FIN-ACK. Unlike
-            // FIN-WAIT-1/2, our own FIN hasn't gone out yet, so we can piggyback the data echo on
-            // this same reply.
+            // FIN-ACK (connection teardown), arriving in order -> echo any trailing data (as much
+            // as the window allows, same as plain in-order data), then start closing to wait for
+            // client's final ACK, replying with FIN-ACK. Unlike FIN-WAIT-1/2, our own FIN hasn't
+            // gone out yet, so we can piggyback the data echo on this same reply.
             (TcpFlags::FinAck, maybe_payload) if seg.seq_num == conn.rcv_nxt => {
                 Some(Self::begin_passive_close_without_close_wait(
                     seg,
@@ -330,7 +329,8 @@ impl SendOptions {
         })
     }
 
-    /// Creates a `Self` for the payload `to_send`, using and then updating the state of `conn`.
+    /// Creates a `Self` for the payload `to_send`, advancing SND.NXT and recording the outgoing
+    /// segment as pending.
     fn data_payload(conn: &mut ConnState, to_send: TcpPayload) -> Self {
         let send_len = to_send.len().into();
 
@@ -386,15 +386,17 @@ impl SendOptions {
         Ok(opts)
     }
 
+    /// Handles the reply decision and state updates for a FIN-WAIT-1 connection, returning a reply
+    /// if necessary and a `bool` representing whether the connection should be removed.
     fn handle_fin_wait_1(
         seg: &TcpSegment<Remote>,
         conn: &mut ConnState,
         fin_wait_1: SyncedState<FinWait1>,
     ) -> (Option<Self>, bool) {
         match (seg.flags, &seg.payload) {
-            // In-order data arriving in FIN-WAIT-1, i.e. after we've sent our own FIN but before
-            // the peer's FIN has arrived (half closed) -> ACK it, don't echo because we have no
-            // send side left, and advance rcv_nxt
+            // In-order data arriving after we've sent our own FIN but before the peer's FIN has
+            // arrived (half closed) -> ACK it, don't echo because we have no send side left, and
+            // advance RCV.NXT.
             (TcpFlags::Ack, Some(payload)) if seg.seq_num == conn.rcv_nxt => {
                 conn.rcv_nxt += payload.len().into();
                 let opts = Self::pure_ack(conn);
@@ -402,16 +404,16 @@ impl SendOptions {
                 (Some(opts), false)
             }
 
-            // FIN-WAIT-1, our FIN has been acknowledged (and nothing else) -> FIN-WAIT-2, no reply
+            // Our FIN has been acknowledged (and nothing else) -> FIN-WAIT-2, no reply.
             (TcpFlags::Ack, None) if seg.ack_num == conn.snd_nxt => {
                 conn.tcp_state =
                     TcpState::FinWait2(fin_wait_1.incoming_ack_update(conn, seg).rcv_ack_of_fin());
                 (None, false)
             }
 
-            // FIN-WAIT-1, the remote peer's FIN arrives before ours is acknowledged (simultaneous
-            // close), and it also acknowledges our FIN -> ACK it, and the connection is fully
-            // closed (skipping FIN-WAIT-2/TIME-WAIT).
+            // Peer's FIN arrives before ours is acknowledged (simultaneous close), and it also
+            // acknowledges our FIN -> ACK it and remove the connection (skipping
+            // FIN-WAIT-2/TIME-WAIT).
             //
             // Our own FIN has already been sent, so any trailing data can't be echoed (same as
             // plain data arriving in FIN-WAIT-1), but RCV.NXT must still advance past it.
@@ -424,9 +426,8 @@ impl SendOptions {
                 (Some(Self::pure_ack(conn)), true)
             }
 
-            // FIN-WAIT-1, the remote peer's FIN arrives before ours is acknowledged (simultaneous
-            // close), but it doesn't acknowledge our FIN -> ACK it and move to CLOSING to await the
-            // ACK of our FIN.
+            // Peer's FIN arrives before ours is acknowledged (simultaneous close), but it doesn't
+            // acknowledge our FIN -> ACK it and move to CLOSING to await the ACK of our FIN.
             //
             // Our own FIN has already been sent, so any trailing data can't be echoed (same as
             // plain data arriving in FIN-WAIT-1), but RCV.NXT must still advance past it.
@@ -434,10 +435,8 @@ impl SendOptions {
                 if seg.seq_num == conn.rcv_nxt && seg.ack_num != conn.snd_nxt =>
             {
                 conn.rcv_nxt += maybe_payload.len_or_default();
-
                 // Consume one sequence number in RCV.NXT for the peer's FIN
                 conn.rcv_nxt += REMOTE_FIN_BYTE;
-
                 let opts = Self::pure_ack(conn);
 
                 conn.tcp_state = TcpState::Closing(
@@ -453,15 +452,17 @@ impl SendOptions {
         }
     }
 
+    /// Handles the reply decision and state updates for a FIN-WAIT-2 connection, returning a reply
+    /// and a `bool` representing whether the connection should be removed.
     fn handle_fin_wait_2(
         seg: &TcpSegment<Remote>,
         conn: &mut ConnState,
         fin_wait_2: SyncedState<FinWait2>,
     ) -> (Self, bool) {
         match (seg.flags, &seg.payload) {
-            // In-order data arriving in FIN-WAIT-2, i.e. after we've sent our own FIN but before
-            // the peer's FIN has arrived (half closed) -> ACK it, don't echo because we have no
-            // send side left, and advance rcv_nxt
+            // In-order data arriving after we've sent our own FIN but before the peer's FIN has
+            // arrived (half closed) -> ACK it, don't echo because we have no send side left, and
+            // advance RCV.NXT.
             (TcpFlags::Ack, Some(payload)) if seg.seq_num == conn.rcv_nxt => {
                 conn.rcv_nxt += payload.len().into();
                 let opts = Self::pure_ack(conn);
@@ -469,9 +470,9 @@ impl SendOptions {
                 (opts, false)
             }
 
-            // FIN-WAIT-2, the remote peer's FIN arrives, in order -> ACK it and finish closing (no
-            // TIME-WAIT). Our own FIN has already been sent, so any trailing data can't be echoed,
-            // but the ACK must still reflect RCV.NXT advanced past it as well as the FIN.
+            // Peer's FIN arrives in order -> ACK it and finish closing (no TIME-WAIT). Our own FIN
+            // has already been sent, so any trailing data can't be echoed, but the ACK must still
+            // reflect RCV.NXT advanced past it as well as the FIN.
             (TcpFlags::FinAck, maybe_payload) if seg.seq_num == conn.rcv_nxt => {
                 conn.rcv_nxt += maybe_payload.len_or_default();
                 conn.rcv_nxt += REMOTE_FIN_BYTE;
@@ -482,35 +483,38 @@ impl SendOptions {
         }
     }
 
+    /// Handles the reply decision and state updates for a CLOSING connection, returning a reply if
+    /// necessary and a `bool` representing whether the connection should be removed.
     fn handle_closing(
         seg: &TcpSegment<Remote>,
         conn: &ConnState,
         _closing: SyncedState<Closing>,
     ) -> (Option<Self>, bool) {
         match (seg.flags, &seg.payload) {
-            // CLOSING (simultaneous close), the remote peer's ACK of our FIN arrives -> fully
-            // closed, no reply
+            // Simultaneous close, peer's ACK of our FIN arrives -> remove connection, no reply.
             (TcpFlags::Ack, None) if seg.ack_num == conn.snd_nxt => (None, true),
 
             _ => (Some(Self::rst(seg)), false),
         }
     }
 
+    /// Handles the reply decision and state updates for a LAST-ACK connection, returning a reply if
+    /// necessary and a `bool` representing whether the connection should be removed.
     fn handle_last_ack(
         seg: &TcpSegment<Remote>,
         conn: &mut ConnState,
         last_ack: SyncedState<LastAck>,
     ) -> (Option<Self>, bool) {
         match (seg.flags, &seg.payload) {
-            // Partial ACK in LAST-ACK, not yet covering our FIN -> update send-side state like a
-            // plain ACK, keep waiting in LAST-ACK for the real final ACK
+            // Partial ACK not yet covering our FIN -> update send-side state like a plain ACK, keep
+            // waiting in LAST-ACK for the real final ACK.
             (TcpFlags::Ack, None) if seg.ack_num != conn.snd_nxt => {
                 conn.tcp_state = TcpState::LastAck(last_ack.incoming_ack_update(conn, seg));
                 (None, false)
             }
 
-            // Final ACK completing passive close (LAST-ACK), fully acknowledging our FIN -> remove
-            // connection, no reply
+            // Final ACK completing passive close, fully acknowledging our FIN -> remove connection,
+            // no reply.
             (TcpFlags::Ack, None) if seg.ack_num == conn.snd_nxt => (None, true),
 
             _ => (Some(Self::rst(seg)), false),

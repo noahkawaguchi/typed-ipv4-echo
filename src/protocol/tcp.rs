@@ -92,7 +92,8 @@ impl TcpSegment<Remote> {
         Self::inner_parse(data, ip_pair)
     }
 
-    /// Creates a TCP header and payload for replying to `self`, or returns `Ok(None)` for no reply.
+    /// Creates a TCP header and payload for replying to `self`, or returns `Ok(None)` for no reply,
+    /// updating connection state accordingly.
     pub(super) fn create_reply(
         &self,
         connections: &mut TcpConnections,
