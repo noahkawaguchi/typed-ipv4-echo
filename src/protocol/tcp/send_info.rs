@@ -101,51 +101,53 @@ impl SendInfo {
                     Some(Self::pure_ack(conn))
                 }
 
-                _ => match conn.tcp_state {
-                    TcpState::SynReceived(syn_received) => {
-                        Self::handle_syn_rcv(seg, conn, syn_received)?
-                    }
-
-                    TcpState::Established(established) => {
-                        Self::handle_established(seg, conn, established)?
-                    }
-
-                    TcpState::FinWait1(fin_wait_1) => {
-                        let (maybe_send_info, remove_conn) =
-                            Self::handle_fin_wait_1(seg, conn, fin_wait_1);
-                        if remove_conn {
-                            connections.remove(&key);
+                TcpFlags::Syn | TcpFlags::SynAck | TcpFlags::Ack | TcpFlags::FinAck => {
+                    match conn.tcp_state {
+                        TcpState::SynReceived(syn_received) => {
+                            Self::handle_syn_rcv(seg, conn, syn_received)?
                         }
-                        maybe_send_info
-                    }
 
-                    TcpState::FinWait2(fin_wait_2) => {
-                        let (send_info, remove_conn) =
-                            Self::handle_fin_wait_2(seg, conn, fin_wait_2);
-                        if remove_conn {
-                            connections.remove(&key);
+                        TcpState::Established(established) => {
+                            Self::handle_established(seg, conn, established)?
                         }
-                        Some(send_info)
-                    }
 
-                    TcpState::Closing(closing) => {
-                        let (maybe_send_info, remove_conn) =
-                            Self::handle_closing(seg, conn, closing);
-                        if remove_conn {
-                            connections.remove(&key);
+                        TcpState::FinWait1(fin_wait_1) => {
+                            let (maybe_send_info, remove_conn) =
+                                Self::handle_fin_wait_1(seg, conn, fin_wait_1);
+                            if remove_conn {
+                                connections.remove(&key);
+                            }
+                            maybe_send_info
                         }
-                        maybe_send_info
-                    }
 
-                    TcpState::LastAck(last_ack) => {
-                        let (maybe_send_info, remove_conn) =
-                            Self::handle_last_ack(seg, conn, last_ack);
-                        if remove_conn {
-                            connections.remove(&key);
+                        TcpState::FinWait2(fin_wait_2) => {
+                            let (send_info, remove_conn) =
+                                Self::handle_fin_wait_2(seg, conn, fin_wait_2);
+                            if remove_conn {
+                                connections.remove(&key);
+                            }
+                            Some(send_info)
                         }
-                        maybe_send_info
+
+                        TcpState::Closing(closing) => {
+                            let (maybe_send_info, remove_conn) =
+                                Self::handle_closing(seg, conn, closing);
+                            if remove_conn {
+                                connections.remove(&key);
+                            }
+                            maybe_send_info
+                        }
+
+                        TcpState::LastAck(last_ack) => {
+                            let (maybe_send_info, remove_conn) =
+                                Self::handle_last_ack(seg, conn, last_ack);
+                            if remove_conn {
+                                connections.remove(&key);
+                            }
+                            maybe_send_info
+                        }
                     }
-                },
+                }
             },
         })
     }
@@ -170,10 +172,13 @@ impl SendInfo {
                 Some(send_info)
             }
 
-            // RST from an unknown connection -> silently drop segment (never RST a RST).
+            // RST from an unknown connection -> per RFC 9293, Sections 3.10.7.1 and 3.10.7.2,
+            // silently drop the segment (never RST a RST).
             TcpFlags::Rst | TcpFlags::RstAck => None,
 
-            _ => Some(Self::rst(seg)),
+            // Something else with ACK set (non-RST) -> per RFC 9293, Sections 3.10.7.1 and
+            // 3.10.7.2, send <SEQ=SEG.ACK><CTL=RST>.
+            TcpFlags::SynAck | TcpFlags::Ack | TcpFlags::FinAck => Some(Self::rst(seg)),
         })
     }
 
