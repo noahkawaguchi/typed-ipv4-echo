@@ -4,6 +4,7 @@ mod connections;
 mod flags;
 mod payload;
 mod pending_segment;
+mod send_info;
 mod seq_space;
 mod state;
 
@@ -22,6 +23,7 @@ use {
                 flags::TcpFlags,
                 payload::{LenOrDefault as _, TcpPayload},
                 pending_segment::PendingSegment,
+                send_info::SendInfo,
                 seq_space::{SeqOffset, SeqPoint},
                 state::{
                     Closing, ConnState, Established, FinWait1, FinWait2, LastAck, SynReceived,
@@ -49,32 +51,6 @@ const REMOTE_SYN_BYTE: SeqOffset<u32, Remote> = SeqOffset::new(1);
 
 /// The single phantom byte consumed by FIN in the stream going in the remote to local direction.
 const REMOTE_FIN_BYTE: SeqOffset<u32, Remote> = SeqOffset::new(1);
-
-/// Fields that differ when determining a segment to send.
-#[derive(Clone)]
-#[cfg_attr(test, derive(Debug))]
-struct SendInfo {
-    seq_num: SeqPoint<Local>,
-    ack_num: SeqPoint<Remote>,
-    flags: TcpFlags,
-    payload: Option<TcpPayload>,
-}
-
-impl SendInfo {
-    const fn pure_ack(seq_num: SeqPoint<Local>, ack_num: SeqPoint<Remote>) -> Self {
-        Self { seq_num, ack_num, flags: TcpFlags::Ack, payload: None }
-    }
-
-    const fn rst(seq_num: SeqPoint<Local>) -> Self {
-        Self {
-            seq_num,
-            // ack_num is 0 because sending bare RST with no ACK flag leaves ack_num undefined
-            ack_num: SeqPoint::new(0),
-            flags: TcpFlags::Rst,
-            payload: None,
-        }
-    }
-}
 
 /// Manages TCP headers, data, and reply logic. Field definitions below from RFC 9293, Section 3.1.
 /// Endpoint `S` is the sender (values based on the sender's ISN), while endpoint `S::Peer` is the
