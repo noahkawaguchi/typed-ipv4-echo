@@ -261,7 +261,7 @@ impl TcpSegment<Remote> {
         conn: &mut ConnState,
         syn_received: SynReceived,
     ) -> Result<Option<SendInfo>> {
-        Ok(match (self.flags, self.payload.as_ref()) {
+        Ok(match (self.flags, &self.payload) {
             // Duplicate SYN while awaiting the handshake ACK (client's retransmission timer resent
             // the SYN) -> resend the same SYN-ACK (which was likely lost) using the already-stored
             // ISN
@@ -329,7 +329,7 @@ impl TcpSegment<Remote> {
 
                 Some(self.begin_passive_close_without_close_wait(
                     conn,
-                    maybe_payload,
+                    maybe_payload.as_ref(),
                     established,
                 )?)
             }
@@ -360,7 +360,7 @@ impl TcpSegment<Remote> {
         conn: &mut ConnState,
         established: SyncedState<Established>,
     ) -> Result<Option<SendInfo>> {
-        Ok(match (self.flags, self.payload.as_ref()) {
+        Ok(match (self.flags, &self.payload) {
             // ACK acknowledging data the server has not yet sent (ack_num is past snd_nxt) ->
             // per RFC 9293, Section 3.10.7.4, drop the segment and reply with an ACK reflecting
             // current state.
@@ -408,9 +408,13 @@ impl TcpSegment<Remote> {
             // then start closing to wait for client's final ACK, replying with FIN-ACK. Unlike
             // FIN-WAIT-1/2, our own FIN hasn't gone out yet, so we can piggyback the data echo on
             // this same reply.
-            (TcpFlags::FinAck, maybe_payload) if self.seq_num == conn.rcv_nxt => Some(
-                self.begin_passive_close_without_close_wait(conn, maybe_payload, established)?,
-            ),
+            (TcpFlags::FinAck, maybe_payload) if self.seq_num == conn.rcv_nxt => {
+                Some(self.begin_passive_close_without_close_wait(
+                    conn,
+                    maybe_payload.as_ref(),
+                    established,
+                )?)
+            }
 
             _ => Some(SendInfo::rst(self.ack_num)),
         })
@@ -477,7 +481,7 @@ impl TcpSegment<Remote> {
         conn: &mut ConnState,
         fin_wait_1: SyncedState<FinWait1>,
     ) -> (Option<SendInfo>, bool) {
-        match (self.flags, self.payload.as_ref()) {
+        match (self.flags, &self.payload) {
             // In-order data arriving in FIN-WAIT-1, i.e. after we've sent our own FIN but before
             // the peer's FIN has arrived (half closed) -> ACK it, don't echo because we have no
             // send side left, and advance rcv_nxt
@@ -544,7 +548,7 @@ impl TcpSegment<Remote> {
         conn: &mut ConnState,
         fin_wait_2: SyncedState<FinWait2>,
     ) -> (SendInfo, bool) {
-        match (self.flags, self.payload.as_ref()) {
+        match (self.flags, &self.payload) {
             // In-order data arriving in FIN-WAIT-2, i.e. after we've sent our own FIN but before
             // the peer's FIN has arrived (half closed) -> ACK it, don't echo because we have no
             // send side left, and advance rcv_nxt
@@ -575,7 +579,7 @@ impl TcpSegment<Remote> {
         conn: &ConnState,
         _closing: SyncedState<Closing>,
     ) -> (Option<SendInfo>, bool) {
-        match (self.flags, self.payload.as_ref()) {
+        match (self.flags, &self.payload) {
             // CLOSING (simultaneous close), the remote peer's ACK of our FIN arrives -> fully
             // closed, no reply
             (TcpFlags::Ack, None) if self.ack_num == conn.snd_nxt => (None, true),
@@ -589,7 +593,7 @@ impl TcpSegment<Remote> {
         conn: &mut ConnState,
         last_ack: SyncedState<LastAck>,
     ) -> (Option<SendInfo>, bool) {
-        match (self.flags, self.payload.as_ref()) {
+        match (self.flags, &self.payload) {
             // Partial ACK in LAST-ACK, not yet covering our FIN -> update send-side state like a
             // plain ACK, keep waiting in LAST-ACK for the real final ACK
             (TcpFlags::Ack, None) if self.ack_num != conn.snd_nxt => {

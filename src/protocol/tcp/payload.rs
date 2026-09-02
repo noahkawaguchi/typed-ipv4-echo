@@ -9,12 +9,11 @@ pub(super) trait LenOrDefault<T: Default> {
     fn len_or_default(&self) -> T;
 }
 
-impl<T: Default + From<NonZeroU16>> LenOrDefault<T> for Option<&TcpPayload> {
-    fn len_or_default(&self) -> T { self.map_or_else(Default::default, |p| p.len().into()) }
-}
-
 impl<T: Default + From<NonZeroU16>> LenOrDefault<T> for Option<TcpPayload> {
-    fn len_or_default(&self) -> T { self.as_ref().len_or_default() }
+    fn len_or_default(&self) -> T {
+        self.as_ref()
+            .map_or_else(Default::default, |p| p.len().into())
+    }
 }
 
 /// A payload of bytes guaranteed to have a length in the range of `NonZeroU16`.
