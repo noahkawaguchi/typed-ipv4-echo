@@ -176,26 +176,6 @@ impl TcpSegment<Remote> {
                 Some(send_info)
             }
 
-            // Duplicate SYN while awaiting the handshake ACK (client's retransmission timer resent
-            // the SYN) -> resend the same SYN-ACK (which was likely lost) using the already-stored
-            // ISN
-            (
-                Some(ConnState { tcp_state: TcpState::SynReceived(_), snd_una, pending, .. }),
-                TcpFlags::Syn,
-                _,
-            ) => {
-                let send_info = SendInfo {
-                    seq_num: *snd_una, // ISN
-                    ack_num: self.seq_num + REMOTE_SYN_BYTE,
-                    flags: TcpFlags::SynAck,
-                    payload: None,
-                };
-
-                pending.push(PendingSegment::new(send_info.clone(), Instant::now()));
-
-                Some(send_info)
-            }
-
             // Stray SYN or SYN-ACK on a synchronized connection -> send a challenge ACK, do not
             // reset the connection (RFC 9293, Section 3.10.7.4).
             //
@@ -211,70 +191,11 @@ impl TcpSegment<Remote> {
                 Some(SendInfo::pure_ack(snd_nxt, rcv_nxt))
             }
 
-            // ACK or FIN-ACK during SYN-RECEIVED with an unacceptable sequence number (regardless
-            // of whether it carries data) -> per RFC 9293, Section 3.10.7.4, "First, check sequence
-            // number," reply with an ACK reflecting current state and drop the segment.
-            //
-            // Due to the current simplification of not using a reassembly buffer, any SEG.SEQ other
-            // than exactly RCV.NXT gets a current state ACK and is not held for later.
             (
-                Some(&mut ConnState {
-                    tcp_state: TcpState::SynReceived(_), snd_nxt, rcv_nxt, ..
-                }),
-                TcpFlags::Ack | TcpFlags::FinAck,
+                Some(conn @ &mut ConnState { tcp_state: TcpState::SynReceived(syn_received), .. }),
                 _,
-            ) if self.seq_num != rcv_nxt => Some(SendInfo::pure_ack(snd_nxt, rcv_nxt)),
-
-            // Acceptable handshake-completing ACK (step 3) -> transition to ESTABLISHED. If it also
-            // carries data, echo it, otherwise no reply is needed.
-            (
-                Some(conn @ &mut ConnState { tcp_state: TcpState::SynReceived(syn_received), .. }),
-                TcpFlags::Ack,
-                maybe_payload,
-            ) if self.seq_num == conn.rcv_nxt
-                && conn.snd_una.precedes(self.ack_num)
-                && self.ack_num.precedes_or_eq(conn.snd_nxt) =>
-            {
-                let established = self.complete_handshake(conn, syn_received);
-
-                maybe_payload
-                    .as_ref()
-                    .map(|payload| {
-                        conn.rcv_nxt += payload.len().into();
-                        conn.send_buffer.extend(payload.as_bytes());
-
-                        established.drain_transmittable(conn).map(|maybe_to_send| {
-                            match maybe_to_send {
-                                Some(to_send) => Self::data_payload(conn, to_send),
-                                None => SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt),
-                            }
-                        })
-                    })
-                    .transpose()?
-            }
-
-            // Handshake-completing FIN-ACK (step 3 combined with the peer's own close) -> as per
-            // RFC 9293, Section 3.10.7.4, complete the handshake, transitioning to ESTABLISHED
-            // ("Fifth, check the ACK field"), then immediately start closing ("Eighth, check the
-            // FIN bit"), skipping CLOSE-WAIT under the current simplification, the same as a
-            // FIN-ACK arriving on an ESTABLISHED connection. Also echo as much trailing data as
-            // possible, if any.
-            (
-                Some(conn @ &mut ConnState { tcp_state: TcpState::SynReceived(syn_received), .. }),
-                TcpFlags::FinAck,
-                maybe_payload,
-            ) if self.seq_num == conn.rcv_nxt
-                && conn.snd_una.precedes(self.ack_num)
-                && self.ack_num.precedes_or_eq(conn.snd_nxt) =>
-            {
-                let established = self.complete_handshake(conn, syn_received);
-
-                Some(self.begin_passive_close_without_close_wait(
-                    conn,
-                    maybe_payload.as_ref(),
-                    established,
-                )?)
-            }
+                _,
+            ) => self.handle_syn_rcv(conn, syn_received)?,
 
             (
                 Some(conn @ &mut ConnState { tcp_state: TcpState::Established(established), .. }),
@@ -416,6 +337,88 @@ impl TcpSegment<Remote> {
                 send_info,
             )
         }))
+    }
+
+    fn handle_syn_rcv(
+        &self,
+        conn: &mut ConnState,
+        syn_received: SynReceived,
+    ) -> Result<Option<SendInfo>> {
+        Ok(match (self.flags, self.payload.as_ref()) {
+            // Duplicate SYN while awaiting the handshake ACK (client's retransmission timer resent
+            // the SYN) -> resend the same SYN-ACK (which was likely lost) using the already-stored
+            // ISN
+            (TcpFlags::Syn, _) => {
+                let send_info = SendInfo {
+                    seq_num: conn.snd_una, // ISN
+                    ack_num: self.seq_num + REMOTE_SYN_BYTE,
+                    flags: TcpFlags::SynAck,
+                    payload: None,
+                };
+
+                conn.pending
+                    .push(PendingSegment::new(send_info.clone(), Instant::now()));
+
+                Some(send_info)
+            }
+
+            // ACK or FIN-ACK during SYN-RECEIVED with an unacceptable sequence number (regardless
+            // of whether it carries data) -> per RFC 9293, Section 3.10.7.4, "First, check sequence
+            // number," reply with an ACK reflecting current state and drop the segment.
+            //
+            // Due to the current simplification of not using a reassembly buffer, any SEG.SEQ other
+            // than exactly RCV.NXT gets a current state ACK and is not held for later.
+            (TcpFlags::Ack | TcpFlags::FinAck, _) if self.seq_num != conn.rcv_nxt => {
+                Some(SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt))
+            }
+
+            // Acceptable handshake-completing ACK (step 3) -> transition to ESTABLISHED. If it also
+            // carries data, echo it, otherwise no reply is needed.
+            (TcpFlags::Ack, maybe_payload)
+                if self.seq_num == conn.rcv_nxt
+                    && conn.snd_una.precedes(self.ack_num)
+                    && self.ack_num.precedes_or_eq(conn.snd_nxt) =>
+            {
+                let established = self.complete_handshake(conn, syn_received);
+
+                maybe_payload
+                    .as_ref()
+                    .map(|payload| {
+                        conn.rcv_nxt += payload.len().into();
+                        conn.send_buffer.extend(payload.as_bytes());
+
+                        established.drain_transmittable(conn).map(|maybe_to_send| {
+                            match maybe_to_send {
+                                Some(to_send) => Self::data_payload(conn, to_send),
+                                None => SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt),
+                            }
+                        })
+                    })
+                    .transpose()?
+            }
+
+            // Handshake-completing FIN-ACK (step 3 combined with the peer's own close) -> as per
+            // RFC 9293, Section 3.10.7.4, complete the handshake, transitioning to ESTABLISHED
+            // ("Fifth, check the ACK field"), then immediately start closing ("Eighth, check the
+            // FIN bit"), skipping CLOSE-WAIT under the current simplification, the same as a
+            // FIN-ACK arriving on an ESTABLISHED connection. Also echo as much trailing data as
+            // possible, if any.
+            (TcpFlags::FinAck, maybe_payload)
+                if self.seq_num == conn.rcv_nxt
+                    && conn.snd_una.precedes(self.ack_num)
+                    && self.ack_num.precedes_or_eq(conn.snd_nxt) =>
+            {
+                let established = self.complete_handshake(conn, syn_received);
+
+                Some(self.begin_passive_close_without_close_wait(
+                    conn,
+                    maybe_payload,
+                    established,
+                )?)
+            }
+
+            _ => Some(SendInfo::rst(self.ack_num)),
+        })
     }
 
     /// Completes the initial three-way handshake, updating `conn` and returning a copy of the inner
