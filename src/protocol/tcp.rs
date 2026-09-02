@@ -144,14 +144,14 @@ impl TcpSegment<Remote> {
                     // Case 2
                     connections.remove(&key);
                     None
+                } else if rcv_nxt.precedes_or_eq(self.seq_num)
+                    && self
+                        .seq_num
+                        .precedes(rcv_nxt + TcpSegment::<Local>::RCV_WND.into())
+                {
+                    Some(SendInfo::pure_ack(snd_nxt, rcv_nxt)) // Case 3
                 } else {
-                    // Check whether `seq_num` falls within the receive window [RCV.NXT, RCV.NXT +
-                    // RCV.WND). true -> Case 3, false -> Case 1.
-                    (rcv_nxt.precedes_or_eq(self.seq_num)
-                        && self
-                            .seq_num
-                            .precedes(rcv_nxt + TcpSegment::<Local>::RCV_WND.into()))
-                    .then_some(SendInfo::pure_ack(snd_nxt, rcv_nxt))
+                    None // Case 1
                 }
             }
 
