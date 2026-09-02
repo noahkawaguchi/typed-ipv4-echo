@@ -130,8 +130,7 @@ impl TcpSegment<Remote> {
         };
 
         Ok(match (connections.get_mut(&key), self.flags) {
-            // RST from an unknown (CLOSED) connection -> silently drop segment (never RST a RST)
-            (None, TcpFlags::Rst | TcpFlags::RstAck) => None,
+            (None, _) => self.handle_unknown_conn(connections, key)?,
 
             // RST on a known connection -> RFC 9293, Section 3.10.7.4 has three cases for when the
             // RST bit is set, protecting against a blind reset attack (as described in RFC 5961,
@@ -155,21 +154,6 @@ impl TcpSegment<Remote> {
                 }
             }
 
-            // SYN packet (step 1 of handshake) -> reply with SYN-ACK (step 2), no payload echo
-            (None, TcpFlags::Syn) => {
-                // seq num = random ISN, local ack num = remote seq num + 1
-                let send_info = SendInfo {
-                    seq_num: SeqPoint::new(sys::random_u32()?),
-                    ack_num: self.seq_num + REMOTE_SYN_BYTE,
-                    flags: TcpFlags::SynAck,
-                    payload: None,
-                };
-
-                connections.insert_syn_rcv(key, ConnState::from_syn_ack(send_info.clone())?)?;
-
-                Some(send_info)
-            }
-
             // Stray SYN or SYN-ACK on a synchronized connection -> send a challenge ACK, do not
             // reset the connection (RFC 9293, Section 3.10.7.4).
             //
@@ -183,10 +167,6 @@ impl TcpSegment<Remote> {
             ) if !matches!(tcp_state, TcpState::SynReceived(_)) => {
                 Some(SendInfo::pure_ack(snd_nxt, rcv_nxt))
             }
-
-            // Per RFC 9293, Section 3.10.7.1, any non-RST segment to a CLOSED (unknown) connection
-            // gets a RST.
-            (None, _) => Some(SendInfo::rst(self.ack_num)),
 
             (Some(conn), _) => match conn.tcp_state {
                 TcpState::SynReceived(syn_received) => self.handle_syn_rcv(conn, syn_received)?,
@@ -233,6 +213,33 @@ impl TcpSegment<Remote> {
                 send_info,
             )
         }))
+    }
+
+    fn handle_unknown_conn(
+        &self,
+        connections: &mut TcpConnections,
+        key: ConnKey,
+    ) -> Result<Option<SendInfo>> {
+        Ok(match self.flags {
+            // SYN packet (step 1 of handshake) -> reply with SYN-ACK (step 2)
+            TcpFlags::Syn => {
+                let send_info = SendInfo {
+                    seq_num: SeqPoint::new(sys::random_u32()?),
+                    ack_num: self.seq_num + REMOTE_SYN_BYTE,
+                    flags: TcpFlags::SynAck,
+                    payload: None,
+                };
+
+                connections.insert_syn_rcv(key, ConnState::from_syn_ack(send_info.clone())?)?;
+
+                Some(send_info)
+            }
+
+            // RST from an unknown connection -> silently drop segment (never RST a RST)
+            TcpFlags::Rst | TcpFlags::RstAck => None,
+
+            _ => Some(SendInfo::rst(self.ack_num)),
+        })
     }
 
     fn handle_syn_rcv(
