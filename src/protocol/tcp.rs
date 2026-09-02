@@ -19,16 +19,10 @@ use {
             pseudo_hdr_cksum,
             router::{Encode, PrettyProtocol},
             tcp::{
-                connections::ConnKey,
                 flags::TcpFlags,
                 payload::TcpPayload,
-                pending_segment::PendingSegment,
                 send_info::SendInfo,
                 seq_space::{SeqOffset, SeqPoint},
-                state::{
-                    Closing, ConnState, Established, FinWait1, FinWait2, LastAck, SynReceived,
-                    SyncedState, TcpState,
-                },
             },
         },
         try_ops::{TryAdd as _, TryGet as _, TryGetMut as _},
@@ -308,7 +302,10 @@ mod tests {
         crate::{
             ETHERNET_MTU,
             protocol::{
-                tcp::state::{SynReceived, SyncedState, WindowState},
+                tcp::{
+                    connections::ConnKey,
+                    state::{ConnState, SynReceived, SyncedState, TcpState, WindowState},
+                },
                 test_consts::{LOCAL_TO_REMOTE_IP_PAIR, REMOTE_TO_LOCAL_IP_PAIR},
             },
         },

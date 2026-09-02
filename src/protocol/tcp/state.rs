@@ -3,8 +3,12 @@ use {
         Result,
         endpoint::{Local, Remote},
         protocol::tcp::{
-            LOCAL_SYN_BYTE, SendInfo, SeqOffset, SeqPoint, TcpFlags, TcpPayload, TcpSegment,
+            LOCAL_SYN_BYTE, TcpSegment,
+            flags::TcpFlags,
+            payload::TcpPayload,
             pending_segment::PendingSegment,
+            send_info::SendInfo,
+            seq_space::{SeqOffset, SeqPoint},
         },
     },
     std::{collections::VecDeque, marker::PhantomData, time::Instant},

@@ -2,8 +2,11 @@ use {
     crate::{
         endpoint::Local,
         protocol::tcp::{
-            SendInfo, SeqOffset, SeqPoint, TcpFlags, connections::RtoConfig,
+            connections::RtoConfig,
+            flags::TcpFlags,
             payload::LenOrDefault as _,
+            send_info::SendInfo,
+            seq_space::{SeqOffset, SeqPoint},
         },
     },
     std::time::Instant,

@@ -4,7 +4,10 @@ use {
         addr_pairs::{Ipv4AddrPair, PortPair},
         endpoint::Local,
         protocol::tcp::{
-            LOCAL_FIN_BYTE, PendingSegment, SendInfo, TcpFlags, TcpSegment,
+            LOCAL_FIN_BYTE, TcpSegment,
+            flags::TcpFlags,
+            pending_segment::PendingSegment,
+            send_info::SendInfo,
             state::{ConnState, TcpState},
         },
     },

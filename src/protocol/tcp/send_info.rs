@@ -5,9 +5,16 @@ use {
         protocol::{
             TcpConnections, TcpSegment,
             tcp::{
-                Closing, ConnKey, ConnState, Established, FinWait1, FinWait2, LOCAL_FIN_BYTE,
-                LastAck, PendingSegment, REMOTE_FIN_BYTE, REMOTE_SYN_BYTE, SeqPoint, SynReceived,
-                SyncedState, TcpFlags, TcpPayload, TcpState, payload::LenOrDefault as _,
+                LOCAL_FIN_BYTE, REMOTE_FIN_BYTE, REMOTE_SYN_BYTE,
+                connections::ConnKey,
+                flags::TcpFlags,
+                payload::{LenOrDefault as _, TcpPayload},
+                pending_segment::PendingSegment,
+                seq_space::SeqPoint,
+                state::{
+                    Closing, ConnState, Established, FinWait1, FinWait2, LastAck, SynReceived,
+                    SyncedState, TcpState,
+                },
             },
         },
         sys,
