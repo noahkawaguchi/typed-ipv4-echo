@@ -23,7 +23,7 @@ use {
                 payload::{LenOrDefault as _, TcpPayload},
                 pending_segment::PendingSegment,
                 seq_space::{SeqOffset, SeqPoint},
-                state::{ConnState, Established, SynReceived, SyncedState, TcpState},
+                state::{ConnState, Established, FinWait1, SynReceived, SyncedState, TcpState},
             },
         },
         sys,
@@ -203,6 +203,18 @@ impl TcpSegment<Remote> {
                 _,
             ) => self.handle_established(conn, established)?,
 
+            (
+                Some(conn @ &mut ConnState { tcp_state: TcpState::FinWait1(fin_wait_1), .. }),
+                _,
+                _,
+            ) => {
+                let (maybe_send_info, remove_conn) = self.handle_fin_wait_1(conn, fin_wait_1);
+                if remove_conn {
+                    connections.remove(&key);
+                }
+                maybe_send_info
+            }
+
             // Partial ACK in LAST-ACK, not yet covering our FIN -> update send-side state like a
             // plain ACK, keep waiting in LAST-ACK for the real final ACK
             (
@@ -225,16 +237,11 @@ impl TcpSegment<Remote> {
                 None
             }
 
-            // In-order data arriving in FIN-WAIT-1/FIN-WAIT-2, i.e. after we've sent our own FIN
-            // but before the peer's FIN has arrived (half closed) -> ACK it, don't echo because we
-            // have no send side left, and advance rcv_nxt
+            // In-order data arriving in FIN-WAIT-2, i.e. after we've sent our own FIN but before
+            // the peer's FIN has arrived (half closed) -> ACK it, don't echo because we have no
+            // send side left, and advance rcv_nxt
             (
-                Some(
-                    conn @ ConnState {
-                        tcp_state: TcpState::FinWait1(_) | TcpState::FinWait2(_),
-                        ..
-                    },
-                ),
+                Some(conn @ &mut ConnState { tcp_state: TcpState::FinWait2(fin_wait_2), .. }),
                 TcpFlags::Ack,
                 Some(payload),
             ) if self.seq_num == conn.rcv_nxt => {
@@ -242,58 +249,7 @@ impl TcpSegment<Remote> {
 
                 let send_info = SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt);
 
-                conn.tcp_state = match conn.tcp_state {
-                    TcpState::FinWait1(fin_wait_1) => {
-                        TcpState::FinWait1(fin_wait_1.incoming_ack_update(conn, self))
-                    }
-                    TcpState::FinWait2(fin_wait_2) => {
-                        TcpState::FinWait2(fin_wait_2.incoming_ack_update(conn, self))
-                    }
-                    _ => conn.tcp_state,
-                };
-
-                Some(send_info)
-            }
-
-            // FIN-WAIT-1, our FIN has been acknowledged (and nothing else) -> FIN-WAIT-2, no reply
-            (
-                Some(conn @ &mut ConnState { tcp_state: TcpState::FinWait1(fin_wait_1), .. }),
-                TcpFlags::Ack,
-                None,
-            ) if self.ack_num == conn.snd_nxt => {
-                conn.tcp_state =
-                    TcpState::FinWait2(fin_wait_1.incoming_ack_update(conn, self).rcv_ack_of_fin());
-
-                None
-            }
-
-            // FIN-WAIT-1, the remote peer's FIN arrives before ours is acknowledged (simultaneous
-            // close) -> ACK it. If it also acknowledges our FIN, the connection is fully closed
-            // (skipping FIN-WAIT-2/TIME-WAIT), otherwise move to CLOSING to await that ACK.
-            //
-            // Our own FIN has already been sent, so any trailing data can't be echoed (same as
-            // plain data arriving in FIN-WAIT-1), but RCV.NXT must still advance past it.
-            (
-                Some(conn @ &mut ConnState { tcp_state: TcpState::FinWait1(fin_wait_1), .. }),
-                TcpFlags::FinAck,
-                maybe_payload,
-            ) if self.seq_num == conn.rcv_nxt => {
-                conn.rcv_nxt += maybe_payload.len_or_default();
-
-                // Consume one sequence number in RCV.NXT for the peer's FIN
-                conn.rcv_nxt += REMOTE_FIN_BYTE;
-
-                let send_info = SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt);
-
-                if self.ack_num == conn.snd_nxt {
-                    connections.remove(&key);
-                } else {
-                    conn.tcp_state = TcpState::Closing(
-                        fin_wait_1
-                            .incoming_ack_update(conn, self)
-                            .rcv_fin_before_fin_is_acked(),
-                    );
-                }
+                conn.tcp_state = TcpState::FinWait2(fin_wait_2.incoming_ack_update(conn, self));
 
                 Some(send_info)
             }
@@ -553,6 +509,73 @@ impl TcpSegment<Remote> {
             .push(PendingSegment::new(send_info.clone(), Instant::now()));
 
         Ok(send_info)
+    }
+
+    fn handle_fin_wait_1(
+        &self,
+        conn: &mut ConnState,
+        fin_wait_1: SyncedState<FinWait1>,
+    ) -> (Option<SendInfo>, bool) {
+        match (self.flags, self.payload.as_ref()) {
+            // In-order data arriving in FIN-WAIT-1, i.e. after we've sent our own FIN but before
+            // the peer's FIN has arrived (half closed) -> ACK it, don't echo because we have no
+            // send side left, and advance rcv_nxt
+            (TcpFlags::Ack, Some(payload)) if self.seq_num == conn.rcv_nxt => {
+                conn.rcv_nxt += payload.len().into();
+                let send_info = SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt);
+                conn.tcp_state = TcpState::FinWait1(fin_wait_1.incoming_ack_update(conn, self));
+                (Some(send_info), false)
+            }
+
+            // FIN-WAIT-1, our FIN has been acknowledged (and nothing else) -> FIN-WAIT-2, no reply
+            (TcpFlags::Ack, None) if self.ack_num == conn.snd_nxt => {
+                conn.tcp_state =
+                    TcpState::FinWait2(fin_wait_1.incoming_ack_update(conn, self).rcv_ack_of_fin());
+                (None, false)
+            }
+
+            // FIN-WAIT-1, the remote peer's FIN arrives before ours is acknowledged (simultaneous
+            // close), and it also acknowledges our FIN -> ACK it, and the connection is fully
+            // closed (skipping FIN-WAIT-2/TIME-WAIT).
+            //
+            // Our own FIN has already been sent, so any trailing data can't be echoed (same as
+            // plain data arriving in FIN-WAIT-1), but RCV.NXT must still advance past it.
+            (TcpFlags::FinAck, maybe_payload)
+                if self.seq_num == conn.rcv_nxt && self.ack_num == conn.snd_nxt =>
+            {
+                conn.rcv_nxt += maybe_payload.len_or_default();
+                // Consume one sequence number in RCV.NXT for the peer's FIN
+                conn.rcv_nxt += REMOTE_FIN_BYTE;
+                (Some(SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt)), true)
+            }
+
+            // FIN-WAIT-1, the remote peer's FIN arrives before ours is acknowledged (simultaneous
+            // close), but it doesn't acknowledge our FIN -> ACK it and move to CLOSING to await the
+            // ACK of our FIN.
+            //
+            // Our own FIN has already been sent, so any trailing data can't be echoed (same as
+            // plain data arriving in FIN-WAIT-1), but RCV.NXT must still advance past it.
+            (TcpFlags::FinAck, maybe_payload)
+                if self.seq_num == conn.rcv_nxt && self.ack_num != conn.snd_nxt =>
+            {
+                conn.rcv_nxt += maybe_payload.len_or_default();
+
+                // Consume one sequence number in RCV.NXT for the peer's FIN
+                conn.rcv_nxt += REMOTE_FIN_BYTE;
+
+                let send_info = SendInfo::pure_ack(conn.snd_nxt, conn.rcv_nxt);
+
+                conn.tcp_state = TcpState::Closing(
+                    fin_wait_1
+                        .incoming_ack_update(conn, self)
+                        .rcv_fin_before_fin_is_acked(),
+                );
+
+                (Some(send_info), false)
+            }
+
+            _ => (Some(SendInfo::rst(self.ack_num)), false),
+        }
     }
 }
 
