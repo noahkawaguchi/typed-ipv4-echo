@@ -129,9 +129,9 @@ impl TcpSegment<Remote> {
             server_port: self.ports.dst,
         };
 
-        Ok(match (connections.get_mut(&key), self.flags, &self.payload) {
+        Ok(match (connections.get_mut(&key), self.flags) {
             // RST from an unknown (CLOSED) connection -> silently drop segment (never RST a RST)
-            (None, TcpFlags::Rst | TcpFlags::RstAck, _) => None,
+            (None, TcpFlags::Rst | TcpFlags::RstAck) => None,
 
             // RST on a known connection -> RFC 9293, Section 3.10.7.4 has three cases for when the
             // RST bit is set, protecting against a blind reset attack (as described in RFC 5961,
@@ -139,11 +139,7 @@ impl TcpSegment<Remote> {
             //   Case 1: SEG.SEQ outside window           -> silently drop segment
             //   Case 2: SEG.SEQ == RCV.NXT               -> reset connection, no reply
             //   Case 3: SEG.SEQ in window but != RCV.NXT -> no connection reset, send challenge ACK
-            (
-                Some(&mut ConnState { snd_nxt, rcv_nxt, .. }),
-                TcpFlags::Rst | TcpFlags::RstAck,
-                _,
-            ) => {
+            (Some(&mut ConnState { snd_nxt, rcv_nxt, .. }), TcpFlags::Rst | TcpFlags::RstAck) => {
                 if self.seq_num == rcv_nxt {
                     // Case 2
                     connections.remove(&key);
@@ -159,9 +155,8 @@ impl TcpSegment<Remote> {
                 }
             }
 
-            // SYN packet (step 1 of handshake)
-            // Reply with SYN-ACK (step 2), no payload echo
-            (None, TcpFlags::Syn, _) => {
+            // SYN packet (step 1 of handshake) -> reply with SYN-ACK (step 2), no payload echo
+            (None, TcpFlags::Syn) => {
                 // seq num = random ISN, local ack num = remote seq num + 1
                 let send_info = SendInfo {
                     seq_num: SeqPoint::new(sys::random_u32()?),
@@ -185,67 +180,51 @@ impl TcpSegment<Remote> {
             (
                 Some(&mut ConnState { tcp_state, snd_nxt, rcv_nxt, .. }),
                 TcpFlags::Syn | TcpFlags::SynAck,
-                _,
             ) if !matches!(tcp_state, TcpState::SynReceived(_)) => {
                 Some(SendInfo::pure_ack(snd_nxt, rcv_nxt))
             }
 
-            (
-                Some(conn @ &mut ConnState { tcp_state: TcpState::SynReceived(syn_received), .. }),
-                _,
-                _,
-            ) => self.handle_syn_rcv(conn, syn_received)?,
+            // Per RFC 9293, Section 3.10.7.1, any non-RST segment to a CLOSED (unknown) connection
+            // gets a RST.
+            (None, _) => Some(SendInfo::rst(self.ack_num)),
 
-            (
-                Some(conn @ &mut ConnState { tcp_state: TcpState::Established(established), .. }),
-                _,
-                _,
-            ) => self.handle_established(conn, established)?,
+            (Some(conn), _) => match conn.tcp_state {
+                TcpState::SynReceived(syn_received) => self.handle_syn_rcv(conn, syn_received)?,
 
-            (
-                Some(conn @ &mut ConnState { tcp_state: TcpState::FinWait1(fin_wait_1), .. }),
-                _,
-                _,
-            ) => {
-                let (maybe_send_info, remove_conn) = self.handle_fin_wait_1(conn, fin_wait_1);
-                if remove_conn {
-                    connections.remove(&key);
+                TcpState::Established(established) => self.handle_established(conn, established)?,
+
+                TcpState::FinWait1(fin_wait_1) => {
+                    let (maybe_send_info, remove_conn) = self.handle_fin_wait_1(conn, fin_wait_1);
+                    if remove_conn {
+                        connections.remove(&key);
+                    }
+                    maybe_send_info
                 }
-                maybe_send_info
-            }
 
-            (
-                Some(conn @ &mut ConnState { tcp_state: TcpState::FinWait2(fin_wait_2), .. }),
-                _,
-                _,
-            ) => {
-                let (send_info, remove_conn) = self.handle_fin_wait_2(conn, fin_wait_2);
-                if remove_conn {
-                    connections.remove(&key);
+                TcpState::FinWait2(fin_wait_2) => {
+                    let (send_info, remove_conn) = self.handle_fin_wait_2(conn, fin_wait_2);
+                    if remove_conn {
+                        connections.remove(&key);
+                    }
+                    Some(send_info)
                 }
-                Some(send_info)
-            }
 
-            (Some(conn @ &mut ConnState { tcp_state: TcpState::Closing(closing), .. }), _, _) => {
-                let (maybe_send_info, remove_conn) = self.handle_closing(conn, closing);
-                if remove_conn {
-                    connections.remove(&key);
+                TcpState::Closing(closing) => {
+                    let (maybe_send_info, remove_conn) = self.handle_closing(conn, closing);
+                    if remove_conn {
+                        connections.remove(&key);
+                    }
+                    maybe_send_info
                 }
-                maybe_send_info
-            }
 
-            (Some(conn @ &mut ConnState { tcp_state: TcpState::LastAck(last_ack), .. }), _, _) => {
-                let (maybe_send_info, remove_conn) = self.handle_last_ack(conn, last_ack);
-                if remove_conn {
-                    connections.remove(&key);
+                TcpState::LastAck(last_ack) => {
+                    let (maybe_send_info, remove_conn) = self.handle_last_ack(conn, last_ack);
+                    if remove_conn {
+                        connections.remove(&key);
+                    }
+                    maybe_send_info
                 }
-                maybe_send_info
-            }
-
-            // Something else unrecognized (other than RST caught above) -> RST so the peer fails
-            // fast instead of hanging. Per RFC 9293, Section 3.10.7.1, any non-RST segment to a
-            // CLOSED (unknown) connection gets a RST.
-            _ => Some(SendInfo::rst(self.ack_num)),
+            },
         }
         .map(|send_info| {
             TcpSegment::<Local>::from_pairs_and_info(
