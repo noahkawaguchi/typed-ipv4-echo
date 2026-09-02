@@ -3,7 +3,7 @@ use {
         Result,
         endpoint::{Local, Remote},
         protocol::tcp::{
-            LOCAL_SYN_BYTE, SendOptions, SeqOffset, SeqPoint, TcpFlags, TcpPayload, TcpSegment,
+            LOCAL_SYN_BYTE, SendInfo, SeqOffset, SeqPoint, TcpFlags, TcpPayload, TcpSegment,
             pending_segment::PendingSegment,
         },
     },
@@ -38,18 +38,18 @@ impl ConnState {
     /// # Errors
     ///
     /// Returns `Err` if the flags are not SYN-ACK.
-    pub(super) fn from_syn_ack(send_opts: SendOptions) -> Result<Self, &'static str> {
-        (send_opts.flags == TcpFlags::SynAck)
+    pub(super) fn from_syn_ack(send_info: SendInfo) -> Result<Self, &'static str> {
+        (send_info.flags == TcpFlags::SynAck)
             .then(|| Self {
                 // State after the initial two-way exchange
                 tcp_state: TcpState::SynReceived(SynReceived),
                 // SYN-ACK consumes one sequence number
-                snd_nxt: send_opts.seq_num + LOCAL_SYN_BYTE,
+                snd_nxt: send_info.seq_num + LOCAL_SYN_BYTE,
                 // Our SYN-ACK's `ack_num` is the client's ISN + 1
-                rcv_nxt: send_opts.ack_num,
+                rcv_nxt: send_info.ack_num,
                 // Our SYN-ACK is unacknowledged (this is our ISN)
-                snd_una: send_opts.seq_num,
-                pending: vec![PendingSegment::new(send_opts, Instant::now())],
+                snd_una: send_info.seq_num,
+                pending: vec![PendingSegment::new(send_info, Instant::now())],
                 send_buffer: VecDeque::new(),
             })
             .ok_or(

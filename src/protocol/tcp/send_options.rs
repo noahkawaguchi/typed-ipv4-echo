@@ -18,14 +18,14 @@ use {
 /// Comprises fields that differ when determining a segment to send and handles core reply logic.
 #[derive(Clone)]
 #[cfg_attr(test, derive(Debug))]
-pub(super) struct SendOptions {
+pub(super) struct SendInfo {
     pub(super) seq_num: SeqPoint<Local>,
     pub(super) ack_num: SeqPoint<Remote>,
     pub(super) flags: TcpFlags,
     pub(super) payload: Option<TcpPayload>,
 }
 
-impl SendOptions {
+impl SendInfo {
     /// Creates a pure ACK `Self` with SEG.SEQ=SND.NXT and SEG.ACK=RCV.NXT.
     const fn pure_ack(conn: &ConnState) -> Self {
         Self { seq_num: conn.snd_nxt, ack_num: conn.rcv_nxt, flags: TcpFlags::Ack, payload: None }
@@ -104,36 +104,39 @@ impl SendOptions {
                     }
 
                     TcpState::FinWait1(fin_wait_1) => {
-                        let (maybe_opts, remove_conn) =
+                        let (maybe_send_info, remove_conn) =
                             Self::handle_fin_wait_1(seg, conn, fin_wait_1);
                         if remove_conn {
                             connections.remove(&key);
                         }
-                        maybe_opts
+                        maybe_send_info
                     }
 
                     TcpState::FinWait2(fin_wait_2) => {
-                        let (opts, remove_conn) = Self::handle_fin_wait_2(seg, conn, fin_wait_2);
+                        let (send_info, remove_conn) =
+                            Self::handle_fin_wait_2(seg, conn, fin_wait_2);
                         if remove_conn {
                             connections.remove(&key);
                         }
-                        Some(opts)
+                        Some(send_info)
                     }
 
                     TcpState::Closing(closing) => {
-                        let (maybe_opts, remove_conn) = Self::handle_closing(seg, conn, closing);
+                        let (maybe_send_info, remove_conn) =
+                            Self::handle_closing(seg, conn, closing);
                         if remove_conn {
                             connections.remove(&key);
                         }
-                        maybe_opts
+                        maybe_send_info
                     }
 
                     TcpState::LastAck(last_ack) => {
-                        let (maybe_opts, remove_conn) = Self::handle_last_ack(seg, conn, last_ack);
+                        let (maybe_send_info, remove_conn) =
+                            Self::handle_last_ack(seg, conn, last_ack);
                         if remove_conn {
                             connections.remove(&key);
                         }
-                        maybe_opts
+                        maybe_send_info
                     }
                 },
             },
@@ -148,16 +151,16 @@ impl SendOptions {
         Ok(match seg.flags {
             // SYN (step 1 of handshake) -> store new connection, reply with SYN-ACK (step 2).
             TcpFlags::Syn => {
-                let opts = Self {
+                let send_info = Self {
                     seq_num: SeqPoint::new(sys::random_u32()?),
                     ack_num: seg.seq_num + REMOTE_SYN_BYTE,
                     flags: TcpFlags::SynAck,
                     payload: None,
                 };
 
-                connections.insert_syn_rcv(key, ConnState::from_syn_ack(opts.clone())?)?;
+                connections.insert_syn_rcv(key, ConnState::from_syn_ack(send_info.clone())?)?;
 
-                Some(opts)
+                Some(send_info)
             }
 
             // RST from an unknown connection -> silently drop segment (never RST a RST).
@@ -177,7 +180,7 @@ impl SendOptions {
             // the SYN) -> resend the same SYN-ACK (which was likely lost) using the already-stored
             // ISN.
             (TcpFlags::Syn, _) => {
-                let opts = Self {
+                let send_info = Self {
                     seq_num: conn.snd_una, // ISN
                     ack_num: seg.seq_num + REMOTE_SYN_BYTE,
                     flags: TcpFlags::SynAck,
@@ -185,9 +188,9 @@ impl SendOptions {
                 };
 
                 conn.pending
-                    .push(PendingSegment::new(opts.clone(), Instant::now()));
+                    .push(PendingSegment::new(send_info.clone(), Instant::now()));
 
-                Some(opts)
+                Some(send_info)
             }
 
             // ACK or FIN-ACK with an unacceptable sequence number (regardless of whether it carries
@@ -334,7 +337,7 @@ impl SendOptions {
     fn data_payload(conn: &mut ConnState, to_send: TcpPayload) -> Self {
         let send_len = to_send.len().into();
 
-        let opts = Self {
+        let send_info = Self {
             seq_num: conn.snd_nxt,
             ack_num: conn.rcv_nxt,
             flags: TcpFlags::Ack,
@@ -343,9 +346,9 @@ impl SendOptions {
 
         conn.snd_nxt += send_len;
         conn.pending
-            .push(PendingSegment::new(opts.clone(), Instant::now()));
+            .push(PendingSegment::new(send_info.clone(), Instant::now()));
 
-        opts
+        send_info
     }
 
     /// Transitions from ESTABLISHED straight to LAST-ACK, skipping over CLOSE-WAIT (TODO: implement
@@ -370,7 +373,7 @@ impl SendOptions {
 
         conn.tcp_state = TcpState::LastAck(new_established.skip_close_wait());
 
-        let opts = Self {
+        let send_info = Self {
             seq_num: conn.snd_nxt,
             ack_num: conn.rcv_nxt,
             flags: TcpFlags::FinAck,
@@ -381,9 +384,9 @@ impl SendOptions {
         conn.snd_nxt += LOCAL_FIN_BYTE; // Our FIN consumes one sequence number
 
         conn.pending
-            .push(PendingSegment::new(opts.clone(), Instant::now()));
+            .push(PendingSegment::new(send_info.clone(), Instant::now()));
 
-        Ok(opts)
+        Ok(send_info)
     }
 
     /// Handles the reply decision and state updates for a FIN-WAIT-1 connection, returning a reply
@@ -399,9 +402,9 @@ impl SendOptions {
             // advance RCV.NXT.
             (TcpFlags::Ack, Some(payload)) if seg.seq_num == conn.rcv_nxt => {
                 conn.rcv_nxt += payload.len().into();
-                let opts = Self::pure_ack(conn);
+                let send_info = Self::pure_ack(conn);
                 conn.tcp_state = TcpState::FinWait1(fin_wait_1.incoming_ack_update(conn, seg));
-                (Some(opts), false)
+                (Some(send_info), false)
             }
 
             // Our FIN has been acknowledged (and nothing else) -> FIN-WAIT-2, no reply.
@@ -437,7 +440,7 @@ impl SendOptions {
                 conn.rcv_nxt += maybe_payload.len_or_default();
                 // Consume one sequence number in RCV.NXT for the peer's FIN
                 conn.rcv_nxt += REMOTE_FIN_BYTE;
-                let opts = Self::pure_ack(conn);
+                let send_info = Self::pure_ack(conn);
 
                 conn.tcp_state = TcpState::Closing(
                     fin_wait_1
@@ -445,7 +448,7 @@ impl SendOptions {
                         .rcv_fin_before_fin_is_acked(),
                 );
 
-                (Some(opts), false)
+                (Some(send_info), false)
             }
 
             _ => (Some(Self::rst(seg)), false),
@@ -465,9 +468,9 @@ impl SendOptions {
             // advance RCV.NXT.
             (TcpFlags::Ack, Some(payload)) if seg.seq_num == conn.rcv_nxt => {
                 conn.rcv_nxt += payload.len().into();
-                let opts = Self::pure_ack(conn);
+                let send_info = Self::pure_ack(conn);
                 conn.tcp_state = TcpState::FinWait2(fin_wait_2.incoming_ack_update(conn, seg));
-                (opts, false)
+                (send_info, false)
             }
 
             // Peer's FIN arrives in order -> ACK it and finish closing (no TIME-WAIT). Our own FIN
