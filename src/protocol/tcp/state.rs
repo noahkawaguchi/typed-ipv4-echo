@@ -3,8 +3,12 @@ use {
         Result,
         endpoint::{Local, Remote},
         protocol::tcp::{
-            LOCAL_SYN_BYTE, SendInfo, SeqOffset, SeqPoint, TcpFlags, TcpPayload, TcpSegment,
+            LOCAL_SYN_BYTE, TcpSegment,
+            flags::TcpFlags,
+            payload::TcpPayload,
             pending_segment::PendingSegment,
+            send_info::SendInfo,
+            seq_space::{SeqOffset, SeqPoint},
         },
     },
     std::{collections::VecDeque, marker::PhantomData, time::Instant},
@@ -37,7 +41,7 @@ impl ConnState {
     ///
     /// # Errors
     ///
-    /// Returns `Err` if `send_info.flags` is not SYN-ACK.
+    /// Returns `Err` if the flags are not SYN-ACK.
     pub(super) fn from_syn_ack(send_info: SendInfo) -> Result<Self, &'static str> {
         (send_info.flags == TcpFlags::SynAck)
             .then(|| Self {
